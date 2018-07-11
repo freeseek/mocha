@@ -1,0 +1,30 @@
+2018-07-04: included code that allows to run Illumina AutoCall software on Linux using free tools
+2018-06-29: fixed several bugs in GTCtoVCF and a critical bug in fixref to correctly handle TOP/BOT Illumina strand
+2018-06-24: added a GTCtoVCF plugin that should allow users to convert Illumina binary files into binary VCFs
+2018-06-12: added estimate of cell fractions and fixed a bug causing false positive calls in between true positive calls
+2018-06-06: fixed a bug with mochatools when the -G option is used
+2018-06-05: added a sex column to the output table with mosaic chromosomal alterations
+2018-06-04: added a check to make sure CNPs are events surrounded by mostly diploid regions to avoid false positive CNPs
+2018-05-23: fixed bug that could cause more than one call per telomere
+2018-05-22: added option to avoid performing BAF or LRR adjustments
+2018-05-21: added centromere penalty and telomere advantage parameters
+2018-05-18: when consecutive mosaic calls with consecutive hidden states are made, increase the number of hidden states
+2018-05-02: improved the code that automatically detects X nonPAR ploidity and turned off calling on chromosome X nonPAR for males
+2018-04-30: general clean up and update of pipeline to work with GRCh38 data
+2018-04-27: fixed a bug with the lrr_cn1to2 estimates from Illumina array data
+2018-04-26: generated patches for vcfconvert.c and fixref.c which allow to convert GenomeStudio files to VCF format
+2018-04-25: completed the implementation of CNP genotyping and added info for the pipeline
+2018-04-24: added some sanity checks and started the implementation for CNP genotyping
+2018-04-23: devised workaround for htslib bug https://github.com/samtools/htslib/issues/691 (the bug is fixed now)
+2018-04-20: added output columns with separate LODs for the two models to better understand where the evidence comes from
+2018-04-19: fixed bugs causing calls from LRR+BAF model to be dropped and cleaned up
+2018-04-18: added functionality to regress GC content from LRR (improves LRR+BAF calls)
+2018-04-09: added HMM model detecting CNVs from LRR+BAF (rather than BAF+phase)
+2018-04-06: introduced code that rejects unphased calls if phased calls achieve better LODs
+2018-04-05: converted memory structures from float to int16_t to decrease memory usage by about ~25%
+2018-04-04: included penalty for mosaic chromosomal calls that span the centromeres and report arm type
+2018-04-03: included possibility to specify genome model with determination of centromere and nonPAR region positions
+2018-04-02: included special handling of chromosome X including automatic determination of ploidity in nonPAR (minus XTR) regions
+2018-03-30: included the -s/-S and -G options in mochatools plugin (so that it is no longer required to pipe the data with bcftools view)
+2018-03-28: added plugin mochatools to perform analyses on the Bdev_Phase output and further pre-processing necessary for WGS data
+2018-03-27: added code to perform LRR/BAF median adjustment (generates better calls from Illumina GenomeStudio raw LRR/BAF)

@@ -1,0 +1,21 @@
+--- main.c	2018-02-28 12:00:00.000000000 -0500
++++ main.c	2018-02-28 12:00:00.000000000 -0500
+@@ -50,6 +50,7 @@
+ int main_reheader(int argc, char *argv[]);
+ int main_vcfconvert(int argc, char *argv[]);
+ int main_vcfcnv(int argc, char *argv[]);
++int main_vcfmocha(int argc, char *argv[]);
+ #if USE_GPL
+ int main_polysomy(int argc, char *argv[]);
+ #endif
+@@ -153,6 +154,10 @@
+       .alias = "cnv",
+       .help  = "HMM CNV calling"
+     },
++    { .func  = main_vcfmocha,
++      .alias = "mocha",
++      .help  = "MOsaic CHromosomal Alterations calling"
++    },
+     { .func  = main_csq,
+       .alias = "csq",
+       .help  = "call variation consequences"
