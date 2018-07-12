@@ -78,8 +78,8 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 
 Add patches and code for plugin
 ```
-wget -P bcftools https://raw.githubusercontent.com/freeseek/gtc2vcf/master/{Makefile.patch,main.patch,norm.patch,vcfmocha.c,sumlog.c}
-wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/gtc2vcf/master/{trio-phase,mochatools}.c
+wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{Makefile.patch,main.patch,norm.patch,vcfmocha.c,sumlog.c}
+wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools}.c
 cd bcftools && patch < Makefile.patch && patch < main.patch && patch < norm.patch && cd ..
 ```
 
@@ -330,7 +330,7 @@ sudo apt-get install r-cran-ggplot2 r-cran-data.table r-cran-gridextra
 
 Download R scripts
 ```
-wget -qP $HOME/bin bcftools https://raw.githubusercontent.com/freeseek/gtc2vcf/master/plot_{summary,mocha}.R
+wget -qP $HOME/bin bcftools https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,mocha}.R
 chmod a+x $HOME/bin/plot_{summary,mocha}.R
 ```
 
