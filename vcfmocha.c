@@ -1719,6 +1719,7 @@ static void sample_contig_run(sample_t *self, kv_mocha_t *kv_mocha, const contig
                     if ( mocha.lod_lrr_baf > -log10f( model_param->xy_prob ) )
                     {
                         mocha.cnf = 1.0f;
+                        mocha.type = MOCHA_CNP_DEL;
                         mocha.cf = NAN;
                     }
                 }
@@ -2308,6 +2309,7 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
 
             if ( flags & WGS_DATA )
             {
+                assert(gt0 >= 0 && gt0 < nalleles && gt1 >= 0 && gt1 < nalleles);
                 int *ad_ptr = ad_arr + nalleles * sample[j].idx;
                 // missing allelic depth information
                 if ( ad_ptr[gt0] == 0 && ad_ptr[gt1] == 0) continue;
@@ -2331,8 +2333,6 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
 
                 kv_push(int, kv_vcf_imap[j], i);
                 kv_push(int8_t, kv_gt_phase[j], gt_phase );
-                assert(gt0 < nalleles);
-                assert(gt1 < nalleles);
                 int16_t ad0 = (int16_t)ad_ptr[gt0];
                 int16_t ad1 = (gt0 == gt1) ? (int16_t)INT16_NAN : (int16_t)ad_ptr[gt1];
                 kv_push(int16_t, kv_data[AD0][j], ad0);
