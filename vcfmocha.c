@@ -1542,7 +1542,7 @@ static float mocha_cellfraction(float ldev, float ldev_se, float bdev, float bde
             case MOCHA_DEL:
                 return 4.0f * bdev / (1.0f + 2.0f * bdev);
             case MOCHA_DUP:
-                return 4.0f * bdev / (1.0f + 2.0f * bdev);
+                return 4.0f * bdev / (1.0f - 2.0f * bdev);
             case MOCHA_UPD:
                 return 2.0f * bdev;
             default:
