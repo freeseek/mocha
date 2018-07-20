@@ -732,6 +732,19 @@ static float compare_models(const float *baf, const int8_t *gt_phase, int n, con
  * BASIC STATISTICS FUNCTIONS    *
  *********************************/
 
+// iterator of non-NaN values
+static inline float next_not_nan(const float *v, const int *imap, int n, int *i)
+{
+    float x = NAN;
+    while (*i < n)
+    {
+         x = imap ? v[ imap[*i] ] : v[*i];
+         if ( !isnan(x) ) break;
+         (*i)++;
+    }
+    return x;
+}
+
 // compute BAF phase concordance for a float array with iterator
 static float get_baf_conc(const float *baf, const int8_t *gt_phase, int n, const int *imap)
 {
@@ -755,6 +768,42 @@ static float get_baf_conc(const float *baf, const int8_t *gt_phase, int n, const
         }
     }
     return (float)a/(float)(a+b);
+}
+
+static float get_sample_sd(const float *v, int n, const int *imap);
+
+// compute (adjusted) LRR autocorrelation for a float array with iterator
+static float get_lrr_auto(const float *lrr, int n, const int *imap)
+{
+    float value;
+    double mean = 0.0;
+    int i = 0, j = 0;
+    for (value = next_not_nan(lrr, imap, n, &i); i < n; i++, value = next_not_nan(lrr, imap, n, &i))
+    {
+        mean += (double)value;
+        j++;
+    }
+    if ( j <= 1 ) return NAN;
+    mean /= (double)j;
+
+    double var = 0.0;
+    i = 0;
+    for (value = next_not_nan(lrr, imap, n, &i); i < n; i++, value = next_not_nan(lrr, imap, n, &i))
+    {
+        var += sq((double)value - mean);
+    }
+
+    double auto_corr = 0.0;
+    i = 0;
+    double prev = (double)next_not_nan(lrr, imap, n, &i) - mean, next;
+    for (i++, value = next_not_nan(lrr, imap, n, &i); i < n ; i++, value = next_not_nan(lrr, imap, n, &i))
+    {
+        next = (double)value - mean;
+        auto_corr += prev * next;
+        prev = next;
+    }
+    auto_corr /= var;
+    return auto_corr;
 }
 
 // compute the n50 of a vector
@@ -1340,16 +1389,19 @@ typedef struct
     float lrr_sd;
     float adjlrr_sd;
     float baf_conc;
+    float lrr_auto;
     int nhets;
     int x_nonpar_nhets;
     float x_nonpar_lrr_median;
     float y_nonpar_lrr_median;
     float mt_lrr_median;
     contig_t contig;
+
     kv_float kv_lrr_median;
     kv_float kv_lrr_sd;
     kv_float kv_baf_sd;
     kv_float kv_baf_conc;
+    kv_float kv_lrr_auto;
 
     // LRR polynomial regression parameters
     float coeffs[MAX_ORDER+1];
@@ -1954,10 +2006,12 @@ static void sample_stats(sample_t *self, int n, model_param_t *model_param, int 
         self[i].lrr_sd = get_median( self[i].kv_lrr_sd.a, self[i].kv_lrr_sd.n, NULL );
         self[i].baf_sd = get_median( self[i].kv_baf_sd.a, self[i].kv_baf_sd.n, NULL );
         self[i].baf_conc = get_median( self[i].kv_baf_conc.a, self[i].kv_baf_conc.n, NULL );
+        self[i].lrr_auto = get_median( self[i].kv_lrr_auto.a, self[i].kv_lrr_auto.n, NULL );
         free(self[i].kv_lrr_median.a);
         free(self[i].kv_lrr_sd.a);
         free(self[i].kv_baf_sd.a);
         free(self[i].kv_baf_conc.a);
+        free(self[i].kv_lrr_auto.a);
 
         self[i].adjlrr_sd = self[i].lrr_sd;
         if ( model_param->order_lrr_gc == 0 )
@@ -1980,7 +2034,9 @@ static void sample_stats(sample_t *self, int n, model_param_t *model_param, int 
     float lrr_autosomes = get_median( tmp, j, NULL );
 
     j = 0;
-    for (int i=0; i<n; i++) if( !isnan(self[i].x_nonpar_lrr_median) ) tmp[j++] = self[i].x_nonpar_lrr_median;
+    for (int i=0; i<n; i++)
+        if( !isnan(self[i].x_nonpar_lrr_median) )
+            tmp[j++] = self[i].x_nonpar_lrr_median - self[i].lrr_median;
     float cutoff = get_cutoff( tmp, j );
     for (int i=0; i<n; i++)
     {
@@ -2094,6 +2150,8 @@ static void sample_contig_stats(sample_t *self, const contig_param_t *contig_par
             float rss = get_tss(lrr, self->contig.size);
             kv_push(float, self->kv_rel_ess, 1.0f - rss / tss );
         }
+        // compute autocorrelation after GC correction
+        kv_push(float, self->kv_lrr_auto, get_lrr_auto( lrr, self->contig.size, NULL ) );
     }
 
     free(self->contig.vcf_imap);
@@ -2116,24 +2174,26 @@ static void sample_print(const sample_t *self, int n, FILE *restrict stream, con
     sex[SEX_FEM] = 'F';
     if ( flags & WGS_DATA )
     {
-        fprintf(stream, "SAMPLE\tCOV_MEDIAN\tCOV_SD\tBAF_CORR\tBAF_CONC\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_COV_MEDIAN\tY_NONPAR_COV_MEDIAN\tMT_COV_MEDIAN\tSEX\tREL_ESS\n");
+        fprintf(stream, "SAMPLE\tCOV_MEDIAN\tCOV_SD\tBAF_CORR\tBAF_CONC\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_COV_MEDIAN\tY_NONPAR_COV_MEDIAN\tMT_COV_MEDIAN\tSEX\tREL_ESS\tCOV_AUTO\n");
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, self[i].idx);
-            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\n", sample_name, expf(self[i].lrr_median),
+            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\t%.4f\n", sample_name, expf(self[i].lrr_median),
             expf(self[i].lrr_median)*self[i].lrr_sd, self[i].baf_sd, self[i].baf_conc, self[i].nhets, self[i].x_nonpar_nhets,
-            expf(self[i].x_nonpar_lrr_median), expf(self[i].y_nonpar_lrr_median), expf(self[i].mt_lrr_median), sex[self[i].sex], self[i].rel_ess);
+            expf(self[i].x_nonpar_lrr_median), expf(self[i].y_nonpar_lrr_median), expf(self[i].mt_lrr_median), sex[self[i].sex],
+            self[i].rel_ess, self[i].lrr_auto);
         }
     }
     else
     {
-        fprintf(stream, "SAMPLE\tLRR_MEDIAN\tLRR_SD\tBAF_SD\tBAF_CONC\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_LRR_MEDIAN\tY_NONPAR_LRR_MEDIAN\tMT_LRR_MEDIAN\tSEX\tREL_ESS\n");
+        fprintf(stream, "SAMPLE\tLRR_MEDIAN\tLRR_SD\tBAF_SD\tBAF_CONC\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_LRR_MEDIAN\tY_NONPAR_LRR_MEDIAN\tMT_LRR_MEDIAN\tSEX\tREL_ESS\tLRR_AUTO\n");
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, self[i].idx);
-            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\n", sample_name, self[i].lrr_median,
+            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\t%.4f\n", sample_name, self[i].lrr_median,
             self[i].lrr_sd, self[i].baf_sd, self[i].baf_conc, self[i].nhets, self[i].x_nonpar_nhets,
-            self[i].x_nonpar_lrr_median, self[i].y_nonpar_lrr_median, self[i].mt_lrr_median, sex[self[i].sex], self[i].rel_ess);
+            self[i].x_nonpar_lrr_median, self[i].y_nonpar_lrr_median, self[i].mt_lrr_median, sex[self[i].sex],
+            self[i].rel_ess, self[i].lrr_auto);
         }
     }
     if (stream != stdout && stream != stderr) fclose(stream);
