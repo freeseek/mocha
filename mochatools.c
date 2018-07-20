@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <htslib/vcf.h>
+#include <htslib/kseq.h>
 #include <htslib/faidx.h>
 #include <htslib/kfunc.h>
 #include "bcftools.h"
@@ -50,6 +51,7 @@ typedef struct
 {
     int ase, ad, tx, ws;
     int ngt_arr, nad_arr, nbdev_phase_arr;
+    int *sex;
     int32_t *gt_arr, *ad_arr, *bdev_phase_arr;
     faidx_t *fai;
     bcf_hdr_t *in_hdr, *out_hdr;
@@ -77,7 +79,8 @@ const char *usage(void)
 "Plugin options:\n"
 "   -b, --binom-ase               performs binomial test for asymmetry of B Allele Frequency (Bdev_Phase)\n"
 "   -a, --ad-het                  performs binomial test for reference / alternate allelic depth (AD)\n"
-"   -t, --tx-bias                 perform transmission bias tests  (requires absolute phasing)\n"
+"   -x  --sex <file>              file including information about sex of sample\n"
+"   -t, --tx-bias                 perform transmission bias tests (requires absolute phasing)\n"
 "   -f, --fasta-ref <file>        reference sequence to compute GC and CpG content\n"
 "   -w, --window-size <int>       Window size in bp used to compute the GC and CpG content [200]\n"
 "   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with \"^\" prefix)\n"
@@ -87,9 +90,35 @@ const char *usage(void)
 "\n";
 }
 
+static void parse_sex(args_t *args, char *fname)
+{
+    htsFile *fp = hts_open(fname, "r");
+    if ( !fp ) error("Could not read: %s\n", fname);
+
+    kstring_t str = {0,0,0};
+    if ( hts_getline(fp, KS_SEP_LINE, &str) <= 0 ) error("Empty file: %s\n", fname);
+
+    args->sex = (int *)calloc(bcf_hdr_nsamples(args->in_hdr), sizeof(int));
+
+    int moff = 0, *off = NULL;
+    char *tmp = NULL;
+    do
+    {
+        int ncols = ksplit_core(str.s, 0, &moff, &off);
+        if ( ncols<2 ) error("Could not parse the sex file: %s\n", str.s);
+
+        int sample = bcf_hdr_id2int(args->in_hdr, BCF_DT_SAMPLE, &str.s[off[0]]);
+        if ( sample>=0 ) args->sex[sample] = (int)strtol(&str.s[off[1]], &tmp, 0);
+    } while ( hts_getline(fp, KS_SEP_LINE, &str)>=0 );
+
+    free(str.s);
+    free(off);
+    hts_close(fp);
+}
+
 int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
 {
-    args = (args_t*)calloc(1, sizeof(args_t));
+    args = (args_t *)calloc(1, sizeof(args_t));
     args->ws = 200;
     args->in_hdr = in;
     args->out_hdr = out;
@@ -97,6 +126,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
     int force_samples = 0;
     int sites_only = 0;
     char *sample_names = NULL;
+    char *sex_fname = NULL;
     char *ref_fname = NULL;
     char *tmp = NULL;
 
@@ -105,6 +135,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
     {
         {"binom-ase", no_argument, NULL, 'b'},
         {"ad-het", no_argument, NULL, 'a'},
+        {"sex", required_argument, NULL, 'x'},
         {"tx-bias", no_argument, NULL, 't'},
         {"fasta-ref", required_argument, NULL, 'f'},
         {"window-size", required_argument, NULL, 'w'},
@@ -115,12 +146,13 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
         {NULL,0,NULL,0}
     };
 
-    while ((c = getopt_long(argc, argv, "h?batf:w:s:S:G",loptions,NULL)) >= 0)
+    while ((c = getopt_long(argc, argv, "h?bax:tf:w:s:S:G",loptions,NULL)) >= 0)
     {
         switch (c)
         {
             case 'b': args->ase = 1; break;
             case 'a': args->ad = 1; break;
+            case 'x': sex_fname = optarg; break;
             case 't': args->tx = 1; break;
             case 'f': ref_fname = optarg; break;
             case 'w':
@@ -164,6 +196,8 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
         free(smpl);
     }
 
+    if ( sex_fname ) parse_sex(args, sex_fname);
+
     if ( ref_fname )
     {
         args->fai = fai_load(ref_fname);
@@ -193,7 +227,12 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
         }
     }
 
-    bcf_hdr_append(args->out_hdr, "##INFO=<ID=AC_Het,Number=1,Type=Integer,Description=\"Total number of heterozygous genotypes\">");
+    bcf_hdr_append(args->out_hdr, "##INFO=<ID=AC_Het,Number=1,Type=Integer,Description=\"Number of heterozygous genotypes\">");
+    if ( args->sex )
+    {
+        bcf_hdr_append(args->out_hdr, "##INFO=<ID=AC_Het_Sex,Number=2,Type=Integer,Description=\"Number of heterozygous genotypes by sex\">");
+        bcf_hdr_append(args->out_hdr, "##INFO=<ID=AC_Sex_Test,Number=1,Type=Float,Description=\"Fisher's exact test for alternate alleles and sex\">");
+    }
 
     if ( args->ad && ad >= 0 )
     {
@@ -346,7 +385,7 @@ bcf1_t *process(bcf1_t *rec)
 
     float ret[4];
     kvec_t(float) kv_baf[2] = { {0, 0, NULL}, {0, 0, NULL} };
-    int ac_het = 0, ac_het_tx[] = {0, 0}, ase[] = {0,0}, ase_tx[] = {0, 0}, ad_het[] = {0, 0};
+    int ac_het = 0, ac_sex[] = {0, 0, 0, 0}, ac_het_sex[] = {0, 0}, ac_het_tx[] = {0, 0}, ase[] = {0,0}, ase_tx[] = {0, 0}, ad_het[] = {0, 0};
 
     int nbdev_phase = args->ase ? bcf_get_format_int32(args->in_hdr, rec, "Bdev_Phase", &args->bdev_phase_arr, &args->nbdev_phase_arr) : 0;
     int nad = args->ad ? bcf_get_format_int32(args->in_hdr, rec, "AD", &args->ad_arr, &args->nad_arr) : 0;
@@ -355,11 +394,19 @@ bcf1_t *process(bcf1_t *rec)
     {
         float baf = NAN;
         int32_t *ptr = args->gt_arr + i * max_ploidy;
-        // if genotype is not heterozygous, skip
+        // if genotype is missing, skip
         if ( bcf_gt_is_missing(ptr[0]) || bcf_gt_is_missing(ptr[1]) || ptr[1]==bcf_int32_vector_end ) continue;
-        if ( ptr[0]>>1 == ptr[1]>>1 || ( ptr[0]>>1 != 1 && ptr[1]>>1 != 1 ) ) continue;
+        if ( args->sex && ( args->sex[i] == 1 || args->sex[i] == 2 ) )
+        {
+            if ( bcf_gt_allele(ptr[0]) == 0 && bcf_gt_allele(ptr[1]) == 0 ) ac_sex[args->sex[i]-1]++;
+            else if ( bcf_gt_allele(ptr[0]) > 0 && bcf_gt_allele(ptr[1]) > 0 ) ac_sex[2+args->sex[i]-1]++;
+        }
+        // if genotype is not heterozygous, skip
+        if ( bcf_gt_allele(ptr[0]) == bcf_gt_allele(ptr[1]) ||
+           ( bcf_gt_allele(ptr[0]) != 0 && bcf_gt_allele(ptr[1]) != 0 ) ) continue;
         int8_t gt_phase = (int8_t)SIGN((ptr[0]>>1) - (ptr[1]>>1)) * (int8_t)bcf_gt_is_phased(ptr[1]);
         ac_het++;
+        if ( args->sex && ( args->sex[i] == 1 || args->sex[i] == 2 ) ) ac_het_sex[args->sex[i]-1]++;
         if ( args->tx && gt_phase ) ac_het_tx[(1-gt_phase)/2]++;
 
         if ( nbdev_phase )
@@ -389,6 +436,13 @@ bcf1_t *process(bcf1_t *rec)
     }
 
     bcf_update_info_int32(args->out_hdr, rec, "AC_Het", &ac_het, 1);
+    if ( args->sex )
+    {
+        bcf_update_info_int32(args->out_hdr, rec, "AC_Het_Sex", &ac_het_sex, 2);
+        double left, right, fisher;
+        ret[0] = 0.0f - log10f(kt_fisher_exact(ac_sex[0], ac_sex[1], ac_sex[2], ac_sex[3], &left, &right, &fisher));
+        bcf_update_info_float(args->out_hdr, rec, "AC_Sex_Test", &ret, 1);
+    }
     if ( args->tx )
     {
         bcf_update_info_int32(args->out_hdr, rec, "AC_Het_Tx", &ac_het_tx, 2);
@@ -432,6 +486,7 @@ end:
 
 void destroy(void)
 {
+    free(args->sex);
     free(args->gt_arr);
     free(args->ad_arr);
     free(args->bdev_phase_arr);
