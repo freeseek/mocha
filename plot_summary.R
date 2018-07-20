@@ -36,7 +36,7 @@ df_stats <- read.table(stats, sep = '\t', header = TRUE)
 lrr_cn1to2 <- median(df_stats$X_NONPAR_LRR_MEDIAN[df_stats$SEX=='F']) - median(df_stats$X_NONPAR_LRR_MEDIAN[df_stats$SEX=='M'])
 
 df <- read.table(mocha, sep = '\t', header = TRUE)
-idx <- !( df$CHROM %in% c('X', 'Y', 'MT') )
+idx <- !( df$CHROM %in% c('X', 'Y', 'MT') ) & (df$LDEV > -3*lrr_cn1to2)
 df$SV <- factor(df$CHROM, levels = c('0-2 Mbp', '2-10 Mbp', '10-50 Mbp', '50-250 Mbp'))
 df$SV[df$LENGTH < 250e6] <- '50-250 Mbp'
 df$SV[df$LENGTH < 50e6] <- '10-50 Mbp'
@@ -105,33 +105,38 @@ p4 <- ggplot(df[idx,], aes(x=Deletion, y=Duplication, color=CHROM, shape=CHROM, 
   scale_shape_manual(values=0:23, guide=FALSE) +
   theme_bw(base_size = fs)
 
-p5 <- ggplot(df_stats, aes(x=X_NONPAR_LRR_MEDIAN, y=Y_NONPAR_LRR_MEDIAN, color=SEX)) +
+p5 <- ggplot(df_stats, aes(x=X_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=Y_NONPAR_LRR_MEDIAN - LRR_MEDIAN, color=SEX)) +
   geom_point(alpha=1/3) +
-  scale_x_continuous('X nonPAR median LRR') +
-  scale_y_continuous('Y nonPAR median LRR') +
+  scale_x_continuous('X nonPAR median LRR (autosome corrected)') +
+  scale_y_continuous('Y nonPAR median LRR (autosome corrected)') +
   scale_color_discrete(guide = FALSE) +
   theme_bw(base_size = fs)
-title <- paste('Males:', median(df_stats$LRR_MEDIAN[df$SEX=='M']), median(df_stats$X_NONPAR_LRR_MEDIAN[df$SEX=='M']), '/ Females:', median(df_stats$LRR_MEDIAN[df$SEX=='F']), median(df_stats$X_NONPAR_LRR_MEDIAN[df$SEX=='F']))
-p6 <- ggplot(df_stats, aes(x=X_NONPAR_LRR_MEDIAN, y=LRR_MEDIAN, color=SEX)) +
+p6 <- ggplot(df_stats, aes(x=X_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=MT_LRR_MEDIAN - LRR_MEDIAN, color=SEX)) +
   geom_point(alpha=1/3) +
-  scale_x_continuous('X nonPAR median LRR') +
-  scale_y_continuous('Median LRR') +
+  scale_x_continuous('X nonPAR median LRR (autosome corrected)') +
+  scale_y_continuous('MT median LRR (autosome corrected)') +
   scale_color_discrete(guide = FALSE) +
   theme_bw(base_size = fs)
-p7 <- ggplot(df_stats, aes(x=LRR_MEDIAN, y=LRR_SD)) +
+p7 <- ggplot(df_stats, aes(x=Y_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=MT_LRR_MEDIAN - LRR_MEDIAN, color=SEX)) +
   geom_point(alpha=1/3) +
-  scale_x_continuous('Median LRR') +
-  scale_y_continuous('Standard deviation LRR') +
+  scale_x_continuous('Y nonPAR median LRR (autosome corrected)') +
+  scale_y_continuous('MT median LRR (autosome corrected)') +
+  scale_color_discrete(guide = FALSE) +
   theme_bw(base_size = fs)
-p8 <- ggplot(df_stats, aes(x=LRR_SD, y=BAF_SD)) +
-  geom_point(alpha=1/3) +
-  scale_x_continuous('Standard deviation LRR') +
-  scale_y_continuous('Standard deviation BAF') +
-  theme_bw(base_size = fs)
-p9 <- ggplot(df_stats, aes(x=BAF_SD, y=BAF_CONC)) +
+p8 <- ggplot(df_stats, aes(x=BAF_SD, y=BAF_CONC)) +
   geom_point(alpha=1/3) +
   scale_x_continuous('Standard deviation BAF') +
   scale_y_continuous('BAF concordance') +
+  theme_bw(base_size = fs)
+p9 <- ggplot(df_stats, aes(x=REL_ESS, y=LRR_AUTO)) +
+  geom_point(alpha=1/3) +
+  scale_x_continuous('Relative LRR variance explained by GC') +
+  scale_y_continuous('GC-adjusted LRR auto-correlation') +
+  theme_bw(base_size = fs)
+p9 <- ggplot(df_stats, aes(x=LRR_SD, y=LRR_AUTO)) +
+  geom_point(alpha=1/3) +
+  scale_x_continuous('Standard deviation LRR') +
+  scale_y_continuous('GC-adjusted LRR auto-correlation') +
   theme_bw(base_size = fs)
 
 pdf(out_pdf)
@@ -144,4 +149,5 @@ print(p6)
 print(p7)
 print(p8)
 print(p9)
+print(p10)
 invisible(dev.off())
