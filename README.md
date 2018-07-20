@@ -108,7 +108,7 @@ samtools faidx $HOME/res/human_g1k_v37.fasta
 
 Genetic map
 ```
-wget -P $HOME/res/ https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg19_withX.txt.gz
+wget -P $HOME/res https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg19_withX.txt.gz
 ```
 
 1000 Genomes project phase 3
@@ -124,7 +124,7 @@ done
 
 List of common germline duplications and deletions
 ```
-wget -P $HOME/res/ ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz{,.tbi}
+wget -P $HOME/res ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz{,.tbi}
 bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "%CHROM\t%POS\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/res/cnp.grch37.bed
 ```
@@ -151,7 +151,7 @@ samtools faidx $HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
 
 Genetic map
 ```
-wget -P $HOME/res/ https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz
+wget -P $HOME/res https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz
 ```
 
 1000 Genomes project phase 3 (fixing contig names and removing duplicate variants)
@@ -171,10 +171,10 @@ done
 
 List of common germline duplications and deletions
 ```
-wget -P $HOME/res/ ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz{,.tbi}
-wget -q http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver
+wget -P $HOME/res ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz{,.tbi}
+wget http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver
 chmod a+x liftOver
-wget -q http://hgdownload.cse.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz
+wget http://hgdownload.cse.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz
 bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "chr%CHROM\t%POS\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz | \
     ./liftOver \
@@ -221,8 +221,9 @@ Perform basic quality control
 n=$(bcftools query -l $dir/$pfx.unphased.bcf|wc -l)
 ns=$((n*98/100))
 $HOME/bin/bcftools +$HOME/bin/fill-tags.so --no-version -Ou $dir/$pfx.unphased.bcf -- -t NS,ExcHet | \
-  $HOME/bin/bcftools view --no-version -Ou -i "NS<$ns || ExcHet<1e-6" -G | \
-  $HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf -x FILTER,^INFO/NS,^INFO/ExcHet && \
+  $HOME/bin/bcftools +$HOME/bin/mochatools.so --no-version -Ou -- -x $sex -G | \
+  $HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf -i "NS<$ns || ExcHet<1e-6 || AC_Sex_Test>6" \
+    -x FILTER,^INFO/NS,^INFO/ExcHet,^AC_Sex_Test && \
   $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 ```
 (the generated list of variants will be excluded from modeling by both eagle and mocha)
@@ -330,7 +331,7 @@ sudo apt-get install r-cran-ggplot2 r-cran-data.table r-cran-gridextra
 
 Download R scripts
 ```
-wget -qP $HOME/bin bcftools https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,mocha}.R
+wget -P $HOME/bin bcftools https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,mocha}.R
 chmod a+x $HOME/bin/plot_{summary,mocha}.R
 ```
 
