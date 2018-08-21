@@ -105,35 +105,41 @@ p4 <- ggplot(df[idx,], aes(x=Deletion, y=Duplication, color=CHROM, shape=CHROM, 
   scale_shape_manual(values=0:23, guide=FALSE) +
   theme_bw(base_size = fs)
 
-p5 <- ggplot(df_stats, aes(x=X_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=Y_NONPAR_LRR_MEDIAN - LRR_MEDIAN, color=SEX)) +
+p5 <- ggplot(df_stats, aes(x=X_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=X_NONPAR_NHETS, color=SEX)) +
+  geom_point(alpha=1/3) +
+  scale_x_continuous('X nonPAR median LRR (autosome corrected)') +
+  scale_y_continuous('X nonPAR number of heterozygous sites') +
+  scale_color_discrete(guide = FALSE) +
+  theme_bw(base_size = fs)
+p6 <- ggplot(df_stats, aes(x=X_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=Y_NONPAR_LRR_MEDIAN - LRR_MEDIAN, color=SEX)) +
   geom_point(alpha=1/3) +
   scale_x_continuous('X nonPAR median LRR (autosome corrected)') +
   scale_y_continuous('Y nonPAR median LRR (autosome corrected)') +
   scale_color_discrete(guide = FALSE) +
   theme_bw(base_size = fs)
-p6 <- ggplot(df_stats, aes(x=X_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=MT_LRR_MEDIAN - LRR_MEDIAN, color=SEX)) +
+p7 <- ggplot(df_stats, aes(x=X_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=MT_LRR_MEDIAN - LRR_MEDIAN, color=SEX)) +
   geom_point(alpha=1/3) +
   scale_x_continuous('X nonPAR median LRR (autosome corrected)') +
   scale_y_continuous('MT median LRR (autosome corrected)') +
   scale_color_discrete(guide = FALSE) +
   theme_bw(base_size = fs)
-p7 <- ggplot(df_stats, aes(x=Y_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=MT_LRR_MEDIAN - LRR_MEDIAN, color=SEX)) +
+p8 <- ggplot(df_stats, aes(x=Y_NONPAR_LRR_MEDIAN - LRR_MEDIAN, y=MT_LRR_MEDIAN - LRR_MEDIAN, color=SEX)) +
   geom_point(alpha=1/3) +
   scale_x_continuous('Y nonPAR median LRR (autosome corrected)') +
   scale_y_continuous('MT median LRR (autosome corrected)') +
   scale_color_discrete(guide = FALSE) +
   theme_bw(base_size = fs)
-p8 <- ggplot(df_stats, aes(x=BAF_SD, y=BAF_CONC)) +
+p9 <- ggplot(df_stats, aes(x=BAF_SD, y=BAF_CONC)) +
   geom_point(alpha=1/3) +
   scale_x_continuous('Standard deviation BAF') +
   scale_y_continuous('BAF concordance') +
   theme_bw(base_size = fs)
-p9 <- ggplot(df_stats, aes(x=REL_ESS, y=LRR_AUTO)) +
+p10 <- ggplot(df_stats, aes(x=REL_ESS, y=LRR_AUTO)) +
   geom_point(alpha=1/3) +
   scale_x_continuous('Relative LRR variance explained by GC') +
   scale_y_continuous('GC-adjusted LRR auto-correlation') +
   theme_bw(base_size = fs)
-p9 <- ggplot(df_stats, aes(x=LRR_SD, y=LRR_AUTO)) +
+p11 <- ggplot(df_stats, aes(x=LRR_SD, y=LRR_AUTO)) +
   geom_point(alpha=1/3) +
   scale_x_continuous('Standard deviation LRR') +
   scale_y_continuous('GC-adjusted LRR auto-correlation') +
@@ -150,4 +156,5 @@ print(p7)
 print(p8)
 print(p9)
 print(p10)
+print(p11)
 invisible(dev.off())

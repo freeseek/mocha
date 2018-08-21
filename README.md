@@ -4,7 +4,7 @@ MoChA (MOsaic CHromosomal Alterations caller)
 A bcftools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following <a href="http://doi.org/10.1038/s41586-018-0321-x">paper</a>:
 ```
 Loh P., Genovese G., McCarroll S., Price A. et al. Insights about clonal expansions from 8,342 mosaic
-chromosomal alterations. Nature xxx, xxx-xxx (2018). [PMID: xxxxxxxx] [DOI: 10.1038/s41586-018-0321-x]
+chromosomal alterations. Nature 559, 350–355 (2018). [PMID: 29995854] [DOI: 10.1038/s41586-018-0321-x]
 ```
 and this website. For any feedback, send an email to giulio.genovese@gmail.com
 
@@ -78,9 +78,9 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 
 Add patches and code for plugin
 ```
-wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{Makefile.patch,main.patch,norm.patch,vcfmocha.c,sumlog.c}
+wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c,sumlog.c}
 wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools}.c
-cd bcftools && patch < Makefile.patch && patch < main.patch && patch < norm.patch && cd ..
+cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.patch && cd ..
 ```
 
 Compile latest version of `htslib` (optionally disable `bz2` and `lzma`) and `bcftools`
@@ -204,6 +204,7 @@ tbl="..." # input Illumina GenomeStudio table
 vcf="..." # input VCF file with phased GT, LRR, and BAF
 pfx="..." # output prefix
 thr="..." # number of threads to use
+sex="..." # file with sex information (first column sample ID, second column sex: 1=male; 2=female)
 ped="..." # pedigree file to use if parent child duos are present
 dir="mocha"
 mkdir -p $dir
@@ -214,7 +215,21 @@ If you already have a VCF file with BAF and LRR information, create a minimal bi
 $HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf -x FILTER,INFO,^FMT/GT,^FMT/BAF,^FMT/LRR $vcf && \
   $HOME/bin/bcftools index -f $dir/$pfx.unphased.bcf
 ```
-Otherwise, if you have Illumina data, use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> plugin to convert the data to VCF
+Otherwise, if you have Illumina genotype array data, use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> plugin to convert the data to VCF
+
+If you prefer to bring your BAF and LRR data to VCF format using your own scripts, it should have the following format:
+```
+##fileformat=VCFv4.2
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=BAF,Number=1,Type=Float,Description="B Allele Frequency">
+##FORMAT=<ID=LRR,Number=1,Type=Float,Description="Log R Ratio">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	NA12878
+1	752566	rs3094315	G	A	.	.	.	GT:BAF:LRR	1|1:0.9889:-0.0798
+1	776546	rs12124819	A	G	.	.	.	GT:BAF:LRR	0|1:0.5441:0.4959
+1	798959	rs11240777	G	A	.	.	.	GT:BAF:LRR	0|0:0.0288:0.2276
+1	932457	rs1891910	G	A	.	.	.	GT:BAF:LRR	1|0:0.4540:-0.1653
+```
+Making sure that BAF refers to the allele frequency of what in the VCF is indicated as the alternate allele.
 
 Perform basic quality control
 ```
@@ -223,7 +238,7 @@ ns=$((n*98/100))
 $HOME/bin/bcftools +$HOME/bin/fill-tags.so --no-version -Ou $dir/$pfx.unphased.bcf -- -t NS,ExcHet | \
   $HOME/bin/bcftools +$HOME/bin/mochatools.so --no-version -Ou -- -x $sex -G | \
   $HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf -i "NS<$ns || ExcHet<1e-6 || AC_Sex_Test>6" \
-    -x FILTER,^INFO/NS,^INFO/ExcHet,^AC_Sex_Test && \
+    -x FILTER,^INFO/NS,^INFO/ExcHet,^INFO/AC_Sex_Test && \
   $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 ```
 (the generated list of variants will be excluded from modeling by both eagle and mocha)

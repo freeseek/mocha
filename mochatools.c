@@ -95,7 +95,7 @@ static void parse_sex(args_t *args, char *fname)
     htsFile *fp = hts_open(fname, "r");
     if ( !fp ) error("Could not read: %s\n", fname);
 
-    kstring_t str = {0,0,0};
+    kstring_t str = {0, 0, NULL};
     if ( hts_getline(fp, KS_SEP_LINE, &str) <= 0 ) error("Empty file: %s\n", fname);
 
     args->sex = (int *)calloc(bcf_hdr_nsamples(args->in_hdr), sizeof(int));
