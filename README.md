@@ -195,7 +195,7 @@ rule="GRCh38"
 cnp="$HOME/res/cnp.grch38.bed"
 ```
 
-Phasing Pipeline
+Data preparation
 ================
 
 Preparation steps
@@ -206,18 +206,18 @@ pfx="..." # output prefix
 thr="..." # number of threads to use
 sex="..." # file with sex information (first column sample ID, second column sex: 1=male; 2=female)
 ped="..." # pedigree file to use if parent child duos are present
-dir="mocha"
+dir="..." # directory where output files will be generated
 mkdir -p $dir
 ```
 
 If you already have a VCF file with BAF and LRR information, create a minimal binary VCF
 ```
-$HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf -x FILTER,INFO,^FMT/GT,^FMT/BAF,^FMT/LRR $vcf && \
+$HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf -x FILTER,INFO,^FMT/GT,^FMT/BAF,^FMT/LRR,^FMR/AD $vcf && \
   $HOME/bin/bcftools index -f $dir/$pfx.unphased.bcf
 ```
 Otherwise, if you have Illumina genotype array data, use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> plugin to convert the data to VCF
 
-If you prefer to bring your BAF and LRR data to VCF format using your own scripts, it should have the following format:
+If you want to bring your BAF and LRR data to VCF format using your own scripts, it should have the following format:
 ```
 ##fileformat=VCFv4.2
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
@@ -231,7 +231,29 @@ If you prefer to bring your BAF and LRR data to VCF format using your own script
 ```
 Making sure that BAF refers to the allele frequency of what in the VCF is indicated as the alternate allele.
 
-Perform basic quality control
+The mochatools plugin has some functions that will be necessary in the next steps:
+```
+About:   tools for the MOsaic CHromosomal Alterations pipeline.
+
+Usage:   bcftools +mochatools [General Options] -- [Plugin Options]
+
+General options:
+   run "bcftools plugin" for a list of common options
+
+Plugin options:
+   -b, --binom-ase               performs binomial test for asymmetry of B Allele Frequency (Bdev_Phase)
+   -a, --ad-het                  performs binomial test for reference / alternate allelic depth (AD)
+   -x  --sex <file>              file including information about sex of sample
+   -t, --tx-bias                 perform transmission bias tests (requires absolute phasing)
+   -f, --fasta-ref <file>        reference sequence to compute GC and CpG content
+   -w, --window-size <int>       Window size in bp used to compute the GC and CpG content [200]
+   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with "^" prefix)
+   -S, --samples-file [^]<file>  file of samples to include (or exclude with "^" prefix)
+       --force-samples           only warn about unknown subset samples
+   -G, --drop-genotypes          drop individual genotype information (after running statistical tests)
+```
+
+Perform basic quality control (the generated list of variants will be excluded from modeling by both eagle and mocha)
 ```
 n=$(bcftools query -l $dir/$pfx.unphased.bcf|wc -l)
 ns=$((n*98/100))
@@ -241,7 +263,10 @@ $HOME/bin/bcftools +$HOME/bin/fill-tags.so --no-version -Ou $dir/$pfx.unphased.b
     -x FILTER,^INFO/NS,^INFO/ExcHet,^INFO/AC_Sex_Test && \
   $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 ```
-(the generated list of variants will be excluded from modeling by both eagle and mocha)
+This command will only remove variants with high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6). There will likely be other steps that will be necessary to clean your data for your study, such as removing variants falling within segmental duplications, and which are not included in these guidelines.
+
+Phasing Pipeline
+================
 
 Phase VCF file by chromosome with `eagle`
 ```
