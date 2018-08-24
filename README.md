@@ -55,6 +55,10 @@ HMM Options:
                                       median BAF adjustment (-1 for no BAF adjustment) [5]
         --order-LRR-GC <int>          order of polynomial in local GC content to be used for polynomial
                                       regression of LRR (-1 for no LRR adjustment, 5 maximum) [2]
+
+Examples:
+    bcftools mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed
+    bcftools mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -n 1.0 --LRR-weight 0.5
 ```
 
 Installation
@@ -62,7 +66,7 @@ Installation
 
 Install basic tools (Debian/Ubuntu specific):
 ```
-sudo apt-get install wget liblzma-dev libbz2-dev libgsl0-dev gzip samtools unzip
+sudo apt-get install wget liblzma-dev libbz2-dev libgsl0-dev gzip samtools unzip bedtools
 ```
 
 Preparation steps
@@ -91,7 +95,7 @@ cd bcftools && make && cd ..
 ```
 Notice that you will need some functionalities missing from the base version of bcftools to run the pipeline
 
-Install latest version of `eagle`
+Install latest version of <a href="https://data.broadinstitute.org/alkesgroup/Eagle/">`eagle`</a>
 ```
 wget -O $HOME/bin/eagle https://data.broadinstitute.org/alkesgroup/Eagle/downloads/dev/eagle_v2.4
 ```
@@ -129,6 +133,23 @@ bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || S
   -f "%CHROM\t%POS\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/res/cnp.grch37.bed
 ```
 
+List of segmental duplications (make sure your bedtools version is not affected by bug https://github.com/arq5x/bedtools2/issues/418)
+```
+wget -O- http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/genomicSuperDups.txt.gz | gzip -d |
+  awk '!($2=="chrX" && $8=="chrY" || $2=="chrY" && $8=="chrX") {print $2"\t"$3"\t"$4"\t"$30}' > genomicSuperDups.bed
+
+awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
+  sort -k1,1 -k2,2n | uniq | \
+  awk 'chrom==$1 {print chrom"\t"pos"\t"$2} {chrom=$1; pos=$2}' | \
+  bedtools intersect -a genomicSuperDups.bed -b - | \
+  bedtools sort | \
+  bedtools groupby -c 4 -o min | \
+  awk 'BEGIN {i=0; s[0]="+"; s[1]="-"} {if ($4!=x) i=(i+1)%2; x=$4; print $0"\t0\t"s[i]}' | \
+  bedtools merge -s -c 4 -o distinct | \
+  cut -f1-3,5 | sed 's/^chr//' | grep -v gl | bgzip > $HOME/res/dup.grch37.bed.gz && \
+  tabix -f -p bed $HOME/res/dup.grch37.bed.gz
+```
+
 Setup variables
 ```
 ref="$HOME/res/human_g1k_v37.fasta"
@@ -137,6 +158,7 @@ kgp_pfx="$HOME/res/chrs/chr"
 kgp_sfx=".1kg.phase3.v5a.bcf"
 rule="GRCh37"
 cnp="$HOME/res/cnp.grch37.bed"
+dup="$HOME/res/dup.grch37.bed.gz"
 ```
 
 Download resources for GRCh38
@@ -185,6 +207,23 @@ bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || S
     /dev/stderr
 ```
 
+List of segmental duplications (make sure your bedtools version is not affected by bug https://github.com/arq5x/bedtools2/issues/418)
+```
+wget -O- http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/genomicSuperDups.txt.gz | gzip -d |
+  awk '!($2=="chrX" && $8=="chrY" || $2=="chrY" && $8=="chrX") {print $2"\t"$3"\t"$4"\t"$30}' > genomicSuperDups.bed
+
+awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
+  sort -k1,1 -k2,2n | uniq | \
+  awk 'chrom==$1 {print chrom"\t"pos"\t"$2} {chrom=$1; pos=$2}' | \
+  bedtools intersect -a genomicSuperDups.bed -b - | \
+  bedtools sort | \
+  bedtools groupby -c 4 -o min | \
+  awk 'BEGIN {i=0; s[0]="+"; s[1]="-"} {if ($4!=x) i=(i+1)%2; x=$4; print $0"\t0\t"s[i]}' | \
+  bedtools merge -s -c 4 -o distinct | \
+  cut -f1-3,5 | grep -v "GL\|KI" | bgzip > $HOME/res/dup.grch38.bed.gz && \
+  tabix -f -p bed $HOME/res/dup.grch38.bed.gz
+```
+
 Setup variables
 ```
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
@@ -193,6 +232,7 @@ kgp_pfx="$HOME/res/chrs/ALL.chr"
 kgp_sfx="_GRCh38.genotypes.20170504.bcf"
 rule="GRCh38"
 cnp="$HOME/res/cnp.grch38.bed"
+dup="$HOME/res/dup.grch38.bed.gz"
 ```
 
 Data preparation
@@ -205,19 +245,13 @@ vcf="..." # input VCF file with phased GT, LRR, and BAF
 pfx="..." # output prefix
 thr="..." # number of threads to use
 sex="..." # file with sex information (first column sample ID, second column sex: 1=male; 2=female)
+xcl="..." # VCF file with additional list of variants to exclude (optional)
 ped="..." # pedigree file to use if parent child duos are present
 dir="..." # directory where output files will be generated
 mkdir -p $dir
 ```
 
-If you already have a VCF file with BAF and LRR information, create a minimal binary VCF
-```
-$HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf -x FILTER,INFO,^FMT/GT,^FMT/BAF,^FMT/LRR,^FMR/AD $vcf && \
-  $HOME/bin/bcftools index -f $dir/$pfx.unphased.bcf
-```
-Otherwise, if you have Illumina genotype array data, use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> plugin to convert the data to VCF
-
-If you want to bring your BAF and LRR data to VCF format using your own scripts, it should have the following format:
+If you want to process <b>genotype</b> array data you need a VCF file with GT, BAF, and LRR information:
 ```
 ##fileformat=VCFv4.2
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
@@ -230,6 +264,39 @@ If you want to bring your BAF and LRR data to VCF format using your own scripts,
 1	932457	rs1891910	G	A	.	.	.	GT:BAF:LRR	1|0:0.4540:-0.1653
 ```
 Making sure that BAF refers to the allele frequency of what in the VCF is indicated as the alternate allele.
+
+If you do not already have a VCF file but you have Illumina genotype array data, you can use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> plugin to convert the data to VCF. Alternatively you can use your own scripts.
+
+Create a minimal binary VCF
+```
+$HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf -x ID,QUAL,INFO,^FMT/GT,^FMT/BAF,^FMT/LRR $vcf && \
+  $HOME/bin/bcftools index -f $dir/$pfx.unphased.bcf
+```
+
+If you want to process <b>whole-genome</b> sequence data you need a VCF file with GT and AD information:
+```
+##fileformat=VCFv4.2
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for the ref and alt alleles in the order listed">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	NA12878
+1	752566	rs3094315	G	A	.	.	.	GT:AD	1|1:0,31
+1	776546	rs12124819	A	G	.	.	.	GT:AD	0|1:21,23
+1	798959	rs11240777	G	A	.	.	.	GT:AD	0|0:31,0
+1	932457	rs1891910	G	A	.	.	.	GT:AD	1|0:18,14
+```
+Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will be not <a href="https://github.com/samtools/bcftools/issues/360">properly split</a>.
+
+Create a minimal binary VCF
+```
+bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/' | \
+  bcftools reheader -h /dev/stdin $vcf | \
+  bcftools filter --no-version -Ou -e "FMT/DP<10 || FMT/GQ<20" --set-GT . | \
+  bcftools annotate --no-version -Ou -x ID,QUAL,INFO,^FMT/GT,^FMT/AD | \
+  bcftools norm --no-version -Ou -m -any -k | \
+  bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
+  bcftools index $dir/$pfx.unphased.bcf
+```
+This will set to missing heterozygous genotypes that have low coverage or low genotyping quality, as these can cause issues.
 
 The mochatools plugin has some functions that will be necessary in the next steps:
 ```
@@ -257,13 +324,24 @@ Perform basic quality control (the generated list of variants will be excluded f
 ```
 n=$(bcftools query -l $dir/$pfx.unphased.bcf|wc -l)
 ns=$((n*98/100))
-$HOME/bin/bcftools +$HOME/bin/fill-tags.so --no-version -Ou $dir/$pfx.unphased.bcf -- -t NS,ExcHet | \
+echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
+  $HOME/bin/bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
+  $HOME/bin/bcftools +$HOME/bin/fill-tags.so --no-version -Ou -- -t NS,ExcHet | \
   $HOME/bin/bcftools +$HOME/bin/mochatools.so --no-version -Ou -- -x $sex -G | \
-  $HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf -i "NS<$ns || ExcHet<1e-6 || AC_Sex_Test>6" \
-    -x FILTER,^INFO/NS,^INFO/ExcHet,^INFO/AC_Sex_Test && \
+  $HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
+    -i "FILTER!=\".\" && FILTER!=\"PASS\" || JK<.02 || NS<$ns || ExcHet<1e-6 || AC_Sex_Test>6" \
+    -x FILTER,^INFO/JK,^INFO/NS,^INFO/ExcHet,^INFO/AC_Sex_Test && \
   $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 ```
-This command will only remove variants with high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6). There will likely be other steps that will be necessary to clean your data for your study, such as removing variants falling within segmental duplications, and which are not included in these guidelines.
+This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6).
+
+If a file with additional variants to be excluded is available, further merge it with the generated list
+```
+/bin/mv $dir/$pfx.xcl.bcf $dir/$pfx.xcl.tmp.bcf && \
+/bin/mv	$dir/$pfx.xcl.bcf.csi $dir/$pfx.xcl.tmp.bcf.csi && \
+$HOME/bin/bcftools merge --no-version -Ob -o $dir/$pfx.xcl.bcf $dir/$pfx.xcl.tmp.bcf $xcl && \
+$HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
+```
 
 Phasing Pipeline
 ================

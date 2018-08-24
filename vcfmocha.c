@@ -639,7 +639,7 @@ static float compare_models(const float *baf,
 {
     if ( n == 0 ) return NAN;
     float *emis = get_baf_phase_emis(baf, gt_phase, n, imap, err_prob, flip_prob, baf_sd, bdev, m);
-    int8_t *path = get_viterbi(emis, n, m, xy_prob, flip_prob, telomere_prob, 1.0f, 0, 0); // TODO can't I pass these values instead of 0 0?
+    int8_t *path = get_viterbi(emis, n, m, xy_prob, flip_prob, telomere_prob, 1.0f, 0, 0); // TODO can I not pass these values instead of 0 0?
     free(emis);
     int nflips = 0;
     for (int i=1; i<n; i++) if ( path[i-1] && path[i] && path[i-1] != path[i] ) nflips++;
@@ -661,92 +661,60 @@ static inline float lkl_lrr_ad(float lrr,
                                float lrr_sd,
                                float lrr_bias,
                                float lrr_sd_bias,
-                               float *log_gamma,
-                               float *lod_gamma_alpha,
-                               float *lod_gamma_beta,
-                               float *lod_gamma_alpha_beta,
+                               double *lod_gamma_alpha,
+                               double *lod_gamma_beta,
+                               double *lod_gamma_alpha_beta,
                                float err_prob)
 {
     float ret = isnan( lrr ) ? 1.0f : normal_pdf( lrr, ldev, lrr_sd, lrr_bias ) / lrr_sd_bias;
     if ( ad0!=INT16_NAN && ad1!=INT16_NAN )
-        ret *= ( expf( lod_gamma_alpha[ad0] + lod_gamma_beta[ad1] - lod_gamma_alpha_beta[ad0 + ad1] + log_gamma[ad0 + ad1] - log_gamma[ad0] - log_gamma[ad1] ) +
-                 expf( lod_gamma_alpha[ad1] + lod_gamma_beta[ad0] - lod_gamma_alpha_beta[ad0 + ad1] + log_gamma[ad0 + ad1] - log_gamma[ad0] - log_gamma[ad1] ) ) * 0.5f;
+        ret *= ( expf( lod_gamma_alpha[ad0] + lod_gamma_beta[ad1] - lod_gamma_alpha_beta[ad0 + ad1] ) +
+                 expf( lod_gamma_alpha[ad1] + lod_gamma_beta[ad0] - lod_gamma_alpha_beta[ad0 + ad1] ) ) * 0.5f;
     return ret < err_prob ? err_prob : ret;
 }
 
 static inline float lkl_ad_phase(int16_t ad0,
                                  int16_t ad1,
                                  int8_t phase,
-                                 float *log_gamma,
-                                 float *lod_gamma_alpha,
-                                 float *lod_gamma_beta,
-                                 float *lod_gamma_alpha_beta,
+                                 double *lod_gamma_alpha,
+                                 double *lod_gamma_beta,
+                                 double *lod_gamma_alpha_beta,
                                  float err_prob)
 {
     if ( ad0==INT16_NAN || ad1==INT16_NAN ) return 1.0f;
     float ret;
     if (phase == 0)
-        ret = ( expf( lod_gamma_alpha[ad0] + lod_gamma_beta[ad1] - lod_gamma_alpha_beta[ad0 + ad1] + log_gamma[ad0 + ad1] - log_gamma[ad0] - log_gamma[ad1] ) +
-                expf( lod_gamma_alpha[ad1] + lod_gamma_beta[ad0] - lod_gamma_alpha_beta[ad0 + ad1] + log_gamma[ad0 + ad1] - log_gamma[ad0] - log_gamma[ad1] ) ) * 0.5f;
-    else if (phase>0) ret = expf( lod_gamma_alpha[ad0] + lod_gamma_beta[ad1] - lod_gamma_alpha_beta[ad0 + ad1] + log_gamma[ad0 + ad1] - log_gamma[ad0] - log_gamma[ad1]);
-    else ret = expf( lod_gamma_alpha[ad1] + lod_gamma_beta[ad0] - lod_gamma_alpha_beta[ad0 + ad1] + log_gamma[ad0 + ad1] - log_gamma[ad0] - log_gamma[ad1]);
+        ret = ( expf( lod_gamma_alpha[ad0] + lod_gamma_beta[ad1] - lod_gamma_alpha_beta[ad0 + ad1] ) +
+                expf( lod_gamma_alpha[ad1] + lod_gamma_beta[ad0] - lod_gamma_alpha_beta[ad0 + ad1] ) ) * 0.5f;
+    else if (phase>0) ret = expf( lod_gamma_alpha[ad0] + lod_gamma_beta[ad1] - lod_gamma_alpha_beta[ad0 + ad1] );
+    else ret = expf( lod_gamma_alpha[ad1] + lod_gamma_beta[ad0] - lod_gamma_alpha_beta[ad0 + ad1] );
     return ret < err_prob ? err_prob : ret;
 }
 
-// precompute table of gammas of integer values such that
-// log_gamma[n] = log(n!)
-// see https://en.wikipedia.org/wiki/Gamma_function
-static float *precompute_log_gammas(const int16_t *ad0, const int16_t *ad1, int n, const int *imap)
-{
-    static float *log_gamma = NULL;
-    static int nlog_gamma = 1, mlog_gamma = 0;
-    if (ad0 == NULL && ad1 == NULL && n == 0 && imap == NULL) { free(log_gamma); return NULL; }
-
-    int max = 0;
-    for (int i=0; i<n; i++)
-    {
-        int a = imap ? ad0[ imap[i] ] : ad0[i];
-        int b = imap ? ad1[ imap[i] ] : ad1[i];
-        if ( a!=INT16_NAN && b!=INT16_NAN )
-        {
-            if (max < a + b) max = a + b;
-        }
-    }
-
-    if (max + 1 > nlog_gamma)
-    {
-        hts_expand(float, max + 1, mlog_gamma, log_gamma);
-        log_gamma[0] = 0.0f;
-        for (int i=nlog_gamma; i<=max; i++) log_gamma[i] = log_gamma[i-1] + logf(i);
-        nlog_gamma = max + 1;
-    }
-
-    return log_gamma;
-}
-
 // precompute table of values for the beta binomial log likelihoods such that
-// lod_gamma_alpha[n] = log( \gamma(n+\alpha) / \gamma(\alpha) )
-// lod_gamma_beta[n] = log( \gamma(n+\beta) / \gamma(\beta) )
-// lod_gamma_alpha_beta[n] = log( \gamma(n+\alpha+\beta) / \gamma(\alpha+\beta) )
+// f(n, x) = log( \gamma(n+x) / \gamma(x) / n! )
+// lod_gamma_alpha[n] = f(n, \alpha)
+// lod_gamma_beta[n] = f(n, \beta)
+// lod_gamma_alpha_beta[n] = f(n, \alpha + \beta)
 // see https://en.wikipedia.org/wiki/Beta-binomial_distribution#As_a_compound_distribution
-// TODO change these to double as you need the extra precision
 static void precompute_lod_gammas(const int16_t *ad0,
                                   const int16_t *ad1,
                                   int n,
                                   const int *imap,
                                   float alpha,
                                   float beta,
-                                  float **ptr_lod_gamma_alpha,
-                                  float **ptr_lod_gamma_beta,
-                                  float **ptr_lod_gamma_alpha_beta)
+                                  double **lod_gamma_alpha,
+                                  double **lod_gamma_beta,
+                                  double **lod_gamma_alpha_beta)
 {
-    static float *lod_gamma_alpha = NULL;
-    static float *lod_gamma_beta = NULL;
-    static float *lod_gamma_alpha_beta = NULL;
-    static float curr_alpha = NAN, curr_beta = NAN;
-    static int nlod_gamma_alpha = 1, mlod_gamma_alpha = 0;
-    static int nlod_gamma_beta = 1, mlod_gamma_beta = 0;
-    static int nlod_gamma_alpha_beta = 1, mlod_gamma_alpha_beta = 0;
+    static double *internal_lod_gamma_alpha = NULL;
+    static double *internal_lod_gamma_beta = NULL;
+    static double *internal_lod_gamma_alpha_beta = NULL;
+    static float internal_alpha = NAN, internal_beta = NAN;
+    static int mlod_gamma_alpha = 0;
+    static int mlod_gamma_beta = 0;
+    static int mlod_gamma_alpha_beta = 0;
+    static int n1 = 1, n2 = 1;
     if (ad0 == NULL && ad1 == NULL && n == 0 && imap == NULL)
     {
         free(lod_gamma_alpha);
@@ -755,13 +723,12 @@ static void precompute_lod_gammas(const int16_t *ad0,
         return;
     }
 
-    if (curr_alpha != alpha || curr_beta != beta)
+    if (internal_alpha != alpha || internal_beta != beta)
     {
-        nlod_gamma_alpha = 1;
-        nlod_gamma_beta = 1;
-        nlod_gamma_alpha_beta = 1;
-        curr_alpha = alpha;
-        curr_beta = beta;
+        n1 = 1;
+        n2 = 1;
+        internal_alpha = alpha;
+        internal_beta = beta;
     }
 
     int max1 = 0, max2 = 0;
@@ -777,36 +744,34 @@ static void precompute_lod_gammas(const int16_t *ad0,
         }
     }
 
-    if (max1 + 1 > nlod_gamma_alpha)
+    if (max1 + 1 > n1)
     {
-        hts_expand(float, max1 + 1, mlod_gamma_alpha, lod_gamma_alpha);
-        lod_gamma_alpha[0] = 0.0f;
-        float tmp = alpha;
-        for (int i=nlod_gamma_alpha; i<=max1; i++) lod_gamma_alpha[i] = lod_gamma_alpha[i-1] + logf(tmp++);
-        nlod_gamma_alpha = max1 + 1;
+        hts_expand(double, max1 + 1, mlod_gamma_alpha, internal_lod_gamma_alpha);
+        hts_expand(double, max1 + 1, mlod_gamma_beta, internal_lod_gamma_beta);
+        internal_lod_gamma_alpha[0] = 0.0f;
+        internal_lod_gamma_beta[0] = 0.0f;
+        while (n1 <= max1)
+        {
+            internal_lod_gamma_alpha[n1] = internal_lod_gamma_alpha[n1-1] + logf((alpha + n1 - 1) / n1);
+            internal_lod_gamma_beta[n1] = internal_lod_gamma_beta[n1-1] + logf((beta + n1 - 1) / n1);
+            n1++;
+        }
     }
 
-    if (max1 + 1 > nlod_gamma_beta)
+    if (max2 + 1 > n2)
     {
-        hts_expand(float, max1 + 1, mlod_gamma_beta, lod_gamma_beta);
-        lod_gamma_beta[0] = 0.0f;
-        float tmp = beta;
-        for (int i=nlod_gamma_beta; i<=max1; i++) lod_gamma_beta[i] = lod_gamma_beta[i-1] + logf(tmp++);
-        nlod_gamma_beta = max1 + 1;
+        hts_expand(double, max2 + 1, mlod_gamma_alpha_beta, internal_lod_gamma_alpha_beta);
+        internal_lod_gamma_alpha_beta[0] = 0.0f;
+        while (n2 <= max2)
+        {
+            internal_lod_gamma_alpha_beta[n2] = internal_lod_gamma_alpha_beta[n2-1] + logf((alpha + beta + n2 - 1) / n2);
+            n2++;
+        }
     }
 
-    if (max2 + 1 > nlod_gamma_alpha_beta)
-    {
-        hts_expand(float, max2 + 1, mlod_gamma_alpha_beta, lod_gamma_alpha_beta);
-        lod_gamma_alpha_beta[0] = 0.0f;
-        float tmp = alpha + beta;
-        for (int i=nlod_gamma_alpha_beta; i<=max2; i++) lod_gamma_alpha_beta[i] = lod_gamma_alpha_beta[i-1] + logf(tmp++);
-        nlod_gamma_alpha_beta = max2 + 1;
-    }
-
-    *ptr_lod_gamma_alpha = lod_gamma_alpha;
-    *ptr_lod_gamma_beta = lod_gamma_beta;
-    *ptr_lod_gamma_alpha_beta = lod_gamma_alpha_beta;
+    *lod_gamma_alpha = internal_lod_gamma_alpha;
+    *lod_gamma_beta = internal_lod_gamma_beta;
+    *lod_gamma_alpha_beta = internal_lod_gamma_alpha_beta;
 }
 
 static float *get_lrr_ad_emis(const float *lrr,
@@ -822,8 +787,7 @@ static float *get_lrr_ad_emis(const float *lrr,
                               const float *cnf,
                               int m)
 {
-    float *log_gamma = precompute_log_gammas(ad0, ad1, T, imap);
-    float *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
+    double *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
     float lrr_sd_bias = powf( lrr_sd, lrr_bias );
     float *ldev = (float *)malloc((1+m) * sizeof(float));
     ldev[0] = 0.0f;
@@ -839,7 +803,7 @@ static float *get_lrr_ad_emis(const float *lrr,
             float x = imap ? lrr[ imap[t] ] : lrr[t];
             int16_t a = imap ? ad0[ imap[t] ] : ad0[t];
             int16_t b = imap ? ad1[ imap[t] ] : ad1[t];
-            emis[t*(1+m) + i] = lkl_lrr_ad( x, a, b, ldev[i], lrr_sd, lrr_bias, lrr_sd_bias, log_gamma, lod_gamma_alpha, lod_gamma_beta, lod_gamma_alpha_beta, err_prob );
+            emis[t*(1+m) + i] = lkl_lrr_ad( x, a, b, ldev[i], lrr_sd, lrr_bias, lrr_sd_bias, lod_gamma_alpha, lod_gamma_beta, lod_gamma_alpha_beta, err_prob );
         }
     }
     free(ldev);
@@ -857,8 +821,7 @@ static float *get_ad_phase_emis(const int16_t *ad0,
                                 const float *bdev,
                                 int m)
 {
-    float *log_gamma = precompute_log_gammas(ad0, ad1, T, imap);
-    float *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
+    double *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
     float *emis = (float *)malloc((1+2*m) * T * sizeof(float));
     for (int i=0; i<1+m; i++)
     {
@@ -870,9 +833,8 @@ static float *get_ad_phase_emis(const int16_t *ad0,
             int16_t a = imap ? ad0[ imap[t] ] : ad0[t];
             int16_t b = imap ? ad1[ imap[t] ] : ad1[t];
             int8_t p = imap ? gt_phase[ imap[t] ] : gt_phase[t];
-            emis[t*(1+2*m) + i] = lkl_ad_phase( a, b, p, log_gamma, lod_gamma_alpha, lod_gamma_beta, lod_gamma_alpha_beta, err_prob );
-            if (i>0) emis[t*(1+2*m) + m + i] = lkl_ad_phase( a, b, p, log_gamma, lod_gamma_beta, lod_gamma_alpha, lod_gamma_alpha_beta, err_prob );
-// if (i>0 && p==0) { fprintf(stderr, "%.4f %.4f\n", emis[t*(1+2*m) + i], emis[t*(1+2*m) + m + i]); exit(-1); }
+            emis[t*(1+2*m) + i] = lkl_ad_phase( a, b, p, lod_gamma_alpha, lod_gamma_beta, lod_gamma_alpha_beta, err_prob );
+            if (i>0) emis[t*(1+2*m) + m + i] = lkl_ad_phase( a, b, p, lod_gamma_beta, lod_gamma_alpha, lod_gamma_alpha_beta, err_prob );
         }
     }
     return emis;
@@ -892,8 +854,7 @@ static double log10_lkl_lrr_ad(const float *lrr,
                                double cnf)
 {
     if ( n==0 || cnf < 0.0 || cnf > 4.0 ) return -INFINITY; // kmin_brent does not handle NAN
-    float *log_gamma = precompute_log_gammas(ad0, ad1, n, imap);
-    float *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
+    double *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
     float lrr_sd_bias = powf( lrr_sd, lrr_bias );
     float ldev = ( logf((float)cnf) / (float)M_LN2 - 1.0f ) * lrr_hap2dip;
     float alpha = ( 0.5f + fabsf( 0.5f - 1.0f / cnf ) ) * ( 1.0f - ad_rho ) / ad_rho;
@@ -905,7 +866,7 @@ static double log10_lkl_lrr_ad(const float *lrr,
         float x = imap ? lrr[ imap[i] ] : lrr[i];
         int16_t a = imap ? ad0[ imap[i] ] : ad0[i];
         int16_t b = imap ? ad1[ imap[i] ] : ad1[i];
-        v[i] = lkl_lrr_ad( x, a, b, ldev, lrr_sd, lrr_bias, lrr_sd_bias, log_gamma, lod_gamma_alpha, lod_gamma_beta, lod_gamma_alpha_beta, err_prob );
+        v[i] = lkl_lrr_ad( x, a, b, ldev, lrr_sd, lrr_bias, lrr_sd_bias, lod_gamma_alpha, lod_gamma_beta, lod_gamma_alpha_beta, err_prob );
     }
     float ret = 0.0f;
     sumlogf(v, n, &ret);
@@ -926,8 +887,7 @@ static double log10_lkl_ad_phase(const int16_t *ad0,
                                  double bdev)
 {
     if ( n==0 || bdev < -0.5 || bdev > 0.5 ) return -INFINITY; // kmin_brent does not handle NAN
-    float *log_gamma = precompute_log_gammas(ad0, ad1, n, imap);
-    float *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
+    double *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
     float alpha = ( 0.5f + bdev ) * ( 1.0f - ad_rho ) / ad_rho;
     float beta = ( 0.5f - bdev ) * ( 1.0f - ad_rho ) / ad_rho;
     precompute_lod_gammas(ad0, ad1, n, imap, alpha, beta, &lod_gamma_alpha, &lod_gamma_beta, &lod_gamma_alpha_beta);
@@ -938,7 +898,7 @@ static double log10_lkl_ad_phase(const int16_t *ad0,
         int16_t b = imap ? ad1[ imap[i] ] : ad1[i];
         int8_t p = imap ? gt_phase[ imap[i] ] : gt_phase[i];
         if ( bdev_phase ) p *= (int8_t)SIGN( bdev_phase[i] ); // notice bdev_phase has no imap
-        v[i] = lkl_ad_phase( a, b, p, log_gamma, lod_gamma_alpha, lod_gamma_beta, lod_gamma_alpha_beta, err_prob );
+        v[i] = lkl_ad_phase( a, b, p, lod_gamma_alpha, lod_gamma_beta, lod_gamma_alpha_beta, err_prob );
     }
     float ret = 0.0f;
     sumlogf(v, n, &ret);
@@ -962,7 +922,7 @@ static float compare_wgs_models(const int16_t *ad0,
 {
     if ( n == 0 ) return NAN;
     float *emis = get_ad_phase_emis(ad0, ad1, gt_phase, n, imap, err_prob, flip_prob, ad_rho, bdev, m);
-    int8_t *path = get_viterbi(emis, n, m, xy_prob, flip_prob, telomere_prob, 1.0f, 0, 0); // TODO can't I pass these values instead of 0 0?
+    int8_t *path = get_viterbi(emis, n, m, xy_prob, flip_prob, telomere_prob, 1.0f, 0, 0); // TODO can I not pass these values instead of 0 0?
     free(emis);
     int nflips = 0;
     for (int i=1; i<n; i++) if ( path[i-1] && path[i] && path[i-1] != path[i] ) nflips++;
@@ -980,8 +940,7 @@ static double log10_lkl_beta_binomial(const int16_t *ad0,
 {
     if ( n==0 || ad_rho <= 0.0 || ad_rho >= 1.0 ) return -INFINITY;
     float alpha = 0.5f * ( 1.0f - (float)ad_rho ) / (float)ad_rho;
-    float *log_gamma = precompute_log_gammas(ad0, ad1, n, NULL);
-    float *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
+    double *lod_gamma_alpha, *lod_gamma_beta, *lod_gamma_alpha_beta;
     precompute_lod_gammas(ad0, ad1, n, NULL, alpha, alpha, &lod_gamma_alpha, &lod_gamma_beta, &lod_gamma_alpha_beta);
     float ret = 0.0f;
     for (int i=0; i<n; i++)
@@ -989,8 +948,7 @@ static double log10_lkl_beta_binomial(const int16_t *ad0,
         int16_t a = ad0[i];
         int16_t b = ad1[i];
         if ( a!=INT16_NAN && b!=INT16_NAN )
-            ret += lod_gamma_alpha[a] + lod_gamma_beta[b] - lod_gamma_alpha_beta[a+b] +
-                   log_gamma[a+b] - log_gamma[a] - log_gamma[b];
+            ret += lod_gamma_alpha[a] + lod_gamma_beta[b] - lod_gamma_alpha_beta[a+b];
     }
     return (double)ret / M_LN10;
 }
@@ -1946,7 +1904,7 @@ static int get_path_segs(const int8_t *path, int n, int except, int **beg, int *
             // if two consecutive segments have consecutive HMM states
             if ( abs( curr - next ) == 1 )
             {
-                // if the consecutive HMM states are non-zero and don't correspond to consecutive deletions and duplications
+                // if the consecutive HMM states are non-zero and do not correspond to consecutive deletions and duplications
                 if ( curr && next && ( ( curr != except && curr != except+1 ) || ( next != except && next != except+1 ) ) )
                 {
                     free(*beg);
@@ -2748,7 +2706,6 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
  * MAIN PART OF THE COMMAND      *
  *********************************/
 
-// TODO add examples at the end of the usage section
 static void usage()
 {
     fprintf(stderr, "\n");
@@ -2800,10 +2757,14 @@ static void usage()
     fprintf(stderr, "                                      regression of LRR (-1 for no LRR adjustment, %d maximum) [%d]\n", MAX_ORDER, order_lrr_gc_default);
     fprintf(stderr, "\n");
     fprintf(stderr, "Examples:\n");
+    fprintf(stderr, "    bcftools mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed\n");
+    fprintf(stderr, "    bcftools mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -n 1.0 --LRR-weight 0.5\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Publications:\n");
-    fprintf(stderr, "    Loh P., Genovese G., McCarroll S., Price A. et al. Insights about clonal expansions from 8,342 mosaic\n");
-    fprintf(stderr, "    chromosomal alterations. Nature 559, 350–355 (2018). [PMID: 29995854] [DOI: 10.1038/s41586-018-0321-x]\n");
+    fprintf(stderr, "    Loh P., Genovese G., McCarroll S., Price A. et al. Insights about clonal expansions\n");
+    fprintf(stderr, "    from 8,342 mosaic chromosomal alterations. Nature 559, 350–355 (2018)\n");
+    fprintf(stderr, "    [PubMed: http://www.ncbi.nlm.nih.gov/pubmed/29995854]\n");
+    fprintf(stderr, "    [DOI: http://doi.org/10.1038/s41586-018-0321-x]\n");
     fprintf(stderr, "\n");
     exit(1);
 }
@@ -3123,7 +3084,7 @@ int main_vcfmocha(int argc, char *argv[])
     if (output_fname)
     {
         out_fh = hts_open(output_fname, hts_bcf_wmode(output_type));
-        if ( out_fh == NULL ) error("Can't write to \"%s\": %s\n", output_fname, strerror(errno));
+        if ( out_fh == NULL ) error("Cannot write to \"%s\": %s\n", output_fname, strerror(errno));
         if ( n_threads ) hts_set_opt(out_fh, HTS_OPT_THREAD_POOL, sr->p);
         out_hdr = print_hdr(out_fh, hdr, argc, argv, record_cmd_line, flags);
     }
@@ -3204,7 +3165,6 @@ int main_vcfmocha(int argc, char *argv[])
 
     // free precomputed tables
     ad_to_lrr(NULL, NULL, 0);
-    precompute_log_gammas(NULL, NULL, 0, NULL);
     precompute_lod_gammas(NULL, NULL, 0, NULL, NAN, NAN, NULL, NULL, NULL);
 
     // write table with mosaic chromosomal alterations (and UCSC bed track)
