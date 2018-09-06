@@ -71,10 +71,10 @@ sudo apt-get install wget liblzma-dev libbz2-dev libgsl0-dev gzip samtools unzip
 
 Preparation steps
 ```
-mkdir -p $HOME/bin $HOME/res $HOME/res/chrs && cd /tmp
+mkdir -p $HOME/bin $HOME/res $HOME/res/kgp && cd /tmp
 ```
 
-Download latest version of `htslib` and `bcftools` (if not downloaded already)
+Download latest version of <a href="https://github.com/samtools/htslib">`htslib`</a> and <a href="https://github.com/samtools/bcftools">`bcftools`</a> (if not downloaded already)
 ```
 git clone --branch=develop git://github.com/samtools/htslib.git
 git clone --branch=develop git://github.com/samtools/bcftools.git
@@ -98,6 +98,7 @@ Notice that you will need some functionalities missing from the base version of 
 Install latest version of <a href="https://data.broadinstitute.org/alkesgroup/Eagle/">`eagle`</a>
 ```
 wget -O $HOME/bin/eagle https://data.broadinstitute.org/alkesgroup/Eagle/downloads/dev/eagle_v2.4
+chmod a+x $HOME/bin/eagle
 ```
 
 Download resources for GRCh37
@@ -117,12 +118,13 @@ wget -P $HOME/res https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tab
 
 1000 Genomes project phase 3
 ```
-cd $HOME/res/chrs
-wget http://bochet.gcc.biostat.washington.edu/beagle/1000_Genomes_phase3_v5a/chr{1-4,5-9,10-15,16-22X}.1kg.phase3.v5a.{bref,vcf}.zip
-for chrs in 1-4 5-9 10-15 16-22X; do unzip chr$chrs.1kg.phase3.v5a.vcf.zip; done
-for chr in {1..22} X; do
-  $HOME/bin/bcftools view --no-version -Ob chr$chr.1kg.phase3.v5a.vcf.gz -o chr$chr.1kg.phase3.v5a.bcf && \
-  $HOME/bin/bcftools index -f chr$chr.1kg.phase3.v5a.bcf
+cd $HOME/res/kgp
+wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr{{1..22}.phase3_shapeit2_mvncall_integrated_v5a,X.phase3_shapeit2_mvncall_integrated_v1b,Y.phase3_integrated_v2a}.20130502.genotypes.vcf.gz{,.tbi}
+for chr in {1..22} X Y; do
+  bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][ab].20130502.genotypes.vcf.gz | \
+  bcftools norm --no-version -Ou -m -any | \
+  bcftools norm --no-version -Ob -o ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf -d none -f $HOME/res/human_g1k_v37.fasta && \
+  bcftools index -f ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf
 done
 ```
 
@@ -133,7 +135,7 @@ bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || S
   -f "%CHROM\t%POS\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/res/cnp.grch37.bed
 ```
 
-List of segmental duplications (make sure your bedtools version is not affected by bug https://github.com/arq5x/bedtools2/issues/418)
+List of segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
 ```
 wget -O- http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/genomicSuperDups.txt.gz | gzip -d |
   awk '!($2=="chrX" && $8=="chrY" || $2=="chrY" && $8=="chrX") {print $2"\t"$3"\t"$4"\t"$30}' > genomicSuperDups.bed
@@ -154,8 +156,8 @@ Setup variables
 ```
 ref="$HOME/res/human_g1k_v37.fasta"
 map="$HOME/res/genetic_map_hg19_withX.txt.gz"
-kgp_pfx="$HOME/res/chrs/chr"
-kgp_sfx=".1kg.phase3.v5a.bcf"
+kgp_pfx="$HOME/res/kgp/ALL.chr"
+kgp_sfx=".phase3_integrated.20130502.genotypes.bcf"
 rule="GRCh37"
 cnp="$HOME/res/cnp.grch37.bed"
 dup="$HOME/res/dup.grch37.bed.gz"
@@ -178,7 +180,7 @@ wget -P $HOME/res https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tab
 
 1000 Genomes project phase 3 (fixing contig names and removing duplicate variants)
 ```
-cd $HOME/res/chrs
+cd $HOME/res/kgp
 wget http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/ALL.chr{{1..22},X,Y}_GRCh38.genotypes.20170504.vcf.gz{,.tbi}
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 for chr in {1..22} X Y; do
@@ -228,7 +230,7 @@ Setup variables
 ```
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 map="$HOME/res/genetic_map_hg38_withX.txt.gz"
-kgp_pfx="$HOME/res/chrs/ALL.chr"
+kgp_pfx="$HOME/res/kgp/ALL.chr"
 kgp_sfx="_GRCh38.genotypes.20170504.bcf"
 rule="GRCh38"
 cnp="$HOME/res/cnp.grch38.bed"
@@ -240,7 +242,7 @@ Data preparation
 
 Preparation steps
 ```
-tbl="..." # input Illumina GenomeStudio table
+tbl="..." # input Illumina GenomeStudio table (optional)
 vcf="..." # input VCF file with phased GT, LRR, and BAF
 pfx="..." # output prefix
 thr="..." # number of threads to use
@@ -251,7 +253,7 @@ dir="..." # directory where output files will be generated
 mkdir -p $dir
 ```
 
-If you want to process <b>genotype</b> array data you need a VCF file with GT, BAF, and LRR information:
+If you want to process <b>genotype array</b> data you need a VCF file with GT, BAF, and LRR information:
 ```
 ##fileformat=VCFv4.2
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
@@ -273,7 +275,7 @@ $HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf -x ID,QUA
   $HOME/bin/bcftools index -f $dir/$pfx.unphased.bcf
 ```
 
-If you want to process <b>whole-genome</b> sequence data you need a VCF file with GT and AD information:
+If you want to process <b>whole-genome sequence</b> data you need a VCF file with GT and AD information:
 ```
 ##fileformat=VCFv4.2
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
@@ -284,7 +286,7 @@ If you want to process <b>whole-genome</b> sequence data you need a VCF file wit
 1	798959	rs11240777	G	A	.	.	.	GT:AD	0|0:31,0
 1	932457	rs1891910	G	A	.	.	.	GT:AD	1|0:18,14
 ```
-Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will be not <a href="https://github.com/samtools/bcftools/issues/360">properly split</a>.
+Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will be not <a href="https://github.com/samtools/bcftools/issues/360">split properly</a>.
 
 Create a minimal binary VCF
 ```
@@ -322,14 +324,14 @@ Plugin options:
 
 Perform basic quality control (the generated list of variants will be excluded from modeling by both eagle and mocha)
 ```
-n=$(bcftools query -l $dir/$pfx.unphased.bcf|wc -l)
-ns=$((n*98/100))
+n=$(bcftools query -l $dir/$pfx.unphased.bcf|wc -l); \
+ns=$((n*98/100)); \
 echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
   $HOME/bin/bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
   $HOME/bin/bcftools +$HOME/bin/fill-tags.so --no-version -Ou -- -t NS,ExcHet | \
   $HOME/bin/bcftools +$HOME/bin/mochatools.so --no-version -Ou -- -x $sex -G | \
   $HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
-    -i "FILTER!=\".\" && FILTER!=\"PASS\" || JK<.02 || NS<$ns || ExcHet<1e-6 || AC_Sex_Test>6" \
+    -i 'FILTER!="." && FILTER!="PASS" || JK<.02 || NS<'$ns' || ExcHet<1e-6 || AC_Sex_Test>6' \
     -x FILTER,^INFO/JK,^INFO/NS,^INFO/ExcHet,^INFO/AC_Sex_Test && \
   $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 ```
@@ -338,7 +340,7 @@ This command will create a list of variants falling within segmental duplication
 If a file with additional variants to be excluded is available, further merge it with the generated list
 ```
 /bin/mv $dir/$pfx.xcl.bcf $dir/$pfx.xcl.tmp.bcf && \
-/bin/mv	$dir/$pfx.xcl.bcf.csi $dir/$pfx.xcl.tmp.bcf.csi && \
+/bin/mv $dir/$pfx.xcl.bcf.csi $dir/$pfx.xcl.tmp.bcf.csi && \
 $HOME/bin/bcftools merge --no-version -Ob -o $dir/$pfx.xcl.bcf $dir/$pfx.xcl.tmp.bcf $xcl && \
 $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 ```
@@ -354,7 +356,7 @@ for chr in {1..22} X; do
     --chrom $chr \
     --outPrefix $dir/$pfx.chr$chr \
     --numThreads $thr \
-    --vcfRef $kgp_pfx$chr$kgp_sfx \
+    --vcfRef $kgp_pfx${chr}$kgp_sfx \
     --vcfTarget $dir/$pfx.unphased.bcf \
     --vcfOutFormat b \
     --noImpMissing \
@@ -405,6 +407,7 @@ lst="..." # file with list of samples to analyze for asymmetries (e.g. samples w
 Call mosaic chromosomal alterations with `mocha`
 ```
 $HOME/bin/bcftools mocha \
+  -r $rule \
   --no-version -Ob \
   -o $dir/$pfx.mocha.bcf \
   --threads $thr \
@@ -412,7 +415,6 @@ $HOME/bin/bcftools mocha \
   -m $dir/$pfx.mocha.tsv \
   -g $dir/$pfx.stats.tsv \
   -u $dir/$pfx.ucsc.bed \
-  -r $rule \
   -p $cnp \
   $dir/$pfx.bcf && \
 $HOME/bin/bcftools index -f $dir/$pfx.mocha.bcf
