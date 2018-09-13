@@ -108,7 +108,12 @@ static void parse_sex(args_t *args, char *fname)
         if ( ncols<2 ) error("Could not parse the sex file: %s\n", str.s);
 
         int sample = bcf_hdr_id2int(args->in_hdr, BCF_DT_SAMPLE, &str.s[off[0]]);
-        if ( sample>=0 ) args->sex[sample] = (int)strtol(&str.s[off[1]], &tmp, 0);
+        if ( sample>=0 )
+        {
+            if (str.s[off[1]]=='M') args->sex[sample] = 1;
+            else if (str.s[off[1]]=='F') args->sex[sample] = 2;
+            else args->sex[sample] = (int)strtol(&str.s[off[1]], &tmp, 0);
+        }
     } while ( hts_getline(fp, KS_SEP_LINE, &str)>=0 );
 
     free(str.s);
