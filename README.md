@@ -87,7 +87,7 @@ wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master
 cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.patch && cd ..
 ```
 
-Compile latest version of `htslib` (optionally disable `bz2` and `lzma`) and `bcftools`
+Compile latest version of `htslib` (optionally disable `bz2` and `lzma`) and `bcftools` (make sure you are using gcc version 5 or newer)
 ```
 cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-lzma && make && cd ..
 cd bcftools && make && cd ..
@@ -209,7 +209,7 @@ bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || S
     /dev/stderr
 ```
 
-List of segmental duplications (make sure your bedtools version is not affected by bug https://github.com/arq5x/bedtools2/issues/418)
+List of segmental duplications (make sure your bedtools version is not affected by the <a href="https://github.com/arq5x/bedtools2/issues/418">groupby bug</a>)
 ```
 wget -O- http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/genomicSuperDups.txt.gz | gzip -d |
   awk '!($2=="chrX" && $8=="chrY" || $2=="chrY" && $8=="chrX") {print $2"\t"$3"\t"$4"\t"$30}' > genomicSuperDups.bed
@@ -242,7 +242,6 @@ Data preparation
 
 Preparation steps
 ```
-tbl="..." # input Illumina GenomeStudio table (optional)
 vcf="..." # input VCF file with phased GT, LRR, and BAF
 pfx="..." # output prefix
 thr="..." # number of threads to use
@@ -267,7 +266,7 @@ If you want to process <b>genotype array</b> data you need a VCF file with GT, B
 ```
 Making sure that BAF refers to the allele frequency of what in the VCF is indicated as the alternate allele.
 
-If you do not already have a VCF file but you have Illumina genotype array data, you can use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> plugin to convert the data to VCF. Alternatively you can use your own scripts.
+If you do not already have a VCF file but you have Illumina or Affymetrix genotype array data, you can use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> tools to convert the data to VCF. Alternatively you can use your own scripts.
 
 Create a minimal binary VCF
 ```
@@ -465,4 +464,11 @@ Plot mosaic chromosomal alterations
 for sm in $($HOME/bin/bcftools query -l $dir/$pfx.mocha.bcf | tr ' ' '_'); do
   $HOME/bin/plot_mocha.R $dir/$sm.pdf $dir/$sm.bcf
 done
+```
+
+Acknowledgements
+================
+
+```
+This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244)
 ```
