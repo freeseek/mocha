@@ -1,3 +1,5 @@
+2018-08-24: added removal of variants within segmental duplications in the quality control step
+2018-08-21: initial release of fully functioning WGS model
 2018-07-04: included code that allows to run Illumina AutoCall software on Linux using free tools
 2018-06-29: fixed several bugs in GTCtoVCF and a critical bug in fixref to correctly handle TOP/BOT Illumina strand
 2018-06-24: added a GTCtoVCF plugin that should allow users to convert Illumina binary files into binary VCFs
