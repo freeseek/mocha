@@ -55,7 +55,7 @@ typedef kvec_t(float) kv_float;
 
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2018-08-21"
+#define MOCHA_VERSION "2018-09-12"
 
 #define FLT_INCLUDE  (1<<0)
 #define FLT_EXCLUDE  (1<<1)
@@ -752,8 +752,8 @@ static void precompute_lod_gammas(const int16_t *ad0,
         internal_lod_gamma_beta[0] = 0.0f;
         while (n1 <= max1)
         {
-            internal_lod_gamma_alpha[n1] = internal_lod_gamma_alpha[n1-1] + logf((alpha + n1 - 1) / n1);
-            internal_lod_gamma_beta[n1] = internal_lod_gamma_beta[n1-1] + logf((beta + n1 - 1) / n1);
+            internal_lod_gamma_alpha[n1] = internal_lod_gamma_alpha[n1-1] + logf((alpha + (float)n1 - 1.0f) / (float)n1);
+            internal_lod_gamma_beta[n1] = internal_lod_gamma_beta[n1-1] + logf((beta + (float)n1 - 1.0f) / (float)n1);
             n1++;
         }
     }
@@ -995,10 +995,29 @@ static float get_baf_conc(const float *baf, const int8_t *gt_phase, int n, const
     return (float)a/(float)(a+b);
 }
 
+// compute phased BAF autocorrelation for a float array with iterator
+static float get_baf_auto_corr(const float *baf, const int8_t *gt_phase, int n, const int *imap)
+{
+    double var = 0.0, auto_corr = 0.0;
+    float prev = NAN, next = NAN;
+    for (int i=0; i<n; i++)
+    {
+        next = ( ( imap ? baf[ imap[i] ] : baf[i] ) - 0.5f ) * ( imap ? gt_phase[ imap[i] ] : gt_phase[i] );
+        if (!isnan(next))
+        {
+            var += sq((double)next);
+            if (!isnan(prev)) auto_corr += prev * next;
+            prev = next;
+        }
+    }
+    auto_corr /= var;
+    return auto_corr;
+}
+
 static float get_sample_sd(const float *v, int n, const int *imap);
 
 // compute (adjusted) LRR autocorrelation for a float array with iterator
-static float get_lrr_auto(const float *lrr, int n, const int *imap)
+static float get_lrr_auto_corr(const float *lrr, int n, const int *imap)
 {
     float value;
     double mean = 0.0;
@@ -1609,12 +1628,13 @@ typedef struct
 {
     int idx;
     int sex;
-    float baf_sd;
     float lrr_median;
     float lrr_sd;
-    float adjlrr_sd;
-    float baf_conc;
+    float adjlrr_sd; // this is not output as it is lrr_sd * sqrt( 1 - rel_ess )
     float lrr_auto;
+    float baf_sd;
+    float baf_conc;
+    float baf_auto;
     int nhets;
     int x_nonpar_nhets;
     float x_nonpar_lrr_median;
@@ -1624,9 +1644,10 @@ typedef struct
 
     kv_float kv_lrr_median;
     kv_float kv_lrr_sd;
+    kv_float kv_lrr_auto;
     kv_float kv_baf_sd;
     kv_float kv_baf_conc;
-    kv_float kv_lrr_auto;
+    kv_float kv_baf_auto;
 
     // LRR polynomial regression parameters
     float coeffs[MAX_ORDER+1];
@@ -1662,17 +1683,17 @@ static void mocha_print_ucsc(const mocha_t *mocha, int n, FILE *restrict stream,
             {
                 const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha[j].sample_idx);
                 const char *seq_name = bcf_hdr_id2name(hdr, mocha[j].rid);
-                if ( strncmp(seq_name, "chr", 3) == 0 ) fprintf(stream, "%s\t%d\t%d\t%s\t0\t.\t%d\t%d\t%s\n", seq_name,
-                    mocha[j].beg_pos, mocha[j].end_pos, sample_name, mocha[j].beg_pos, mocha[j].end_pos, color[i]);
-                else fprintf(stream, "chr%s\t%d\t%d\t%s\t0\t.\t%d\t%d\t%s\n", seq_name, mocha[j].beg_pos,
-                    mocha[j].end_pos, sample_name, mocha[j].beg_pos, mocha[j].end_pos, color[i]);
+                if ( strncmp(seq_name, "chr", 3) == 0 ) fprintf(stream, "%s\t%d\t%d\t%s\t%d\t.\t%d\t%d\t%s\n", seq_name,
+                    mocha[j].beg_pos, mocha[j].end_pos, sample_name, (int)(1e3*mocha[j].cf), mocha[j].beg_pos, mocha[j].end_pos, color[i]);
+                else fprintf(stream, "chr%s\t%d\t%d\t%s\t%d\t.\t%d\t%d\t%s\n", seq_name, mocha[j].beg_pos,
+                    mocha[j].end_pos, sample_name, (int)(1e3*mocha[j].cf), mocha[j].beg_pos, mocha[j].end_pos, color[i]);
             }
         }
     }
     if (stream != stdout && stream != stderr) fclose(stream);
 }
 
-static void mocha_print(const mocha_t *mocha, int n, FILE *restrict stream, const bcf_hdr_t *hdr, int flags)
+static void mocha_print(const mocha_t *mocha, int n, FILE *restrict stream, const bcf_hdr_t *hdr, int flags, char *rules)
 {
     if (stream == NULL) return;
     char sex[3];
@@ -1692,7 +1713,7 @@ static void mocha_print(const mocha_t *mocha, int n, FILE *restrict stream, cons
     arm_type[MOCHA_TEL] = 'T';
     if ( flags & WGS_DATA )
     {
-        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG\tEND\tLENGTH\tP\tQ\tNSITES\tHETS\tN50_HETS\tCNF\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n");
+        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG (%s)\tEND (%s)\tLENGTH\tP\tQ\tNSITES\tHETS\tN50_HETS\tCNF\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
@@ -1707,7 +1728,7 @@ static void mocha_print(const mocha_t *mocha, int n, FILE *restrict stream, cons
     }
     else
     {
-        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG\tEND\tLENGTH\tP\tQ\tNSITES\tHETS\tN50_HETS\tCNF\tBDEV\tBDEV_SE\tLDEV\tLDEV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n");
+        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG (%s)\tEND (%s)\tLENGTH\tP\tQ\tNSITES\tHETS\tN50_HETS\tCNF\tBDEV\tBDEV_SE\tLDEV\tLDEV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
@@ -1790,7 +1811,7 @@ static int8_t mocha_type(float ldev, float ldev_se, float bdev, float bdev_se, f
     if (ldev > 0)
     {
         if ( z2_upd > 5.0 ) return MOCHA_DUP;
-        if ( !isnan(bdev) )
+        if ( !(isnan(bdev) || isnan(bdev_se)) )
         {
             float z2_dup = sqf( (ldev - 2.0f * M_LOG2E * lrr_hap2dip * bdev ) / ldev_se ) * 0.5f;
             if (z2_upd > z2_dup + 3.0f) return MOCHA_DUP;
@@ -1800,7 +1821,7 @@ static int8_t mocha_type(float ldev, float ldev_se, float bdev, float bdev_se, f
     else
     {
         if ( z2_upd > 5.0 ) return MOCHA_DEL;
-        if ( !isnan(bdev) )
+        if ( !(isnan(bdev) || isnan(bdev_se)) )
         {
             float z2_del = sqf( (ldev + 2.0f * M_LOG2E * lrr_hap2dip * bdev) / ldev_se ) * 0.5f;
             if (z2_upd > z2_del + 3.0f) return MOCHA_DEL;
@@ -1814,16 +1835,16 @@ static int8_t mocha_type(float ldev, float ldev_se, float bdev, float bdev_se, f
 // BDEV = | 1 / 2 - 1 / CNF |
 // CNF = 2 / ( 1 + 2 x BDEV ) for deletions
 // CNF = 2 / ( 1 - 2 x BDEV ) for duplications
-static float mocha_cellfraction(float ldev, float ldev_se, float bdev, float bdev_se, int8_t type, float lrr_hap2dip)
+static float mocha_cell_fraction(float ldev, float ldev_se, float bdev, float bdev_se, int8_t type, float lrr_hap2dip)
 {
-    if (isnan(bdev))
+    if (isnan(bdev) || isnan(bdev_se))
     {
         switch (type)
         {
             case MOCHA_DEL:
-                return -ldev / lrr_hap2dip;
+                return -2.0f * (expf( ldev / lrr_hap2dip * (float)M_LN2 ) - 1.0f);
             case MOCHA_DUP:
-                return ldev / lrr_hap2dip;
+                return 2.0f * (expf( ldev / lrr_hap2dip * (float)M_LN2 ) - 1.0f);
             default:
                 return NAN;
         }
@@ -2178,7 +2199,7 @@ static void sample_contig_run(sample_t *self, kv_mocha_t *kv_mocha, const contig
             }
 
             mocha.type = mocha_type(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.bdev_se, model_param->lrr_hap2dip, mocha.p_arm, mocha.q_arm);
-            mocha.cf = mocha_cellfraction(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.bdev_se, mocha.type, model_param->lrr_hap2dip);
+            mocha.cf = mocha_cell_fraction(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.bdev_se, mocha.type, model_param->lrr_hap2dip);
             kv_push(mocha_t, *kv_mocha, mocha);
 
             // update information that will be stored in the output VCF and make remaining sites NAN
@@ -2268,14 +2289,16 @@ static float sample_stats(sample_t *self, int n, model_param_t *model_param, int
     {
         self[i].lrr_median = get_median( self[i].kv_lrr_median.a, self[i].kv_lrr_median.n, NULL );
         self[i].lrr_sd = get_median( self[i].kv_lrr_sd.a, self[i].kv_lrr_sd.n, NULL );
+        self[i].lrr_auto = get_median( self[i].kv_lrr_auto.a, self[i].kv_lrr_auto.n, NULL );
         self[i].baf_sd = get_median( self[i].kv_baf_sd.a, self[i].kv_baf_sd.n, NULL );
         self[i].baf_conc = get_median( self[i].kv_baf_conc.a, self[i].kv_baf_conc.n, NULL );
-        self[i].lrr_auto = get_median( self[i].kv_lrr_auto.a, self[i].kv_lrr_auto.n, NULL );
+        self[i].baf_auto = get_median( self[i].kv_baf_auto.a, self[i].kv_baf_auto.n, NULL );
         free(self[i].kv_lrr_median.a);
         free(self[i].kv_lrr_sd.a);
+        free(self[i].kv_lrr_auto.a);
         free(self[i].kv_baf_sd.a);
         free(self[i].kv_baf_conc.a);
-        free(self[i].kv_lrr_auto.a);
+        free(self[i].kv_baf_auto.a);
 
         self[i].adjlrr_sd = self[i].lrr_sd;
         if ( model_param->order_lrr_gc == 0 )
@@ -2397,6 +2420,7 @@ static void sample_contig_stats(sample_t *self, const contig_param_t *contig_par
         kv_push(float, self->kv_lrr_sd, get_sample_sd( lrr, self->contig.size, NULL ) );
 
         kv_push(float, self->kv_baf_conc, get_baf_conc( baf, self->contig.gt_phase, self->contig.size, NULL ) );
+        kv_push(float, self->kv_baf_auto, get_baf_auto_corr( baf, self->contig.gt_phase, self->contig.size, NULL ) );
         if ( model_param->order_lrr_gc == 0 )
         {
             kv_push(float, self->kv_coeffs, get_median( lrr, self->contig.size, NULL ) );
@@ -2415,7 +2439,7 @@ static void sample_contig_stats(sample_t *self, const contig_param_t *contig_par
             kv_push(float, self->kv_rel_ess, 1.0f - rss / tss );
         }
         // compute autocorrelation after GC correction
-        kv_push(float, self->kv_lrr_auto, get_lrr_auto( lrr, self->contig.size, NULL ) );
+        kv_push(float, self->kv_lrr_auto, get_lrr_auto_corr( lrr, self->contig.size, NULL ) );
     }
 
     free(self->contig.vcf_imap);
@@ -2438,26 +2462,26 @@ static void sample_print(const sample_t *self, int n, FILE *restrict stream, con
     sex[SEX_FEM] = 'F';
     if ( flags & WGS_DATA )
     {
-        fprintf(stream, "SAMPLE\tCOV_MEDIAN\tCOV_SD\tBAF_CORR\tBAF_CONC\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_COV_MEDIAN\tY_NONPAR_COV_MEDIAN\tMT_COV_MEDIAN\tSEX\tREL_ESS\tCOV_AUTO\n");
+        fprintf(stream, "SAMPLE\tCOV_MEDIAN\tCOV_SD\tCOV_AUTO\tBAF_CORR\tBAF_CONC\tBAF_AUTO\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_COV_MEDIAN\tY_NONPAR_COV_MEDIAN\tMT_COV_MEDIAN\tSEX\tREL_ESS\n");
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, self[i].idx);
-            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\t%.4f\n", sample_name, expf(self[i].lrr_median),
-            expf(self[i].lrr_median)*self[i].lrr_sd, self[i].baf_sd, self[i].baf_conc, self[i].nhets, self[i].x_nonpar_nhets,
-            expf(self[i].x_nonpar_lrr_median), expf(self[i].y_nonpar_lrr_median), expf(self[i].mt_lrr_median), sex[self[i].sex],
-            self[i].rel_ess, self[i].lrr_auto);
+            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\n", sample_name,
+            expf(self[i].lrr_median), expf(self[i].lrr_median)*self[i].lrr_sd, self[i].lrr_auto, self[i].baf_sd,
+            self[i].baf_conc, self[i].baf_auto, self[i].nhets, self[i].x_nonpar_nhets, expf(self[i].x_nonpar_lrr_median),
+            expf(self[i].y_nonpar_lrr_median), expf(self[i].mt_lrr_median), sex[self[i].sex], self[i].rel_ess);
         }
     }
     else
     {
-        fprintf(stream, "SAMPLE\tLRR_MEDIAN\tLRR_SD\tBAF_SD\tBAF_CONC\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_LRR_MEDIAN\tY_NONPAR_LRR_MEDIAN\tMT_LRR_MEDIAN\tSEX\tREL_ESS\tLRR_AUTO\n");
+        fprintf(stream, "SAMPLE\tLRR_MEDIAN\tLRR_SD\tLRR_AUTO\tBAF_SD\tBAF_CONC\tBAF_AUTO\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_LRR_MEDIAN\tY_NONPAR_LRR_MEDIAN\tMT_LRR_MEDIAN\tSEX\tREL_ESS\n");
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, self[i].idx);
-            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\t%.4f\n", sample_name, self[i].lrr_median,
-            self[i].lrr_sd, self[i].baf_sd, self[i].baf_conc, self[i].nhets, self[i].x_nonpar_nhets,
-            self[i].x_nonpar_lrr_median, self[i].y_nonpar_lrr_median, self[i].mt_lrr_median, sex[self[i].sex],
-            self[i].rel_ess, self[i].lrr_auto);
+            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\n", sample_name,
+            self[i].lrr_median, self[i].lrr_sd, self[i].lrr_auto, self[i].baf_sd, self[i].baf_conc, self[i].baf_auto,
+            self[i].nhets, self[i].x_nonpar_nhets, self[i].x_nonpar_lrr_median, self[i].y_nonpar_lrr_median,
+            self[i].mt_lrr_median, sex[self[i].sex], self[i].rel_ess);
         }
     }
     if (stream != stdout && stream != stderr) fclose(stream);
@@ -2523,7 +2547,7 @@ static int put_contig(bcf_srs_t *sr, int rid, const sample_t *sample, const cont
         }
         bcf_update_format_int32(out_hdr, line, "Bdev_Phase", bdev_phase, (int)nsmpl);
 
-        bcf_write(out_fh, out_hdr, line);
+        if ( bcf_write(out_fh, out_hdr, line) < 0 ) error("Unable to write to output VCF file\n");
     }
 
     free(synced_iter);
@@ -2548,7 +2572,7 @@ static bcf_hdr_t *print_hdr(htsFile *out_fh, bcf_hdr_t *hdr, int argc, char *arg
     if ( bcf_hdr_id2int(out_hdr, BCF_DT_ID, "Bdev_Phase") < 0 )
         bcf_hdr_append(out_hdr, "##FORMAT=<ID=Bdev_Phase,Number=1,Type=Integer,Description=\"BAF deviation phase, if available\">");
     if (record_cmd_line) bcf_hdr_append_version(out_hdr, argc, argv, "bcftools_mocha");
-    bcf_hdr_write(out_fh, out_hdr);
+    if ( bcf_hdr_write(out_fh, out_hdr) < 0 ) error("Unable to write to output VCF file\n");
     return out_hdr;
 }
 
@@ -2872,7 +2896,7 @@ int main_vcfmocha(int argc, char *argv[])
         {"flip-prob", required_argument, NULL, 'f'},
         {"centromere-penalty", required_argument, NULL, 'c'},
         {"telomere-advantage", required_argument, NULL, 't'},
-        {"cnf", required_argument, NULL, 'c'},
+        {"cnf", required_argument, NULL, 'n'},
         {"bdev", required_argument, NULL, 'b'},
         {"min-dist", required_argument, NULL, 'd'},
         {"LRR-hap2dip", required_argument, NULL, 2},
@@ -3168,7 +3192,7 @@ int main_vcfmocha(int argc, char *argv[])
     precompute_lod_gammas(NULL, NULL, 0, NULL, NAN, NAN, NULL, NULL, NULL);
 
     // write table with mosaic chromosomal alterations (and UCSC bed track)
-    mocha_print(kv_mocha.a, kv_mocha.n, out_fm, hdr, flags);
+    mocha_print(kv_mocha.a, kv_mocha.n, out_fm, hdr, flags, rules);
     mocha_print_ucsc(kv_mocha.a, kv_mocha.n, out_fu, hdr);
     free(kv_mocha.a);
 
