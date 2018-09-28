@@ -66,7 +66,7 @@ Installation
 
 Install basic tools (Debian/Ubuntu specific):
 ```
-sudo apt-get install wget liblzma-dev libbz2-dev libgsl0-dev gzip samtools unzip bedtools
+sudo apt install wget liblzma-dev libbz2-dev libgsl0-dev gzip unzip samtools bedtools
 ```
 
 Preparation steps
@@ -99,6 +99,17 @@ Install latest version of <a href="https://data.broadinstitute.org/alkesgroup/Ea
 ```
 wget -O $HOME/bin/eagle https://data.broadinstitute.org/alkesgroup/Eagle/downloads/dev/eagle_v2.4
 chmod a+x $HOME/bin/eagle
+```
+
+Install Minimac3 (optional)
+```diff
+- git clone git://github.com/statgen/Minimac3.git
+- cd Minimac3
+- sed -i 's/USER_WARNINGS ?= -Werror/USER_WARNINGS ?= -Wno-format-truncation/' Library/libStatGenForMinimac3/general/Makefile
+- sed -i 's/bool legacy_count = 0/int legacy_count = 0/' Library/libStatGenForMinimac3/general/Parameters.cpp
+- make
+- cd ..
+- /bin/cp Minimac3/Minimac3 $HOME/bin/
 ```
 
 Download resources for GRCh37
@@ -152,12 +163,22 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
   tabix -f -p bed $HOME/res/dup.grch37.bed.gz
 ```
 
+1000 Genomes project phase 3 imputation panel for Minimac3 (optional)
+```diff
+- cd $HOME/res/kgp
+- for chr in {1..22} X; do
+-   $HOME/bin/bcftools view --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -o tmp.chr$chr.GRCh37.vcf
+-   $HOME/bin/Minimac3 --refHaps tmp.chr$chr.GRCh37.vcf --processReference --myChromosome $chr --prefix ALL.chr$chr.phase3_integrated.20130502.genotypes
+-   /bin/rm tmp.chr$chr.GRCh37.vcf
+- done
+```
+
 Setup variables
 ```
 ref="$HOME/res/human_g1k_v37.fasta"
 map="$HOME/res/genetic_map_hg19_withX.txt.gz"
 kgp_pfx="$HOME/res/kgp/ALL.chr"
-kgp_sfx=".phase3_integrated.20130502.genotypes.bcf"
+kgp_sfx=".phase3_integrated.20130502.genotypes"
 rule="GRCh37"
 cnp="$HOME/res/cnp.grch37.bed"
 dup="$HOME/res/dup.grch37.bed.gz"
@@ -178,7 +199,7 @@ Genetic map
 wget -P $HOME/res https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz
 ```
 
-1000 Genomes project phase 3 (fixing contig names and removing duplicate variants)
+1000 Genomes project phase 3 (fixing contig names, removing duplicate variants, removing incomplete variants)
 ```
 cd $HOME/res/kgp
 wget http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/ALL.chr{{1..22},X,Y}_GRCh38.genotypes.20170504.vcf.gz{,.tbi}
@@ -186,7 +207,8 @@ ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 for chr in {1..22} X Y; do
   ($HOME/bin/bcftools view --no-version -h ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
     grep -v "^##contig=<ID=[GNh]" | sed 's/^##contig=<ID=MT/##contig=<ID=chrM/;s/^##contig=<ID=\([0-9XY]\)/##contig=<ID=chr\1/'; \
-  $HOME/bin/bcftools view --no-version -H -c 2 ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | sed 's/^/chr/') | \
+  $HOME/bin/bcftools view --no-version -H -c 2 ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
+  grep -v "[0-9]|\.\|\.|[0-9]" | sed 's/^/chr/') | \
   $HOME/bin/bcftools norm --no-version -Ou -m -any | \
   $HOME/bin/bcftools norm --no-version -Ob -o ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -d none -f $ref && \
   $HOME/bin/bcftools index -f ALL.chr${chr}_GRCh38.genotypes.20170504.bcf
@@ -226,12 +248,22 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
   tabix -f -p bed $HOME/res/dup.grch38.bed.gz
 ```
 
+1000 Genomes project phase 3 imputation	panel for Minimac3 (optional)
+```diff
+- cd $HOME/res/kgp
+- for chr in {1..22} X; do
+-   $HOME/bin/bcftools view --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -o tmp.chr$chr.GRCh38.vcf
+-   $HOME/bin/Minimac3 --refHaps tmp.chr$chr.GRCh38.vcf --processReference --myChromosome chr$chr --prefix ALL.chr${chr}_GRCh38.genotypes.20170504
+-   /bin/rm tmp.chr$chr.GRCh38.vcf
+- done
+```
+
 Setup variables
 ```
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 map="$HOME/res/genetic_map_hg38_withX.txt.gz"
 kgp_pfx="$HOME/res/kgp/ALL.chr"
-kgp_sfx="_GRCh38.genotypes.20170504.bcf"
+kgp_sfx="_GRCh38.genotypes.20170504"
 rule="GRCh38"
 cnp="$HOME/res/cnp.grch38.bed"
 dup="$HOME/res/dup.grch38.bed.gz"
@@ -355,13 +387,22 @@ for chr in {1..22} X; do
     --chrom $chr \
     --outPrefix $dir/$pfx.chr$chr \
     --numThreads $thr \
-    --vcfRef $kgp_pfx${chr}$kgp_sfx \
+    --vcfRef $kgp_pfx${chr}$kgp_sfx.bcf \
     --vcfTarget $dir/$pfx.unphased.bcf \
     --vcfOutFormat b \
     --noImpMissing \
     --outputUnphased \
     --vcfExclude $dir/$pfx.xcl.bcf && \
   $HOME/bin/bcftools index -f $dir/$pfx.chr$chr.bcf
+done
+```
+
+Impute variants using Minimac3 (optional)
+```
+for chr in {1..22} X; do
+  $HOME/bin/bcftools view --no-version $dir/$pfx.chr$chr.bcf -o $dir/$pfx.chr$chr.vcf | \
+  $HOME/bin/Minimac3 --refHaps $kgp_pfx${chr}$kgp_sfx.m3vcf.gz --haps $dir/$pfx.chr$chr.vcf --prefix $dir/$pfx.chr$chr
+  /bin/rm $dir/$pfx.chr$chr.vcf
 done
 ```
 
@@ -445,7 +486,7 @@ Plot Results
 
 Install basic tools (Debian/Ubuntu specific):
 ```
-sudo apt-get install r-cran-ggplot2 r-cran-data.table r-cran-gridextra
+sudo apt install r-cran-ggplot2 r-cran-data.table r-cran-gridextra
 ```
 
 Download R scripts
@@ -469,4 +510,4 @@ done
 Acknowledgements
 ================
 
-This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244)
+This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244). This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools.
