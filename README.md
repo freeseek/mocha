@@ -91,7 +91,7 @@ Compile latest version of `htslib` (optionally disable `bz2` and `lzma`) and `bc
 ```
 cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-lzma && make && cd ..
 cd bcftools && make && cd ..
-/bin/cp bcftools/{bcftools,plugins/{fill-tags,split,trio-phase,mochatools}.so} $HOME/bin/
+/bin/cp bcftools/{bcftools,plugins/{fill-tags,,fixploidy,split,trio-phase,mochatools}.so} $HOME/bin/
 ```
 Notice that you will need some functionalities missing from the base version of bcftools to run the pipeline
 
@@ -101,15 +101,15 @@ wget -O $HOME/bin/eagle https://data.broadinstitute.org/alkesgroup/Eagle/downloa
 chmod a+x $HOME/bin/eagle
 ```
 
-Install Minimac3 (optional)
-```diff
-- git clone git://github.com/statgen/Minimac3.git
-- cd Minimac3
-- sed -i 's/USER_WARNINGS ?= -Werror/USER_WARNINGS ?= -Wno-format-truncation/' Library/libStatGenForMinimac3/general/Makefile
-- sed -i 's/bool legacy_count = 0/int legacy_count = 0/' Library/libStatGenForMinimac3/general/Parameters.cpp
-- make
-- cd ..
-- /bin/cp Minimac3/Minimac3 $HOME/bin/
+Install Minimac3 (optional for array data)
+```
+git clone git://github.com/statgen/Minimac3.git
+cd Minimac3
+sed -i 's/USER_WARNINGS ?= -Werror/USER_WARNINGS ?= -Wno-format-truncation/' Library/libStatGenForMinimac3/general/Makefile
+sed -i 's/bool legacy_count = 0/int legacy_count = 0/' Library/libStatGenForMinimac3/general/Parameters.cpp
+make
+cd ..
+/bin/cp Minimac3/bin/Minimac3{,-omp} $HOME/bin/
 ```
 
 Download resources for GRCh37
@@ -163,14 +163,24 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
   tabix -f -p bed $HOME/res/dup.grch37.bed.gz
 ```
 
-1000 Genomes project phase 3 imputation panel for Minimac3 (optional)
-```diff
-- cd $HOME/res/kgp
-- for chr in {1..22} X; do
--   $HOME/bin/bcftools view --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -o tmp.chr$chr.GRCh37.vcf
--   $HOME/bin/Minimac3 --refHaps tmp.chr$chr.GRCh37.vcf --processReference --myChromosome $chr --prefix ALL.chr$chr.phase3_integrated.20130502.genotypes
--   /bin/rm tmp.chr$chr.GRCh37.vcf
-- done
+1000 Genomes project phase 3 imputation panel for Minimac3 (optional for array data)
+```
+cd $HOME/res/kgp
+for chr in {1..22} X; do
+  if [ $chr == "X" ]; then
+    $HOME/bin/bcftools +$HOME/bin/fixploidy.so --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -- -f 2 | \
+      sed -e 's/\t0\/0/\t0|0/' -e 's/\t1\/1/\t1|1/' > tmp.chr$chr.GRCh37.vcf
+  else
+    $HOME/bin/bcftools view --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -o tmp.chr$chr.GRCh37.vcf
+  fi
+  $HOME/bin/Minimac3-omp \
+    --refHaps tmp.chr$chr.GRCh37.vcf \
+    --processReference \
+    --myChromosome $chr \
+    --prefix ALL.chr$chr.phase3_integrated.20130502.genotypes \
+    --noPhoneHome
+  /bin/rm tmp.chr$chr.GRCh37.vcf
+done
 ```
 
 Setup variables
@@ -248,14 +258,24 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
   tabix -f -p bed $HOME/res/dup.grch38.bed.gz
 ```
 
-1000 Genomes project phase 3 imputation	panel for Minimac3 (optional)
-```diff
-- cd $HOME/res/kgp
-- for chr in {1..22} X; do
--   $HOME/bin/bcftools view --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -o tmp.chr$chr.GRCh38.vcf
--   $HOME/bin/Minimac3 --refHaps tmp.chr$chr.GRCh38.vcf --processReference --myChromosome chr$chr --prefix ALL.chr${chr}_GRCh38.genotypes.20170504
--   /bin/rm tmp.chr$chr.GRCh38.vcf
-- done
+1000 Genomes project phase 3 imputation	panel for Minimac3 (optional for array data)
+```
+cd $HOME/res/kgp
+for chr in {1..22} X; do
+  if [ $chr == "X" ]; then
+    $HOME/bin/bcftools +$HOME/bin/fixploidy.so --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -- -f 2 | \
+      sed -e 's/\t0\/0/\t0|0/' -e 's/\t1\/1/\t1|1/' > tmp.chr$chr.GRCh38.vcf
+  else
+    $HOME/bin/bcftools view --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -o tmp.chr$chr.GRCh38.vcf
+  fi
+  $HOME/bin/Minimac3-omp \
+    --refHaps tmp.chr$chr.GRCh38.vcf \
+    --processReference \
+    --myChromosome chr$chr \
+    --prefix ALL.chr${chr}_GRCh38.genotypes.20170504 \
+    --noPhoneHome
+  /bin/rm tmp.chr$chr.GRCh38.vcf
+done
 ```
 
 Setup variables
@@ -372,7 +392,7 @@ If a file with additional variants to be excluded is available, further merge it
 ```
 /bin/mv $dir/$pfx.xcl.bcf $dir/$pfx.xcl.tmp.bcf && \
 /bin/mv $dir/$pfx.xcl.bcf.csi $dir/$pfx.xcl.tmp.bcf.csi && \
-$HOME/bin/bcftools merge --no-version -Ob -o $dir/$pfx.xcl.bcf $dir/$pfx.xcl.tmp.bcf $xcl && \
+$HOME/bin/bcftools merge --no-version -Ob -o $dir/$pfx.xcl.bcf -m none $dir/$pfx.xcl.tmp.bcf $xcl && \
 $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 ```
 
@@ -394,15 +414,6 @@ for chr in {1..22} X; do
     --outputUnphased \
     --vcfExclude $dir/$pfx.xcl.bcf && \
   $HOME/bin/bcftools index -f $dir/$pfx.chr$chr.bcf
-done
-```
-
-Impute variants using Minimac3 (optional)
-```
-for chr in {1..22} X; do
-  $HOME/bin/bcftools view --no-version $dir/$pfx.chr$chr.bcf -o $dir/$pfx.chr$chr.vcf | \
-  $HOME/bin/Minimac3 --refHaps $kgp_pfx${chr}$kgp_sfx.m3vcf.gz --haps $dir/$pfx.chr$chr.vcf --prefix $dir/$pfx.chr$chr
-  /bin/rm $dir/$pfx.chr$chr.vcf
 done
 ```
 
@@ -429,9 +440,34 @@ $HOME/bin/bcftools index -f $dir/$pfx.bcf
 ```
 (it requires a ped file)
 
+Impute variants using Minimac3 (optional for array data)
+```
+for chr in {1..22} X; do
+  $HOME/bin/bcftools annotate --no-version -Ou $dir/$pfx.chr$chr.bcf -a $dir/$pfx.xcl.bcf -m +XCL | \
+    $HOME/bin/bcftools view --no-version -Ov -o $dir/$pfx.chr$chr.vcf -e "XCL==1"
+  $HOME/bin/Minimac3-omp \
+    --cpus $thr \
+    --refHaps $kgp_pfx${chr}$kgp_sfx.m3vcf.gz \
+    --format GT,GP \
+    --haps $dir/$pfx.chr$chr.vcf \
+    --prefix $dir/$pfx.chr$chr \
+    --lowMemory \
+    --noPhoneHome
+  $HOME/bin/bcftools query -l $dir/$pfx.chr$chr.bcf | \
+    $HOME/bin/bcftools view --no-version -Ob -o $dir/$pfx.chr$chr.dose.bcf -S /dev/stdin $dir/$pfx.chr$chr.dose.vcf.gz
+  /bin/rm $dir/$pfx.chr$chr.vcf $dir/$pfx.chr$chr.dose.vcf.gz
+done
+```
+
+Concatenate Minimac3 output into a single VCF file
+```
+$HOME/bin/bcftools concat --no-version -Ob -o $dir/$pfx.dose.bcf --threads $thr $dir/$pfx.chr{{1..22},X}.dose.vcf.gz && \
+$HOME/bin/bcftools index -f $dir/$pfx.dose.bcf
+```
+
 Remove unphased VCF and single chromosome files (optional)
 ```
-/bin/rm $dir/$pfx.{unphased,chr{{1..22},X},other}.bcf{,.csi}
+/bin/rm $dir/$pfx.{unphased,chr{{1..22},X},other}.bcf{,.csi} $dir/$pfx.chr{{1..22},X}.dose.bcf
 ```
 
 Chromosomal Alterations Pipeline
@@ -510,4 +546,4 @@ done
 Acknowledgements
 ================
 
-This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244). This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools.
+This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244). This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools and Po-Ru Loh <poruloh@broadinstitute.org> in building the eagle phasing software.
