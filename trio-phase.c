@@ -136,7 +136,8 @@ const char *usage(void)
 {
     return
 "\n"
-"About: Phase genotypes in trios.\n"
+"About: Phase genotypes in trios. (version 2018-10-18)\n"
+"\n"
 "Usage: bcftools +trio-phase [General Options] -- [Plugin Options]\n"
 "Options:\n"
 "   run \"bcftools plugin\" for a list of common options\n"
@@ -146,7 +147,7 @@ const char *usage(void)
 "   -i, --ibd                   Whether to add IBD state for duos\n"
 "\n"
 "Example:\n"
-"   bcftools +trio-phase file.bcf -- -p file.ped\n"
+"   bcftools +trio-phase file.bcf -- --ped file.ped\n"
 "\n";
 }
 
@@ -180,7 +181,10 @@ static void parse_ped(args_t *args, char *fname)
     hts_close(fp);
 }
 
-int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
+int init(int argc,
+         char **argv,
+         bcf_hdr_t *in,
+         bcf_hdr_t *out)
 {
     args = (args_t *)calloc(1, sizeof(args_t));
     args->prev_rid = -1;

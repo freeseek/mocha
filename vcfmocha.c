@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (c) 2015-2018 Giulio Genovese
+   Copyright (C) 2015-2018 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -55,7 +55,7 @@ typedef kvec_t(float) kv_float;
 
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2018-09-12"
+#define MOCHA_VERSION "2018-10-18"
 
 #define FLT_INCLUDE  (1<<0)
 #define FLT_EXCLUDE  (1<<1)
@@ -115,20 +115,19 @@ const int median_baf_adjust_default = 5;
 const int order_lrr_gc_default = 2;
 
 /****************************************
- * CONVERT FLAOT TO INT16 AND VICEVERSA *
+ * CONVERT FLOAT TO INT16 AND VICEVERSA *
  ****************************************/
 
 #define INT16_SCALE 1000 // most BAF values from Illumina and UKBB are scaled to 1000
-#define INT16_NAN (int16_t)0x8000
 
 inline int16_t float_to_int16(float in)
 {
-    return isnan(in) ? INT16_NAN : (int16_t)roundf(INT16_SCALE * in);
+    return isnan(in) ? bcf_int16_missing : (int16_t)roundf(INT16_SCALE * in);
 }
 
 inline float int16_to_float(int16_t in)
 {
-    return in == INT16_NAN ? NAN : ((float)in) / INT16_SCALE;
+    return in == bcf_int16_missing ? NAN : ((float)in) / INT16_SCALE;
 }
 
 static float *realloc_int16_to_float(int16_t *in, int n)
@@ -149,7 +148,11 @@ static float *realloc_int16_to_float(int16_t *in, int n)
 // https://github.com/natedomin/polyfit/blob/master/polyfit.c
 // https://software.intel.com/sites/products/documentation/doclib/mkl_sa/11/mkl_lapack_examples/sgels_ex.c.htm
 // this function needs to use doubles internally when dealing with WGS data
-float *polyfit(const float *lrr, const float *gc, int n, const int *imap, int order)
+float *polyfit(const float *lrr,
+               const float *gc,
+               int n,
+               const int *imap,
+               int order)
 {
     int m = order + 1;
     if (n < m || order > MAX_ORDER) return NULL;
@@ -251,7 +254,9 @@ float *polyfit(const float *lrr, const float *gc, int n, const int *imap, int or
     return coeffs;
 }
 
-static float *ad_to_lrr(int16_t *ad0, int16_t *ad1, int n)
+static float *ad_to_lrr(const int16_t *ad0,
+                        const int16_t *ad1,
+                        int n)
 {
     // this function keeps a list of logarithms of integers to minimize log calls
     static float *int_logf = NULL;
@@ -261,7 +266,7 @@ static float *ad_to_lrr(int16_t *ad0, int16_t *ad1, int n)
     float *lrr = (float *)malloc(n * sizeof(n));
     for(int i=0; i<n; i++)
     {
-        int cov = (int)(ad0[i]==INT16_NAN ? 0 : ad0[i]) + (int)(ad1[i]==INT16_NAN ? 0 : ad1[i]);
+        int cov = (int)(ad0[i]==bcf_int16_missing ? 0 : ad0[i]) + (int)(ad1[i]==bcf_int16_missing ? 0 : ad1[i]);
         if (cov==0)
         {
             lrr[i] = NAN;
@@ -281,15 +286,22 @@ static float *ad_to_lrr(int16_t *ad0, int16_t *ad1, int n)
     return lrr;
 }
 
-static float *ad_to_baf(int16_t *ad0, int16_t *ad1, int n)
+static float *ad_to_baf(const int16_t *ad0,
+                        const int16_t *ad1,
+                        int n)
 {
     float *baf = (float *)malloc(n * sizeof(n));
     for(int i=0; i<n; i++)
-        baf[i] = (ad0[i]==INT16_NAN || ad1[i]==INT16_NAN) ? NAN : (float)ad1[i] / (float)(ad0[i] + ad1[i]);
+        baf[i] = (ad0[i]==bcf_int16_missing || ad1[i]==bcf_int16_missing) ? NAN : (float)ad1[i] / (float)(ad0[i] + ad1[i]);
     return baf;
 }
 
-static void adjust_lrr(float *lrr, const float *gc, int n, const int *imap, const float *coeffs, int order)
+static void adjust_lrr(float *lrr,
+                       const float *gc,
+                       int n,
+                       const int *imap,
+                       const float *coeffs,
+                       int order)
 {
     for (int i=0; i<n; i++)
     {
@@ -333,7 +345,10 @@ static float get_tss(const float *v, int n)
  *********************************/
 
 // compute Viterbi path from probabilities
-static int8_t *retrace_viterbi(int T, int N, const float *prb, const int8_t *ptr)
+static int8_t *retrace_viterbi(int T,
+                               int N,
+                               const float *prb,
+                               const int8_t *ptr)
 {
     int i, t;
     int8_t *path = (int8_t *)malloc(T * sizeof(int8_t));
@@ -352,7 +367,8 @@ static int8_t *retrace_viterbi(int T, int N, const float *prb, const int8_t *ptr
 }
 
 // rescale Viterbi probabilities to avoid underflow issues
-static void rescale_prb(float *prb, int N)
+static void rescale_prb(float *prb,
+                        int N)
 {
     int i;
     float sum;
@@ -364,7 +380,15 @@ static void rescale_prb(float *prb, int N)
 // T is the length of the hidden Markov model
 // m is the number of possible BAF deviations
 // TODO find better terminology for all variables and make sure they match the variables in the manuscript
-static int8_t *get_viterbi(const float *emis, int T, int m, float xy_prob, float flip_prob, float telomere_prob, float centromere_prob, int last_p, int first_q)
+static int8_t *get_viterbi(const float *emis,
+                           int T,
+                           int m,
+                           float xy_prob,
+                           float flip_prob,
+                           float telomere_prob,
+                           float centromere_prob,
+                           int last_p,
+                           int first_q)
 {
     int t, i, j, changeidx;
     float sqrt_xy_prob = sqrtf(xy_prob);
@@ -491,7 +515,10 @@ static int8_t *get_viterbi(const float *emis, int T, int m, float xy_prob, float
  * LRR AND BAF LIKELIHOODS       *
  *********************************/
 
-static inline float normal_pdf(float x, float m, float s, float w)
+static inline float normal_pdf(float x,
+                               float m,
+                               float s,
+                               float w)
 {
     static const float log_inv_sqrt_2pi = -0.918938533204672669541f;
     float a = (x - m) / s;
@@ -500,7 +527,15 @@ static inline float normal_pdf(float x, float m, float s, float w)
 
 // lrr_bias is used in a different way from what done by Petr Danecek in bcftools/vcfcnv.c
 // TODO lrr_sd_bias is just a constant here, it could be removed
-static inline float lkl_lrr_baf(float lrr, float baf, float ldev, float bdev, float lrr_sd, float baf_sd, float lrr_bias, float lrr_sd_bias, float err_prob)
+static inline float lkl_lrr_baf(float lrr,
+                                float baf,
+                                float ldev,
+                                float bdev,
+                                float lrr_sd,
+                                float baf_sd,
+                                float lrr_bias,
+                                float lrr_sd_bias,
+                                float err_prob)
 {
     float ret = isnan( lrr ) ? 1.0f : normal_pdf( lrr, ldev, lrr_sd, lrr_bias ) / lrr_sd_bias;
     if ( !isnan(baf) ) ret *= ( normal_pdf( baf - 0.5f,  bdev, baf_sd, 1.0f ) +
@@ -508,7 +543,11 @@ static inline float lkl_lrr_baf(float lrr, float baf, float ldev, float bdev, fl
     return ret < err_prob ? err_prob : ret;
 }
 
-static inline float lkl_baf_phase(float baf, int8_t phase, float bdev, float baf_sd, float err_prob)
+static inline float lkl_baf_phase(float baf,
+                                  int8_t phase,
+                                  float bdev,
+                                  float baf_sd,
+                                  float err_prob)
 {
     if ( isnan( baf ) ) return 1.0f;
     float ret;
@@ -519,7 +558,17 @@ static inline float lkl_baf_phase(float baf, int8_t phase, float bdev, float baf
 }
 
 // precomupute emission probabilities
-static float *get_lrr_baf_emis(const float *lrr, const float *baf, int T, const int *imap, float err_prob, float lrr_bias, float lrr_hap2dip, float lrr_sd, float baf_sd, const float *cnf, int m)
+static float *get_lrr_baf_emis(const float *lrr,
+                               const float *baf,
+                               int T,
+                               const int *imap,
+                               float err_prob,
+                               float lrr_bias,
+                               float lrr_hap2dip,
+                               float lrr_sd,
+                               float baf_sd,
+                               const float *cnf,
+                               int m)
 {
     float lrr_sd_bias = powf( lrr_sd, lrr_bias );
     float *ldev = (float *)malloc(m * sizeof(float));
@@ -542,7 +591,15 @@ static float *get_lrr_baf_emis(const float *lrr, const float *baf, int T, const 
 }
 
 // precomupute emission probabilities
-static float *get_baf_phase_emis(const float *baf, const int8_t *gt_phase, int T, const int *imap, float err_prob, float flip_prob, float baf_sd, const float *bdev, int m)
+static float *get_baf_phase_emis(const float *baf,
+                                 const int8_t *gt_phase,
+                                 int T,
+                                 const int *imap,
+                                 float err_prob,
+                                 float flip_prob,
+                                 float baf_sd,
+                                 const float *bdev,
+                                 int m)
 {
     int N = 1 + m + ( isnan(flip_prob) ? 0 : m);
     float *emis = (float *)malloc(N * T * sizeof(float));
@@ -667,7 +724,7 @@ static inline float lkl_lrr_ad(float lrr,
                                float err_prob)
 {
     float ret = isnan( lrr ) ? 1.0f : normal_pdf( lrr, ldev, lrr_sd, lrr_bias ) / lrr_sd_bias;
-    if ( ad0!=INT16_NAN && ad1!=INT16_NAN )
+    if ( ad0!=bcf_int16_missing && ad1!=bcf_int16_missing )
         ret *= ( expf( lod_gamma_alpha[ad0] + lod_gamma_beta[ad1] - lod_gamma_alpha_beta[ad0 + ad1] ) +
                  expf( lod_gamma_alpha[ad1] + lod_gamma_beta[ad0] - lod_gamma_alpha_beta[ad0 + ad1] ) ) * 0.5f;
     return ret < err_prob ? err_prob : ret;
@@ -681,7 +738,7 @@ static inline float lkl_ad_phase(int16_t ad0,
                                  double *lod_gamma_alpha_beta,
                                  float err_prob)
 {
-    if ( ad0==INT16_NAN || ad1==INT16_NAN ) return 1.0f;
+    if ( ad0==bcf_int16_missing || ad1==bcf_int16_missing ) return 1.0f;
     float ret;
     if (phase == 0)
         ret = ( expf( lod_gamma_alpha[ad0] + lod_gamma_beta[ad1] - lod_gamma_alpha_beta[ad0 + ad1] ) +
@@ -736,7 +793,7 @@ static void precompute_lod_gammas(const int16_t *ad0,
     {
         int a = imap ? ad0[ imap[i] ] : ad0[i];
         int b = imap ? ad1[ imap[i] ] : ad1[i];
-        if ( a!=INT16_NAN && b!=INT16_NAN )
+        if ( a!=bcf_int16_missing && b!=bcf_int16_missing )
         {
             if (a > max1) max1 = a;
             if (b > max1) max1 = b;
@@ -947,7 +1004,7 @@ static double log10_lkl_beta_binomial(const int16_t *ad0,
     {
         int16_t a = ad0[i];
         int16_t b = ad1[i];
-        if ( a!=INT16_NAN && b!=INT16_NAN )
+        if ( a!=bcf_int16_missing && b!=bcf_int16_missing )
             ret += lod_gamma_alpha[a] + lod_gamma_beta[b] - lod_gamma_alpha_beta[a+b];
     }
     return (double)ret / M_LN10;
@@ -958,7 +1015,10 @@ static double log10_lkl_beta_binomial(const int16_t *ad0,
  *********************************/
 
 // iterator of non-NaN values
-static inline float next_not_nan(const float *v, const int *imap, int n, int *i)
+static inline float next_not_nan(const float *v,
+                                 const int *imap,
+                                 int n,
+                                 int *i)
 {
     float x = NAN;
     while (*i < n)
@@ -971,7 +1031,10 @@ static inline float next_not_nan(const float *v, const int *imap, int n, int *i)
 }
 
 // compute BAF phase concordance for a float array with iterator
-static float get_baf_conc(const float *baf, const int8_t *gt_phase, int n, const int *imap)
+static float get_baf_conc(const float *baf,
+                          const int8_t *gt_phase,
+                          int n,
+                          const int *imap)
 {
     int i, a = 0, b = 0;
     float prev = NAN, next = NAN;
@@ -996,7 +1059,10 @@ static float get_baf_conc(const float *baf, const int8_t *gt_phase, int n, const
 }
 
 // compute phased BAF autocorrelation for a float array with iterator
-static float get_baf_auto_corr(const float *baf, const int8_t *gt_phase, int n, const int *imap)
+static float get_baf_auto_corr(const float *baf,
+                               const int8_t *gt_phase,
+                               int n,
+                               const int *imap)
 {
     double var = 0.0, auto_corr = 0.0;
     float prev = NAN, next = NAN;
@@ -1017,7 +1083,9 @@ static float get_baf_auto_corr(const float *baf, const int8_t *gt_phase, int n, 
 static float get_sample_sd(const float *v, int n, const int *imap);
 
 // compute (adjusted) LRR autocorrelation for a float array with iterator
-static float get_lrr_auto_corr(const float *lrr, int n, const int *imap)
+static float get_lrr_auto_corr(const float *lrr,
+                               int n,
+                               const int *imap)
 {
     float value;
     double mean = 0.0;
@@ -1051,7 +1119,9 @@ static float get_lrr_auto_corr(const float *lrr, int n, const int *imap)
 }
 
 // compute the n50 of a vector
-static int get_n50(const int *v, int n, const int *imap)
+static int get_n50(const int *v,
+                   int n,
+                   const int *imap)
 {
     if ( n <= 1 ) return -1;
     int i;
@@ -1075,8 +1145,10 @@ static int get_n50(const int *v, int n, const int *imap)
 
 // compute sample standard deviation of a float array (with iterator)
 // sqrt ( ( \sum x^2 - (\sum x)^2 / N ) / ( N - 1 ) )
-// TODO this is not okay as the above way to compute the sd is error prone with floats!!!
-static float get_sample_sd(const float *v, int n, const int *imap)
+// TODO this is not completely okay as the above way to compute the sd is error prone with floats
+static float get_sample_sd(const float *v,
+                           int n,
+                           const int *imap)
 {
     // float s = 0.0, s2 = 0.0;
     double mean = 0.0;
@@ -1106,7 +1178,9 @@ static float get_sample_sd(const float *v, int n, const int *imap)
 
 // compute standard error of mean a float array (with iterator)
 // sqrt ( ( \sum x^2 - (\sum x)^2 / N ) / ( N - 1 ) / N )
-static float get_se_mean(const float *v, int n, const int *imap)
+static float get_se_mean(const float *v,
+                         int n,
+                         const int *imap)
 {
     int j = 0;
     for (int i = 0; i < n; i++)
@@ -1120,7 +1194,9 @@ static float get_se_mean(const float *v, int n, const int *imap)
 }
 
 // compute the median of a vector using the ksort library (with iterator)
-float get_median(const float *v, int n, const int *imap)
+float get_median(const float *v,
+                 int n,
+                 const int *imap)
 {
     if ( n == 0 ) return NAN;
     float tmp, *w = (float *)malloc(n * sizeof(float));
@@ -1372,7 +1448,9 @@ static rules_predef_t rules_predefs[] =
 };
 
 // adapted from Petr Danecek's implementation of parse_rules() in bcftools/plugins/mendelian.c
-static void push_rule(genome_param_t *genome_param, char *line, const bcf_hdr_t *hdr)
+static void push_rule(genome_param_t *genome_param,
+                      char *line,
+                      const bcf_hdr_t *hdr)
 {
     // eat any leading spaces
     char *ss = (char *)line;
@@ -1457,7 +1535,9 @@ static void push_rule(genome_param_t *genome_param, char *line, const bcf_hdr_t 
 
 // split file into lines
 // adapted from Petr Danecek's implementation of regidx_init_string() in bcftools/regidx.c
-static void genome_init_file(genome_param_t *genome_param, const char *fname, const bcf_hdr_t *hdr)
+static void genome_init_file(genome_param_t *genome_param,
+                             const char *fname,
+                             const bcf_hdr_t *hdr)
 {
     if ( !fname ) return;
     kstring_t tmp = {0, 0, NULL};
@@ -1471,7 +1551,9 @@ static void genome_init_file(genome_param_t *genome_param, const char *fname, co
 
 // split string into lines
 // adapted from Petr Danecek's implementation of regidx_init_string() in bcftools/regidx.c
-static void genome_init_string(genome_param_t *genome_param, const char *str, const bcf_hdr_t *hdr)
+static void genome_init_string(genome_param_t *genome_param,
+                               const char *str,
+                               const bcf_hdr_t *hdr)
 {
     if ( !str ) return;
     kstring_t tmp = {0, 0, NULL};
@@ -1491,7 +1573,9 @@ static void genome_init_string(genome_param_t *genome_param, const char *str, co
 }
 
 // adapted from Petr Danecek's implementation of init_rules() in bcftools/regidx.c
-static void genome_init_alias(genome_param_t *genome_param, char *alias, const bcf_hdr_t *hdr)
+static void genome_init_alias(genome_param_t *genome_param,
+                              char *alias,
+                              const bcf_hdr_t *hdr)
 {
     const rules_predef_t *rules = rules_predefs;
 
@@ -1528,7 +1612,13 @@ static void genome_init_alias(genome_param_t *genome_param, char *alias, const b
     return genome_init_string(genome_param, rules->rules, hdr);
 }
 
-int cnp_parse(const char *line, char **chr_beg, char **chr_end, uint32_t *beg, uint32_t *end, void *payload, void *usr)
+int cnp_parse(const char *line,
+              char **chr_beg,
+              char **chr_end,
+              uint32_t *beg,
+              uint32_t *end,
+              void *payload,
+              void *usr)
 {
     // Use the standard parser for CHROM,FROM,TO
     int ret = regidx_parse_bed(line, chr_beg, chr_end, beg, end, NULL, NULL);
@@ -1656,7 +1746,10 @@ typedef struct
     kv_float kv_rel_ess;
 } sample_t;
 
-static void mocha_print_ucsc(const mocha_t *mocha, int n, FILE *restrict stream, const bcf_hdr_t *hdr)
+static void mocha_print_ucsc(const mocha_t *mocha,
+                             int n,
+                             FILE *restrict stream,
+                             const bcf_hdr_t *hdr)
 {
     if (stream == NULL) return;
     const char *name[4];
@@ -1693,7 +1786,12 @@ static void mocha_print_ucsc(const mocha_t *mocha, int n, FILE *restrict stream,
     if (stream != stdout && stream != stderr) fclose(stream);
 }
 
-static void mocha_print(const mocha_t *mocha, int n, FILE *restrict stream, const bcf_hdr_t *hdr, int flags, char *rules)
+static void mocha_print(const mocha_t *mocha,
+                        int n,
+                        FILE *restrict stream,
+                        const bcf_hdr_t *hdr,
+                        int flags,
+                        char *rules)
 {
     if (stream == NULL) return;
     char sex[3];
@@ -1713,7 +1811,7 @@ static void mocha_print(const mocha_t *mocha, int n, FILE *restrict stream, cons
     arm_type[MOCHA_TEL] = 'T';
     if ( flags & WGS_DATA )
     {
-        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG (%s)\tEND (%s)\tLENGTH\tP\tQ\tNSITES\tHETS\tN50_HETS\tCNF\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
+        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tHETS\tN50_HETS\tCNF\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
@@ -1728,7 +1826,7 @@ static void mocha_print(const mocha_t *mocha, int n, FILE *restrict stream, cons
     }
     else
     {
-        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG (%s)\tEND (%s)\tLENGTH\tP\tQ\tNSITES\tHETS\tN50_HETS\tCNF\tBDEV\tBDEV_SE\tLDEV\tLDEV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
+        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tHETS\tN50_HETS\tCNF\tBDEV\tBDEV_SE\tLDEV\tLDEV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
@@ -1746,7 +1844,18 @@ static void mocha_print(const mocha_t *mocha, int n, FILE *restrict stream, cons
 
 // this function checks whether the edge of a CNP is indeed diploid
 // by looking for evidence for the diploid model over the CNP model (duplication or deletion)
-static int cnp_edge_is_not_cn2(const float *lrr, const float *baf, int n, int a, int b, float xy_prob, float err_prob, float lrr_bias, float lrr_hap2dip, float lrr_sd, float baf_sd, double cnf)
+static int cnp_edge_is_not_cn2(const float *lrr,
+                               const float *baf,
+                               int n,
+                               int a,
+                               int b,
+                               float xy_prob,
+                               float err_prob,
+                               float lrr_bias,
+                               float lrr_hap2dip,
+                               float lrr_sd,
+                               float baf_sd,
+                               double cnf)
 {
     float lrr_sd_bias = powf( lrr_sd, lrr_bias );
     float ldev = ( logf((float)cnf) / (float)M_LN2 - 1.0f ) * lrr_hap2dip;
@@ -1777,7 +1886,12 @@ static int cnp_edge_is_not_cn2(const float *lrr, const float *baf, int n, int a,
 
 // this function returns two values (a, b) such that:
 // (i) a <= b (ii) pos[a-1] < beg (iii) beg <= pos[a] < end (iv) beg <= pos[b] < end (v) pos[b+1] >= end
-static int get_cnp_edges(const int *pos, int n, int beg, int end, int *a, int *b)
+static int get_cnp_edges(const int *pos,
+                         int n,
+                         int beg,
+                         int end,
+                         int *a,
+                         int *b)
 {
     if ( pos[ 0 ] >= end || pos[ n-1 ] < beg ) return -1;
 
@@ -1804,7 +1918,13 @@ static int get_cnp_edges(const int *pos, int n, int beg, int end, int *a, int *b
 }
 
 // classify mosaic chromosomal alteration type based on LRR and BAF
-static int8_t mocha_type(float ldev, float ldev_se, float bdev, float bdev_se, float lrr_hap2dip, int8_t p_arm, int8_t q_arm)
+static int8_t mocha_type(float ldev,
+                         float ldev_se,
+                         float bdev,
+                         float bdev_se,
+                         float lrr_hap2dip,
+                         int8_t p_arm,
+                         int8_t q_arm)
 {
     float z2_upd = sqf( ldev / ldev_se ) * 0.5f;
     if (p_arm != MOCHA_TEL && q_arm != MOCHA_TEL) z2_upd += 2.0f; // penalty for not ending in a telomere
@@ -1835,7 +1955,12 @@ static int8_t mocha_type(float ldev, float ldev_se, float bdev, float bdev_se, f
 // BDEV = | 1 / 2 - 1 / CNF |
 // CNF = 2 / ( 1 + 2 x BDEV ) for deletions
 // CNF = 2 / ( 1 - 2 x BDEV ) for duplications
-static float mocha_cell_fraction(float ldev, float ldev_se, float bdev, float bdev_se, int8_t type, float lrr_hap2dip)
+static float mocha_cell_fraction(float ldev,
+                                 float ldev_se,
+                                 float bdev,
+                                 float bdev_se,
+                                 int8_t type,
+                                 float lrr_hap2dip)
 {
     if (isnan(bdev) || isnan(bdev_se))
     {
@@ -1867,7 +1992,17 @@ static float mocha_cell_fraction(float ldev, float ldev_se, float bdev, float bd
     }
 }
 
-static void get_mocha_stats(const int *pos, const float *lrr, const float *baf, const int8_t *gt_phase, int n, int a, int b, int cen_beg, int cen_end, int length, mocha_t *mocha)
+static void get_mocha_stats(const int *pos,
+                            const float *lrr,
+                            const float *baf,
+                            const int8_t *gt_phase,
+                            int n,
+                            int a,
+                            int b,
+                            int cen_beg,
+                            int cen_end,
+                            int length,
+                            mocha_t *mocha)
 {
     mocha->nsites = b + 1 - a;
 
@@ -1907,7 +2042,12 @@ static void get_mocha_stats(const int *pos, const float *lrr, const float *baf, 
 }
 
 // return segments called by the HMM or state with consecutive call
-static int get_path_segs(const int8_t *path, int n, int except, int **beg, int **end, int *nseg)
+static int get_path_segs(const int8_t *path,
+                         int n,
+                         int except,
+                         int **beg,
+                         int **end,
+                         int *nseg)
 {
     int beg_m = 0, end_m = 0, a = 0, b = 0;
     *beg = NULL;
@@ -1949,7 +2089,13 @@ static int get_path_segs(const int8_t *path, int n, int except, int **beg, int *
 }
 
 // process one contig for one sample
-static void sample_contig_run(sample_t *self, kv_mocha_t *kv_mocha, const contig_param_t *contig_param, const genome_param_t *genome_param, const model_param_t *model_param, regitr_t *cnp_itr, int flags)
+static void sample_contig_run(sample_t *self,
+                              kv_mocha_t *kv_mocha,
+                              const contig_param_t *contig_param,
+                              const genome_param_t *genome_param,
+                              const model_param_t *model_param,
+                              regitr_t *cnp_itr,
+                              int flags)
 {
     // do nothing if chromosome Y or MT are being tested
     if ( contig_param->rid == genome_param->y_rid || contig_param->rid == genome_param->mt_rid )
@@ -2230,7 +2376,9 @@ static void sample_contig_run(sample_t *self, kv_mocha_t *kv_mocha, const contig
 
 // computes the medoid contig for LRR regression
 // TODO weight the coefficients appropriately
-static int get_medoid(const float *coeffs, int n, int order)
+static int get_medoid(const float *coeffs,
+                      int n,
+                      int order)
 {
     n /= order + 1;
     int medoid_idx = -1;
@@ -2280,7 +2428,10 @@ static float get_cutoff(const float *v, int n)
 }
 
 // this function computes the median of contig stats and then clears the contig stats
-static float sample_stats(sample_t *self, int n, model_param_t *model_param, int flags)
+static float sample_stats(sample_t *self,
+                          int n,
+                          model_param_t *model_param,
+                          int flags)
 {
     int j = 0;
     float *tmp = (float *)malloc(n * sizeof(float));
@@ -2352,7 +2503,11 @@ static float sample_stats(sample_t *self, int n, model_param_t *model_param, int
 }
 
 // this function computes several contig stats and then clears the contig data from the sample
-static void sample_contig_stats(sample_t *self, const contig_param_t *contig_param, const genome_param_t *genome_param, const model_param_t *model_param, int flags)
+static void sample_contig_stats(sample_t *self,
+                                const contig_param_t *contig_param,
+                                const genome_param_t *genome_param,
+                                const model_param_t *model_param,
+                                int flags)
 {
     if (self->contig.size == 0) return;
 
@@ -2453,7 +2608,11 @@ static void sample_contig_stats(sample_t *self, const contig_param_t *contig_par
     free(self->contig.gt_phase);
 }
 
-static void sample_print(const sample_t *self, int n, FILE *restrict stream, const bcf_hdr_t *hdr, int flags)
+static void sample_print(const sample_t *self,
+                         int n,
+                         FILE *restrict stream,
+                         const bcf_hdr_t *hdr,
+                         int flags)
 {
     if (stream == NULL) return;
     char sex[3];
@@ -2500,7 +2659,13 @@ static int bcf_sr_next_line_reader0(bcf_srs_t *sr)
 }
 
 // write one contig
-static int put_contig(bcf_srs_t *sr, int rid, const sample_t *sample, const contig_param_t contig_param, int flags, htsFile *out_fh, bcf_hdr_t *out_hdr)
+static int put_contig(bcf_srs_t *sr,
+                      int rid,
+                      const sample_t *sample,
+                      const contig_param_t contig_param,
+                      int flags,
+                      htsFile *out_fh,
+                      bcf_hdr_t *out_hdr)
 {
     bcf_hdr_t *hdr = bcf_sr_get_header(sr, 0);
     bcf_sr_seek(sr, bcf_hdr_id2name( hdr, rid ), 0);
@@ -2559,7 +2724,12 @@ static int put_contig(bcf_srs_t *sr, int rid, const sample_t *sample, const cont
 }
 
 // write header
-static bcf_hdr_t *print_hdr(htsFile *out_fh, bcf_hdr_t *hdr, int argc, char *argv[], int record_cmd_line, int flags)
+static bcf_hdr_t *print_hdr(htsFile *out_fh,
+                            bcf_hdr_t *hdr,
+                            int argc,
+                            char *argv[],
+                            int record_cmd_line,
+                            int flags)
 {
     bcf_hdr_t *out_hdr = bcf_hdr_dup(hdr);
     if ( !(flags & NO_ANNOT) )
@@ -2576,8 +2746,149 @@ static bcf_hdr_t *print_hdr(htsFile *out_fh, bcf_hdr_t *hdr, int argc, char *arg
     return out_hdr;
 }
 
+// retrieve phase information from BCF record
+// bcf_int8_missing if phase does not apply
+// 0 if phase is not available
+// 1 if higher number allele received from the mother
+// -1 if higher number allele received from the father
+// assumes little endian architecture
+int bcf_get_genotype_phase(bcf_fmt_t *fmt,
+                           int8_t *gt_phase_arr,
+                           int nsmpl)
+{
+    // bcf_fmt_t *fmt = bcf_get_fmt_id(line, id);
+    if ( !fmt || fmt->n != 2 ) return 0;
+
+    #define BRANCH(type_t, bcf_type_vector_end, bcf_type_missing) { \
+        type_t *p = (type_t *)fmt->p; \
+        for (int i=0; i<nsmpl; i++, p+=2) \
+        { \
+            if ( p[0]==bcf_type_vector_end || p[0]==bcf_type_missing || \
+                 p[1]==bcf_type_vector_end || p[1]==bcf_type_missing ) \
+            { \
+                gt_phase_arr[i] = bcf_int8_missing; \
+            } \
+            else \
+            { \
+                type_t gt0 = bcf_gt_allele(p[0]) > 0; \
+                type_t gt1 = bcf_gt_allele(p[1]) > 0; \
+                if ( gt0 == gt1 ) gt_phase_arr[i] = bcf_int8_missing; \
+                else if ( !bcf_gt_is_phased(p[1]) ) gt_phase_arr[i] = 0; \
+                else if ( gt1 > gt0 ) gt_phase_arr[i] = 1; \
+                else gt_phase_arr[i] = -1; \
+            } \
+        } \
+    }
+    switch (fmt->type) {
+        case BCF_BT_INT8:  BRANCH(int8_t, bcf_int8_vector_end, bcf_int8_missing); break;
+        case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end, bcf_int16_missing); break;
+        case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end, bcf_int32_missing); break;
+        default: error("Unexpected type %d", fmt->type);
+    }
+    #undef BRANCH
+
+    return 1;
+}
+
+// retrive genotype alleles information from BCF record
+// assumes little endian architecture
+int bcf_get_genotype_alleles(const bcf_fmt_t *fmt,
+                             int16_t *gt0_arr,
+                             int16_t *gt1_arr,
+                             int nsmpl)
+{
+    if ( !fmt || fmt->n != 2 ) return 0;
+
+    // temporarily store genotype alleles in AD array
+    #define BRANCH(type_t, bcf_type_vector_end, bcf_type_missing) { \
+        type_t *p = (type_t *)fmt->p; \
+        for (int i=0; i<nsmpl; i++, p+=2) \
+        { \
+            if ( p[0]==bcf_type_vector_end || p[0]==bcf_type_missing || \
+                 p[1]==bcf_type_vector_end || p[1]==bcf_type_missing ) \
+            { \
+                gt0_arr[i] = bcf_int16_missing; \
+                gt1_arr[i] = bcf_int16_missing; \
+            } \
+            else \
+            { \
+                gt0_arr[i] = (int16_t)bcf_gt_allele(p[0]); \
+                gt1_arr[i] = (int16_t)bcf_gt_allele(p[1]); \
+            } \
+        } \
+    }
+    switch (fmt->type) {
+        case BCF_BT_INT8:  BRANCH(int8_t, bcf_int8_vector_end, bcf_int8_missing); break;
+        case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end, bcf_int16_missing); break;
+        case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end, bcf_int32_missing); break;
+        default: error("Unexpected type %d", fmt->type);
+    }
+    #undef BRANCH
+
+    return 1;
+}
+
+// retrive allelic depth information from BCF record
+// assumes little endian architecture
+int bcf_get_allelic_depth(const bcf_fmt_t *fmt,
+                          const int16_t *gt0_arr,
+                          const int16_t *gt1_arr,
+                          int16_t *ad0_arr,
+                          int16_t *ad1_arr,
+                          int nsmpl)
+{
+    if ( !fmt ) return 0;
+    int nalleles = fmt->n;
+
+    #define BRANCH(type_t, bcf_type_vector_end, bcf_type_missing) { \
+        type_t *p = (type_t *)fmt->p; \
+        for (int i=0; i<nsmpl; i++, p+=nalleles) \
+        { \
+            if ( ( gt0_arr[i] != bcf_int16_missing && (int)gt0_arr[i] >= nalleles ) || \
+                 ( gt1_arr[i] != bcf_int16_missing && (int)gt1_arr[i] >= nalleles ) ) \
+                error("Error: found VCF record with GT alleles %d and %d and %d number of alleles\n", gt0_arr[i], gt1_arr[i], nalleles); \
+            if ( gt0_arr[i] == bcf_int16_missing || gt1_arr[i] == bcf_int16_missing || \
+                 p[gt0_arr[i]]==bcf_type_vector_end || p[gt0_arr[i]]==bcf_type_missing || \
+                 p[gt1_arr[i]]==bcf_type_vector_end || p[gt1_arr[i]]==bcf_type_missing ) \
+            { \
+                ad0_arr[i] = bcf_int16_missing; \
+                ad1_arr[i] = bcf_int16_missing; \
+            } \
+            else \
+            { \
+                type_t gt0 = gt0_arr[i] > 0; \
+                type_t gt1 = gt1_arr[i] > 0; \
+                if ( gt0 == gt1 ) \
+                { \
+                    ad0_arr[i] = (int16_t)(gt0_arr[i] == gt1_arr[i] ? p[gt0_arr[i]] : p[gt0_arr[i]] + p[gt1_arr[i]]); \
+                    ad1_arr[i] = bcf_int16_missing; \
+                } \
+                else \
+                { \
+                    ad0_arr[i] = (int16_t)p[gt0_arr[i]]; \
+                    ad1_arr[i] = (int16_t)p[gt1_arr[i]]; \
+                } \
+            } \
+        } \
+    }
+    switch (fmt->type) {
+        case BCF_BT_INT8:  BRANCH(int8_t, bcf_int8_vector_end, bcf_int8_missing); break;
+        case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end, bcf_int16_missing); break;
+        case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end, bcf_int32_missing); break;
+        default: error("Unexpected type %d", fmt->type);
+    }
+    #undef BRANCH
+
+    return 1;
+}
+
 // read one contig
-static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *contig_param, int flags, float median_baf_adjust, int min_dist)
+static int get_contig(bcf_srs_t *sr,
+                      int rid, sample_t *sample,
+                      contig_param_t *contig_param,
+                      int flags,
+                      float median_baf_adjust,
+                      int min_dist)
 {
     bcf_hdr_t *hdr = bcf_sr_get_header(sr, 0);
     bcf_sr_seek(sr, bcf_hdr_id2name( hdr, rid ), 0);
@@ -2598,15 +2909,30 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
     kv_int8_t *kv_gt_phase = (kv_int8_t *)calloc(nsmpl, sizeof(kv_int8_t));
 
     int i;
-    int nad_arr = 0, *ad_arr = NULL, nad = 0, nalleles = 0;
-    int ngt_arr = 0, *gt_arr = NULL, ngt = 0, max_ploidy = 0;
+    int gt_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GT");
+    int baf_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "BAF");
+    int lrr_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "LRR");
+    int ad_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "AD");
+    int gc_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GC");
+
+    // maybe this should be assert instead
+    if ( gt_id < 0 ) error("Error: input VCF file has no GT format field\n");
+    if ( (flags & WGS_DATA) && ad_id < 0 ) error("Error: input VCF file has no AD format field\n");
+    if ( !(flags & WGS_DATA) && ( baf_id < 0 || lrr_id <0 ) ) error("Error: input VCF file has no BAF or LRR format field\n");
+
+    int8_t *phase_arr = (int8_t *)malloc(nsmpl * sizeof(int8_t));
+    int16_t *gt0 = (int16_t *)malloc(nsmpl * sizeof(int16_t));
+    int16_t *gt1 = (int16_t *)malloc(nsmpl * sizeof(int16_t));
+    int16_t *ad0 = (int16_t *)malloc(nsmpl * sizeof(int16_t));
+    int16_t *ad1 = (int16_t *)malloc(nsmpl * sizeof(int16_t));
+
     for (i=0; bcf_sr_next_line_reader0(sr); i++)
     {
         bcf1_t *line = bcf_sr_get_line(sr, 0);
-        if (rid != line->rid) break;
+        if ( rid != line->rid ) break;
         int pos = line->pos + 1;
         kv_push(int, kv_pos, pos);
-        if ( ( info = bcf_get_info( hdr, line, "GC" ) ) ) kv_push(float, kv_gc, info->v1.f );
+        if ( gc_id>=0 && ( info = bcf_get_info_id( line, gc_id ) ) ) kv_push(float, kv_gc, info->v1.f );
         else kv_push(float, kv_gc, NAN);
 
         // if failing inclusion/exclusion requirement, skip line
@@ -2614,28 +2940,24 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
         if ( (flags & FLT_INCLUDE) && !bcf_sr_get_line(sr, 1) ) continue;
 
         // if there are no genotypes, skip line
-        ngt = bcf_get_genotypes(hdr, line, &gt_arr, &ngt_arr);
-        if ( ngt <= 0 ) continue;
-        max_ploidy = ngt / nsmpl;
+        bcf_fmt_t *gt_fmt = bcf_get_fmt_id(line, gt_id);
+        if ( !bcf_get_genotype_phase(gt_fmt, phase_arr, nsmpl) ) continue;
 
         // if neither AD nor LRR and BAF formats are present, skip line
         if ( flags & WGS_DATA )
         {
-            nad = bcf_get_format_int32(hdr, line, "AD", &ad_arr, &nad_arr);
-            if ( nad <= 0 ) continue;
-            nalleles = nad / nsmpl;
+            if ( !bcf_get_genotype_alleles(gt_fmt, gt0, gt1, nsmpl) ) continue;
+            if ( !bcf_get_allelic_depth(bcf_get_fmt_id(line, ad_id), gt0, gt1, ad0, ad1, nsmpl) ) continue;
         }
         else
         {
-            if ( !(lrr_fmt = bcf_get_fmt(hdr, line, "LRR")) || !(baf_fmt = bcf_get_fmt(hdr, line, "BAF")) ) continue;
+            if ( !(lrr_fmt = bcf_get_fmt_id(line, lrr_id)) || !(baf_fmt = bcf_get_fmt_id(line, baf_id)) ) continue;
 
             // make nan all BAF values for non heterozygous SNPs (we do not use those BAFs)
             int nbaf = 0;
             for (int j=0; j<nsmpl; j++)
             {
-                int *ptr = gt_arr + max_ploidy * sample[j].idx;
-                if ( bcf_gt_is_missing(ptr[0]) || bcf_gt_is_missing(ptr[1]) || ptr[1]==bcf_int32_vector_end || (ptr[0]>>1) == (ptr[1]>>1) )
-                    ((float *)(baf_fmt->p + baf_fmt->size * sample[j].idx))[0] = NAN;
+                if ( phase_arr[j] == bcf_int8_missing ) ((float *)(baf_fmt->p + baf_fmt->size * sample[j].idx))[0] = NAN;
                 if ( !isnan(((float *)(baf_fmt->p + baf_fmt->size * sample[j].idx))[0]) ) nbaf++;
             }
 
@@ -2649,20 +2971,10 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
 
         for (int j=0; j<nsmpl; j++)
         {
-            // if genotype is not diploid, skip line
-            int *ptr = gt_arr + max_ploidy * sample[j].idx;
-            if ( bcf_gt_is_missing(ptr[0]) || bcf_gt_is_missing(ptr[1]) || ptr[1]==bcf_int32_vector_end ) continue;
-            int gt0 = bcf_gt_allele(ptr[0]), gt1 = bcf_gt_allele(ptr[1]);
-            int8_t gt_phase = (int8_t)( SIGN( gt0 - gt1 ) * bcf_gt_is_phased(ptr[1]) );
-
             if ( flags & WGS_DATA )
             {
-                assert(gt0 >= 0 && gt0 < nalleles && gt1 >= 0 && gt1 < nalleles);
-                int *ad_ptr = ad_arr + nalleles * sample[j].idx;
-                // missing allelic depth information
-                if ( ad_ptr[gt0] == 0 && ad_ptr[gt1] == 0) continue;
                 // site too close to last het site or hom site too close to last site
-                if ( pos < next_het[j] || ( (gt0 == gt1) && (pos < next_hom[j]) ) ) continue;
+                if ( pos < next_het[j] || ( (phase_arr[j] == bcf_int8_missing) && (pos < next_hom[j]) ) ) continue;
                 if ( pos < next_hom[j] )
                 {
                     // substitute the last hom site with the current het site
@@ -2676,21 +2988,21 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
                     size[j]++;
                 }
 
-                if ( gt0 != gt1 ) next_het[j] = pos + min_dist;
+                // if ( gt0 != gt1 ) next_het[j] = pos + min_dist;
+                if ( phase_arr[j] != bcf_int8_missing ) next_het[j] = pos + min_dist;
                 next_hom[j] = pos + min_dist;
 
                 kv_push(int, kv_vcf_imap[j], i);
-                kv_push(int8_t, kv_gt_phase[j], gt_phase );
-                int16_t ad0 = (int16_t)ad_ptr[gt0];
-                int16_t ad1 = (gt0 == gt1) ? (int16_t)INT16_NAN : (int16_t)ad_ptr[gt1];
-                kv_push(int16_t, kv_data[AD0][j], ad0);
-                kv_push(int16_t, kv_data[AD1][j], ad1);
+                kv_push(int8_t, kv_gt_phase[j], phase_arr[j] );
+                kv_push(int16_t, kv_data[AD0][j], ad0[j]);
+                kv_push(int16_t, kv_data[AD1][j], ad1[j]);
             }
             else
             {
                 size[j]++;
                 kv_push(int, kv_vcf_imap[j], i);
-                kv_push(int8_t, kv_gt_phase[j], gt_phase );
+                // kv_push(int8_t, kv_gt_phase[j], gt_phase );
+                kv_push(int8_t, kv_gt_phase[j], phase_arr[j] );
                 float lrr = ((float *)(lrr_fmt->p + lrr_fmt->size * sample[j].idx))[0];
                 float baf = ((float *)(baf_fmt->p + baf_fmt->size * sample[j].idx))[0];
                 kv_push(int16_t, kv_data[LRR][j], float_to_int16(lrr));
@@ -2698,8 +3010,11 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
             }
         }
     }
-    free(ad_arr);
-    free(gt_arr);
+    free(phase_arr);
+    free(gt0);
+    free(gt1);
+    free(ad0);
+    free(ad1);
     contig_param->n = kv_pos.n;
 
     if ( i > 0 )
@@ -2711,7 +3026,7 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
             sample[j].contig.size = size[j];
             sample[j].contig.vcf_imap = (int *)realloc(kv_vcf_imap[j].a, size[j] * sizeof(int));
             sample[j].contig.gt_phase = (int8_t *)realloc(kv_gt_phase[j].a, size[j] * sizeof(int8_t));
-            for (int i=0; i<2; i++) sample[j].contig.data[i] = (int16_t *)realloc(kv_data[i][j].a, size[j] * sizeof(int16_t));
+            for (int k=0; k<2; k++) sample[j].contig.data[k] = (int16_t *)realloc(kv_data[k][j].a, size[j] * sizeof(int16_t));
         }
     }
 
@@ -2719,8 +3034,7 @@ static int get_contig(bcf_srs_t *sr, int rid, sample_t *sample, contig_param_t *
     free(next_het);
     free(next_hom);
     free(kv_vcf_imap);
-    free(kv_data[LRR]);
-    free(kv_data[BAF]);
+    for (int j=0; j<2; j++) free(kv_data[j]);
     free(kv_gt_phase);
 
     return i;
@@ -2793,7 +3107,10 @@ static void usage()
     exit(1);
 }
 
-static float *readlistf(const char *str, int *n, float min, float max)
+static float *readlistf(const char *str,
+                        int *n,
+                        float min,
+                        float max)
 {
     char *tmp, **list = hts_readlist(str, 0, n);
     if ( *n >= 128 ) error("Cannot handle list of 128 or more parameters: %s\n", str);
@@ -3036,7 +3353,7 @@ int main_vcfmocha(int argc, char *argv[])
     // output tables with mosaic chromosomal alteration calls
     if ( mocha_fname ) out_fm = get_file_handle( mocha_fname );
     if ( stats_fname ) out_fg = get_file_handle( stats_fname );
-    if ( ucsc_fname  ) out_fu = get_file_handle( ucsc_fname  );
+    if ( ucsc_fname ) out_fu = get_file_handle( ucsc_fname );
 
     // read list of regions to genotype
     if ( cnp_fname )
@@ -3139,7 +3456,7 @@ int main_vcfmocha(int argc, char *argv[])
 
     if ( !(flags & NO_LOG) ) fprintf(stderr, "Compute and print sample statistics\n");
     float cutoff = sample_stats(sample, nsmpl, &model_param, flags);
-    if ( !(flags & NO_LOG) ) fprintf(stderr, "Estimated cutoff: %.4f\n", cutoff);
+    if ( !(flags & NO_LOG) ) fprintf(stderr, "Estimated X nonPAR LRR cutoff for sex determination: %.4f\n", cutoff);
     sample_print(sample, nsmpl, out_fg, hdr, flags);
 
     if ( isnan( model_param.lrr_hap2dip ) )

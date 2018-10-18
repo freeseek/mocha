@@ -1,5 +1,4 @@
-MoChA (MOsaic CHromosomal Alterations caller)
-=============================================
+![](mocha_logo.png)
 
 A bcftools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following <a href="http://doi.org/10.1038/s41586-018-0321-x">paper</a>:
 ```
@@ -66,7 +65,12 @@ Installation
 
 Install basic tools (Debian/Ubuntu specific):
 ```
-sudo apt install wget liblzma-dev libbz2-dev libgsl0-dev gzip unzip samtools bedtools
+sudo apt install wget gzip unzip samtools bedtools
+```
+
+Optionally, you can install these libraries to activate further bcftools features:
+```
+sudo apt install liblzma-dev libbz2-dev libgsl0-dev
 ```
 
 Preparation steps
@@ -74,7 +78,7 @@ Preparation steps
 mkdir -p $HOME/bin $HOME/res $HOME/res/kgp && cd /tmp
 ```
 
-Download latest version of <a href="https://github.com/samtools/htslib">`htslib`</a> and <a href="https://github.com/samtools/bcftools">`bcftools`</a> (if not downloaded already)
+Download latest version of <a href="https://github.com/samtools/htslib">HTSlib</a> and <a href="https://github.com/samtools/bcftools">BCFtools</a> (if not downloaded already)
 ```
 git clone --branch=develop git://github.com/samtools/htslib.git
 git clone --branch=develop git://github.com/samtools/bcftools.git
@@ -83,19 +87,19 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 Add patches and code for plugin
 ```
 wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c,sumlog.c}
-wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools}.c
+wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools,importFMT,extendFMT}.c
 cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.patch && cd ..
 ```
 
-Compile latest version of `htslib` (optionally disable `bz2` and `lzma`) and `bcftools` (make sure you are using gcc version 5 or newer)
+Compile latest version of HTSlib (optionally disable bz2 and lzma) and BCFtools (make sure you are using gcc version 5 or newer or else include the -std=gnu99 compilation flag)
 ```
 cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-lzma && make && cd ..
 cd bcftools && make && cd ..
-/bin/cp bcftools/{bcftools,plugins/{fill-tags,,fixploidy,split,trio-phase,mochatools}.so} $HOME/bin/
+/bin/cp bcftools/{bcftools,plugins/{fill-tags,,fixploidy,split,trio-phase,mochatools,importFMT,extendFMT}.so} $HOME/bin/
 ```
 Notice that you will need some functionalities missing from the base version of bcftools to run the pipeline
 
-Install latest version of <a href="https://data.broadinstitute.org/alkesgroup/Eagle/">`eagle`</a>
+Install latest version of <a href="https://data.broadinstitute.org/alkesgroup/Eagle/">Eagle</a>
 ```
 wget -O $HOME/bin/eagle https://data.broadinstitute.org/alkesgroup/Eagle/downloads/dev/eagle_v2.4
 chmod a+x $HOME/bin/eagle
@@ -132,17 +136,17 @@ wget -P $HOME/res https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tab
 cd $HOME/res/kgp
 wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr{{1..22}.phase3_shapeit2_mvncall_integrated_v5a,X.phase3_shapeit2_mvncall_integrated_v1b,Y.phase3_integrated_v2a}.20130502.genotypes.vcf.gz{,.tbi}
 for chr in {1..22} X Y; do
-  bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][ab].20130502.genotypes.vcf.gz | \
-  bcftools norm --no-version -Ou -m -any | \
-  bcftools norm --no-version -Ob -o ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf -d none -f $HOME/res/human_g1k_v37.fasta && \
-  bcftools index -f ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf
+  $HOME/bin/bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][ab].20130502.genotypes.vcf.gz | \
+  $HOME/bin/bcftools norm --no-version -Ou -m -any | \
+  $HOME/bin/bcftools norm --no-version -Ob -o ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf -d none -f $HOME/res/human_g1k_v37.fasta && \
+  $HOME/bin/bcftools index -f ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf
 done
 ```
 
 List of common germline duplications and deletions
 ```
 wget -P $HOME/res ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz{,.tbi}
-bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
+$HOME/bin/bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "%CHROM\t%POS\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/res/cnp.grch37.bed
 ```
 
@@ -231,7 +235,7 @@ wget -P $HOME/res ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_
 wget http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver
 chmod a+x liftOver
 wget http://hgdownload.cse.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz
-bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
+$HOME/bin/bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "chr%CHROM\t%POS\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz | \
     ./liftOver \
     -minMatch=0.3 \
@@ -241,7 +245,7 @@ bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || S
     /dev/stderr
 ```
 
-List of segmental duplications (make sure your bedtools version is not affected by the <a href="https://github.com/arq5x/bedtools2/issues/418">groupby bug</a>)
+List of segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
 ```
 wget -O- http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/genomicSuperDups.txt.gz | gzip -d |
   awk '!($2=="chrX" && $8=="chrY" || $2=="chrY" && $8=="chrX") {print $2"\t"$3"\t"$4"\t"$30}' > genomicSuperDups.bed
@@ -341,41 +345,19 @@ Make sure that AD is a "Number=R" format field (this was introduced in version <
 
 Create a minimal binary VCF
 ```
-bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/' | \
-  bcftools reheader -h /dev/stdin $vcf | \
-  bcftools filter --no-version -Ou -e "FMT/DP<10 || FMT/GQ<20" --set-GT . | \
-  bcftools annotate --no-version -Ou -x ID,QUAL,INFO,^FMT/GT,^FMT/AD | \
-  bcftools norm --no-version -Ou -m -any -k | \
-  bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
-  bcftools index $dir/$pfx.unphased.bcf
+$HOME/bin/bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/' | \
+  $HOME/bin/bcftools reheader -h /dev/stdin $vcf | \
+  $HOME/bin/bcftools filter --no-version -Ou -e "FMT/DP<10 || FMT/GQ<20" --set-GT . | \
+  $HOME/bin/bcftools annotate --no-version -Ou -x ID,QUAL,INFO,^FMT/GT,^FMT/AD | \
+  $HOME/bin/bcftools norm --no-version -Ou -m -any -k | \
+  $HOME/bin/bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
+  $HOME/bin/bcftools index $dir/$pfx.unphased.bcf
 ```
 This will set to missing heterozygous genotypes that have low coverage or low genotyping quality, as these can cause issues.
 
-The mochatools plugin has some functions that will be necessary in the next steps:
-```
-About:   tools for the MOsaic CHromosomal Alterations pipeline.
-
-Usage:   bcftools +mochatools [General Options] -- [Plugin Options]
-
-General options:
-   run "bcftools plugin" for a list of common options
-
-Plugin options:
-   -b, --binom-ase               performs binomial test for asymmetry of B Allele Frequency (Bdev_Phase)
-   -a, --ad-het                  performs binomial test for reference / alternate allelic depth (AD)
-   -x  --sex <file>              file including information about sex of sample
-   -t, --tx-bias                 perform transmission bias tests (requires absolute phasing)
-   -f, --fasta-ref <file>        reference sequence to compute GC and CpG content
-   -w, --window-size <int>       Window size in bp used to compute the GC and CpG content [200]
-   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with "^" prefix)
-   -S, --samples-file [^]<file>  file of samples to include (or exclude with "^" prefix)
-       --force-samples           only warn about unknown subset samples
-   -G, --drop-genotypes          drop individual genotype information (after running statistical tests)
-```
-
 Perform basic quality control (the generated list of variants will be excluded from modeling by both eagle and mocha)
 ```
-n=$(bcftools query -l $dir/$pfx.unphased.bcf|wc -l); \
+n=$($HOME/bin/bcftools query -l $dir/$pfx.unphased.bcf|wc -l); \
 ns=$((n*98/100)); \
 echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
   $HOME/bin/bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
@@ -443,7 +425,7 @@ $HOME/bin/bcftools index -f $dir/$pfx.bcf
 Impute variants using Minimac3 (optional for array data)
 ```
 for chr in {1..22} X; do
-  $HOME/bin/bcftools annotate --no-version -Ou $dir/$pfx.chr$chr.bcf -a $dir/$pfx.xcl.bcf -m +XCL | \
+  $HOME/bin/bcftools annotate --no-version -Ou $dir/$pfx.bcf -a $dir/$pfx.xcl.bcf -m +XCL -r \$chr,chr\$chr | \
     $HOME/bin/bcftools view --no-version -Ov -o $dir/$pfx.chr$chr.vcf -e "XCL==1"
   $HOME/bin/Minimac3-omp \
     --cpus $thr \
@@ -459,7 +441,7 @@ for chr in {1..22} X; do
 done
 ```
 
-Concatenate Minimac3 output into a single VCF file
+Concatenate imputed genotypes into a single VCF file (optional for array data)
 ```
 $HOME/bin/bcftools concat --no-version -Ob -o $dir/$pfx.dose.bcf --threads $thr $dir/$pfx.chr{{1..22},X}.dose.vcf.gz && \
 $HOME/bin/bcftools index -f $dir/$pfx.dose.bcf
@@ -480,7 +462,7 @@ thr="..." # number of extra threads to use
 lst="..." # file with list of samples to analyze for asymmetries (e.g. samples with 1p CNN-LOH)
 ```
 
-Call mosaic chromosomal alterations with `mocha`
+Call mosaic chromosomal alterations with MoChA
 ```
 $HOME/bin/bcftools mocha \
   -r $rule \
@@ -496,20 +478,42 @@ $HOME/bin/bcftools mocha \
 $HOME/bin/bcftools index -f $dir/$pfx.mocha.bcf
 ```
 
+import results from MoChA into VCF file with imputed genotypes (optional for array data)
+```
+$HOME/bin/bcftools +$HOME/bin/importFMT.so \
+  --no-version -Ob \
+  --formats Ldev,Bdev,Bdev_Phase \
+  $dir/$pfx.dose.bcf \
+  $dir/$pfx.mocha.bcf \
+  -o $dir/$pfx.dose.mocha.bcf && \
+$HOME/bin/bcftools index $dir/$pfx.dose.mocha.bcf
+```
+
 Run asymmetry analyses (subset cohort, run binomial test, discard genotypes)
 ```
+$HOME/bin/bcftools +$HOME/bin/extendFMT.so \
+  --no-version -Ou \
+  --format Bdev_Phase \
+  --phase \
+  --dist 500000 \
+  -r $reg \
+  -s $lst \
+  $dir/$pfx.dose.mocha.bcf | \
 $HOME/bin/bcftools +$HOME/bin/mochatools.so \
-  --no-version -Ou -r X \
-  -o $dir/$pfx.ase.bcf \
-  $dir/$pfx.mocha.bcf \
-  -- -b -S $lst -G && \
-$HOME/bin/bcftools index -f $dir/$pfx.ase.bcf
+  --no-version -Ob \
+  -o $dir/$pfx.bal.bcf \
+  -- -b Bdev_Phase -G && \
+$HOME/bin/bcftools index -f $dir/$pfx.bal.bcf
 ```
 
 Observe results for asymmetry analyses in table format
 ```
-fmt="%CHROM\t%POS\t%ID\t%ASE{0}\t%ASE{1}\t%ASE_Test\n"
-bcftools query -i "ASE_Test<1e-6" -f "$fmt" $dir/$pfx.ase.bcf | tlmn
+fmt="%CHROM\t%POS\t%ID\t%Bal{0}\t%Bal{1}\t%Bal_Test\n"
+$HOME/bin/bcftools query \
+  -i "Bal_Test>6" \
+  -f "$fmt" \
+  $dir/$pfx.bal.bcf | \
+  column -ts $'\t'
 ```
 
 Split output VCF file by samples (optional)
@@ -527,7 +531,7 @@ sudo apt install r-cran-ggplot2 r-cran-data.table r-cran-gridextra
 
 Download R scripts
 ```
-wget -P $HOME/bin bcftools https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,mocha}.R
+wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,mocha}.R
 chmod a+x $HOME/bin/plot_{summary,mocha}.R
 ```
 
@@ -546,4 +550,4 @@ done
 Acknowledgements
 ================
 
-This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244). This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools and Po-Ru Loh <poruloh@broadinstitute.org> in building the eagle phasing software.
+This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244). This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools and Po-Ru Loh <poruloh@broadinstitute.org> in building the Eagle phasing software.
