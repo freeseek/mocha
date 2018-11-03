@@ -41,6 +41,9 @@ HMM Options:
     -f, --flip-prob <float>           phase flip probability [1e-02]
     -t, --telomere-advantage <float>  telomere advantage [1e-02]
     -c, --centromere-penalty <float>  centromere penalty [1e-04]
+        --short_arm_chrs <list>       list of short arm chromosomes [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
+        --use_short_arms              use variants in short arms
+        --use_centromeres             use variants in centromeres
     -p  --cnp <file>                  list of regions to genotype in BED format
     -n, --cnf <list>                  comma separated list of copy number fractions for LRR+BAF model
                                       [1.0,1.5,3.0,4.0]
@@ -86,6 +89,7 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 
 Add patches and code for plugin
 ```
+/bin/rm -f bcftools/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c,sumlog.c} bcftools/plugins/{trio-phase,mochatools,importFMT,extendFMT}.c
 wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c,sumlog.c}
 wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools,importFMT,extendFMT}.c
 cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.patch && cd ..
@@ -95,7 +99,7 @@ Compile latest version of HTSlib (optionally disable bz2 and lzma) and BCFtools 
 ```
 cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-lzma && make && cd ..
 cd bcftools && make && cd ..
-/bin/cp bcftools/{bcftools,plugins/{fill-tags,,fixploidy,split,trio-phase,mochatools,importFMT,extendFMT}.so} $HOME/bin/
+/bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,split,trio-phase,mochatools,importFMT,extendFMT}.so} $HOME/bin/
 ```
 Notice that you will need some functionalities missing from the base version of bcftools to run the pipeline
 
@@ -150,7 +154,7 @@ $HOME/bin/bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE==
   -f "%CHROM\t%POS\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/res/cnp.grch37.bed
 ```
 
-List of segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
+Minimal divergence intervals from segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
 ```
 wget -O- http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/genomicSuperDups.txt.gz | gzip -d |
   awk '!($2=="chrX" && $8=="chrY" || $2=="chrY" && $8=="chrX") {print $2"\t"$3"\t"$4"\t"$30}' > genomicSuperDups.bed
@@ -245,7 +249,7 @@ $HOME/bin/bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE==
     /dev/stderr
 ```
 
-List of segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
+Minimal divergence intervals from segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
 ```
 wget -O- http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/genomicSuperDups.txt.gz | gzip -d |
   awk '!($2=="chrX" && $8=="chrY" || $2=="chrY" && $8=="chrX") {print $2"\t"$3"\t"$4"\t"$30}' > genomicSuperDups.bed
@@ -381,7 +385,7 @@ $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 Phasing Pipeline
 ================
 
-Phase VCF file by chromosome with `eagle`
+Phase VCF file by chromosome with Eagle
 ```
 for chr in {1..22} X; do
   $HOME/bin/eagle \
@@ -531,6 +535,7 @@ sudo apt install r-cran-ggplot2 r-cran-data.table r-cran-gridextra
 
 Download R scripts
 ```
+/bin/rm -f $HOME/bin/plot_{summary,mocha}.R
 wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,mocha}.R
 chmod a+x $HOME/bin/plot_{summary,mocha}.R
 ```
@@ -543,7 +548,7 @@ $HOME/bin/plot_summary.R $dir/$pfx.pdf $dir/$pfx.stats.tsv $dir/$pfx.mocha.tsv
 Plot mosaic chromosomal alterations
 ```
 for sm in $($HOME/bin/bcftools query -l $dir/$pfx.mocha.bcf | tr ' ' '_'); do
-  $HOME/bin/plot_mocha.R $dir/$sm.pdf $dir/$sm.bcf
+  $HOME/bin/plot_mocha.R array/wgs $rule $dir/$sm.pdf $dir/$sm.bcf
 done
 ```
 
