@@ -44,7 +44,7 @@
 
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2018-11-02"
+#define MOCHA_VERSION "2018-11-05"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -1809,7 +1809,7 @@ static void mocha_print(const mocha_t *mocha,
     arm_type[MOCHA_TEL] = 'T';
     if ( flags & WGS_DATA )
     {
-        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tHETS\tN50_HETS\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
+        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
@@ -1824,7 +1824,7 @@ static void mocha_print(const mocha_t *mocha,
     }
     else
     {
-        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tHETS\tN50_HETS\tBDEV\tBDEV_SE\tLDEV\tLDEV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
+        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tLDEV\tLDEV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tTYPE\tCF\n", rules, rules);
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
@@ -2949,6 +2949,12 @@ static int get_contig(bcf_srs_t *sr,
         if ( rid != line->rid ) break;
         int pos = line->pos + 1;
 
+        hts_expand(int, i+1, model->m_pos, model->pos_arr);
+        model->pos_arr[i] = pos;
+        hts_expand(float, i+1, model->m_gc, model->gc_arr);
+        if ( gc_id>=0 && ( info = bcf_get_info_id( line, gc_id ) ) ) model->gc_arr[i] = info->v1.f;
+        else model->gc_arr[i] = NAN;
+
         // if failing inclusion/exclusion requirement, skip line
         if ( ( model->flags & FLT_EXCLUDE ) && bcf_sr_get_line(sr, 1) ) continue;
         if ( ( model->flags & FLT_INCLUDE ) && !bcf_sr_get_line(sr, 1) ) continue;
@@ -2989,12 +2995,6 @@ static int get_contig(bcf_srs_t *sr,
 
         // read line in memory
         model->n++;
-        hts_expand(int, model->n, model->m_pos, model->pos_arr);
-        model->pos_arr[model->n - 1] = pos;
-        hts_expand(float, model->n, model->m_gc, model->gc_arr);
-        if ( gc_id>=0 && ( info = bcf_get_info_id( line, gc_id ) ) )  model->gc_arr[model->n - 1] = info->v1.f;
-        else model->gc_arr[model->n - 1] = NAN;
-
         for (int j=0; j<nsmpl; j++)
         {
             if ( model->flags & WGS_DATA )
@@ -3014,7 +3014,7 @@ static int get_contig(bcf_srs_t *sr,
                 hts_expand(int8_t, sample[j].n, sample[j].m_phase, sample[j].phase_arr);
                 hts_expand(int16_t, sample[j].n, sample[j].m_data[AD0], sample[j].data_arr[AD0]);
                 hts_expand(int16_t, sample[j].n, sample[j].m_data[AD1], sample[j].data_arr[AD1]);
-                sample[j].vcf_imap_arr[sample[j].n - 1] = model->n - 1;
+                sample[j].vcf_imap_arr[sample[j].n - 1] = i;
                 sample[j].phase_arr[sample[j].n - 1] = phase_arr[j];
                 sample[j].data_arr[AD0][sample[j].n - 1] = ad0[j];
                 sample[j].data_arr[AD1][sample[j].n - 1] = ad1[j];
@@ -3027,7 +3027,7 @@ static int get_contig(bcf_srs_t *sr,
                 hts_expand(int8_t, sample[j].n, sample[j].m_phase, sample[j].phase_arr);
                 hts_expand(int16_t, sample[j].n, sample[j].m_data[LRR], sample[j].data_arr[LRR]);
                 hts_expand(int16_t, sample[j].n, sample[j].m_data[BAF], sample[j].data_arr[BAF]);
-                sample[j].vcf_imap_arr[sample[j].n - 1] = model->n - 1;
+                sample[j].vcf_imap_arr[sample[j].n - 1] = i;
                 sample[j].phase_arr[sample[j].n - 1] = phase_arr[j];
                 float lrr = ((float *)(lrr_fmt->p + lrr_fmt->size * sample[j].idx))[0];
                 float baf = ((float *)(baf_fmt->p + baf_fmt->size * sample[j].idx))[0];
@@ -3079,7 +3079,7 @@ static void usage()
     fprintf(stderr, "    -a  --no-annotations              omit Ldev and Bdev FORMAT from output VCF (requires --output)\n");
     fprintf(stderr, "    -m, --mosaic-calls <file>         write mosaic chromosomal alterations to a file [standard output]\n");
     fprintf(stderr, "    -g, --genome-stats <file>         write sample genome-wide statistics to a file [no output]\n");
-    fprintf(stderr, "    -u, --bed-ucsc <file>             write UCSC bed track to a file [no output]\n");
+    fprintf(stderr, "    -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]\n");
     fprintf(stderr, "    -l  --no-log                      suppress progress report on standard error\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "HMM Options:\n");
@@ -3183,7 +3183,7 @@ int main_vcfmocha(int argc, char *argv[])
 
     // model parameters
     model_t model;
-    memset(&model, 0, sizeof(model));
+    memset(&model, 0, sizeof(model_t));
     model.xy_prob = xy_prob_default;
     model.err_prob = err_prob_default;
     model.flip_prob = flip_prob_default;
@@ -3211,7 +3211,7 @@ int main_vcfmocha(int argc, char *argv[])
         {"no-annotations", no_argument, NULL,'a'},
         {"mosaic-calls", required_argument, NULL, 'm'},
         {"genome-stats", required_argument, NULL, 'g'},
-        {"bed-ucsc", required_argument, NULL, 'u'},
+        {"ucsc-bed", required_argument, NULL, 'u'},
         {"rules", required_argument, NULL, 'r'},
         {"rules-file", required_argument, NULL, 'R'},
         {"xy-prob", required_argument, NULL, 'x'},
