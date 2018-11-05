@@ -32,7 +32,7 @@ Output Options:
     -a  --no-annotations              omit Ldev and Bdev FORMAT from output VCF (requires --output)
     -m, --mosaic-calls <file>         write mosaic chromosomal alterations to a file [standard output]
     -g, --genome-stats <file>         write sample genome-wide statistics to a file [no output]
-    -u, --bed-ucsc <file>             write UCSC bed track to a file [no output]
+    -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]
     -l  --no-log                      suppress progress report on standard error
 
 HMM Options:
@@ -112,11 +112,9 @@ chmod a+x $HOME/bin/eagle
 Install Minimac3 (optional for array data)
 ```
 git clone git://github.com/statgen/Minimac3.git
-cd Minimac3
-sed -i 's/USER_WARNINGS ?= -Werror/USER_WARNINGS ?= -Wno-format-truncation/' Library/libStatGenForMinimac3/general/Makefile
-sed -i 's/bool legacy_count = 0/int legacy_count = 0/' Library/libStatGenForMinimac3/general/Parameters.cpp
-make
-cd ..
+sed -i 's/USER_WARNINGS ?= -Werror/USER_WARNINGS ?= -Wno-format-truncation/' Minimac3/Library/libStatGenForMinimac3/general/Makefile
+sed -i 's/bool legacy_count = 0/int legacy_count = 0/' Minimac3/Library/libStatGenForMinimac3/general/Parameters.cpp
+cd Minimac3 && make && cd ..
 /bin/cp Minimac3/bin/Minimac3{,-omp} $HOME/bin/
 ```
 
@@ -469,17 +467,68 @@ lst="..." # file with list of samples to analyze for asymmetries (e.g. samples w
 Call mosaic chromosomal alterations with MoChA
 ```
 $HOME/bin/bcftools mocha \
-  -r $rule \
-  --no-version -Ob \
-  -o $dir/$pfx.mocha.bcf \
+  --rules $rule \
+  --no-version \
+  --output-type b \
+  --output $dir/$pfx.mocha.bcf \
   --threads $thr \
   --variants ^$dir/$pfx.xcl.bcf \
-  -m $dir/$pfx.mocha.tsv \
-  -g $dir/$pfx.stats.tsv \
-  -u $dir/$pfx.ucsc.bed \
-  -p $cnp \
+  --mosaic-calls $dir/$pfx.mocha.tsv \
+  --genome-stats $dir/$pfx.stats.tsv \
+  --ucsc-bed $dir/$pfx.ucsc.bed \
+  --cnp $cnp \
   $dir/$pfx.bcf && \
 $HOME/bin/bcftools index -f $dir/$pfx.mocha.bcf
+```
+
+The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns:
+```
+             SAMPLE - sample ID
+         XXX_MEDIAN - median LRR or sequencing coverage across autosomes
+             XXX_SD - standard deviation of LRR or sequencing coverage
+           XXX_AUTO - auto correlation of LRR or sequencing coverage (after GC correction)
+  BAF_SD / BAF_CORR - BAF standard deviation or beta-binomial intra class correlation for read counts
+           BAF_CONC - BAF phase concordance across phased heterozygous sites (see Vattathil et al. 2012)
+           BAF_AUTO - phased BAF auto correlation across phased heterozygous sites
+              NHETS - number of heterozygous sites across the genome used for calling
+     X_NONPAR_NHETS - number of heterozygous sites in the X nonPAR region
+X_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the X nonPAR region
+Y_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the Y nonPAR region
+      MT_XXX_MEDIAN - median LRR or sequencing coverage over the mitochondrial genome
+                SEX - estimated sample sex from X nonPAR region (not heterozygous sites count)
+            REL_ESS - LRR or sequencing coverage explained sum of squares fraction using local GC content
+```
+
+The mosaic calls file contains information about each mosaic and germline chromosomal alteration called and it includes the following columns:
+```
+              SAMPLE - sample ID
+                 SEX - inferred sample sex
+               CHROM - chromosome
+          BEG_XXXXXX - beginning base pair position for the call (according to XXXXXX genome reference)
+          END_XXXXXX - end base pair position for the call (according to XXXXXX genome reference)
+              LENGTH - base pair length of the call
+               P_ARM - whether the call extends to the small arm and whether it reaches the telomere
+               Q_ARM - whether the call extends to the long arm and whether it reaches the telomere
+              NSITES - number of sites used for the call
+               NHETS - number of heterozygous sites used for the call
+            N50_HETS - N50 value for heterozygous sites distance
+                BDEV - BAF deviation estimate from 0.5
+             BDEV_SE - standard deviation estimate for BAF deviation
+      LDEV / REL_COV - LRR deviation estimate / relative coverage estimate
+LDEV_SE / REL_COV_SE - standard deviation estimate for LRR deviation / relative coverage
+         LOD_LRR_BAF - LOD score for model based on LRR and BAF
+       LOD_BAF_PHASE - LOD score for model based on BAF and genotype phase
+              NFLIPS - number of phase flips for calls based on BAF and genotype phase model
+            BAF_CONC - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
+                TYPE - Type of call based on LRR / relative coverage
+                  CF - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
+```
+
+The output VCF will contain the following extra FORMAT fields:
+```
+      Ldev - LRR deviation estimate
+      Bdev - BAF deviation estimate
+Bdev_Phase - for heterozygous calls: 1/-1 if the alternate allele is over/under represented
 ```
 
 import results from MoChA into VCF file with imputed genotypes (optional for array data)
