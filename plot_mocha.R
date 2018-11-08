@@ -31,19 +31,41 @@ suppressPackageStartupMessages(library(grid))
 suppressPackageStartupMessages(library(gridExtra))
 
 args <- commandArgs(trailingOnly = TRUE)
-out_pdf <- args[1]
-vcf <- args[2]
+model <- args[1]
+rules <- args[2]
+out_pdf <- args[3]
+vcf <- args[4]
+if (length(args)>4) {
+  maxlen <- as.numeric(args[5])
+} else {
+  maxlen <- 0
+}
+
 title <- sub('.mocha$', '', sub('.vcf$', '', sub('.gz$', '', sub('.bcf$', '', basename(vcf)))))
 
+if ( model == 'array' ) {
+  fmt <- '"%CHROM\t%POS[\t%GT\t%BAF\t%LRR\t%Ldev\t%Bdev\t%Bdev_Phase]\\n"'
+  names <- c('CHROM', 'POS', 'GT', 'BAF', 'LRR', 'LDEV', 'BDEV', 'BDEV_Phase')
+} else if ( model == 'wgs' ) {
+  fmt <- '"%CHROM\t%POS[\t%GT\t%AD{0}\t%AD{1}\t%Ldev\t%Bdev\t%Bdev_Phase]\\n"'
+  names <- c('CHROM', 'POS', 'GT', 'AD0', 'AD1', 'LDEV', 'BDEV', 'BDEV_Phase')
+} else {
+  stop("Model parameter needs to be \"array\" or \"wgs\"")
+}
+
 chrs <- c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y')
-hg19 <- c(249251621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248, 59128983, 63026520, 48129895, 51305566, 155270560, 59373566)
-# hg38 <- c(248956422, 242193529, 198295559, 190214555, 181538259, 170805979, 159345973, 145138636, 138394717, 133797422, 135086622, 133275309, 114364328, 107043718, 101991189, 90338345, 83257441, 80373285, 58617616, 64444167, 46709983, 50818468, 156040895, 57227415)
-names(hg19) <- chrs
+if ( rules == 'GRCh37' ) {
+  chrlen <- c(249251621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248, 59128983, 63026520, 48129895, 51305566, 155270560, 59373566)
+} else if ( rules == 'GRCh38' ) {
+  chrlen <- c(248956422, 242193529, 198295559, 190214555, 181538259, 170805979, 159345973, 145138636, 138394717, 133797422, 135086622, 133275309, 114364328, 107043718, 101991189, 90338345, 83257441, 80373285, 58617616, 64444167, 46709983, 50818468, 156040895, 57227415)
+} else {
+  stop("Rules parameter needs to be \"GRCh37\" or \"GRCh38\"")
+}
+names(chrlen) <- chrs
 
 # load main table from VCF file
-fmt <- '"%CHROM\t%POS[\t%GT\t%BAF\t%LRR\t%Ldev\t%Bdev\t%Bdev_Phase]\\n"'
-names <- c('CHROM', 'POS', 'GT', 'BAF', 'LRR', 'LDEV', 'BDEV', 'BDEV_Phase')
 cmd <- paste('bcftools query --format', fmt, vcf)
+write(paste('Command:', cmd), stderr())
 df <- setNames(fread(cmd, sep = '\t', header = FALSE, na.strings = '.', data.table = FALSE), names)
 
 # fills in variables of interest
@@ -51,6 +73,10 @@ df$CHROM <- as.factor(gsub('^chr', '', gsub('^chrM', 'MT', df$CHROM)))
 ord <- order(as.numeric(gsub('MT', '26', gsub('Y', '24', gsub('X', '23', levels(df$CHROM))))))
 df$CHROM <- factor(df$CHROM, levels(df$CHROM)[ord])
 df$PHASE = (df$GT == '0|1') - (df$GT == '1|0')
+if ( model == 'wgs' ) {
+  df$BAF <- ( df$AD1 + 0.5 ) / ( df$AD0 + df$AD1 + 1.0 )
+  df$LRR <- log2( df$AD0 + df$AD1 ) / log2( median( df$AD0 + df$AD1 ) )
+}
 df$BAF[unname(sapply(df$GT, (function(x) substr(x,1,1)==substr(x,3,3))))] <- NaN
 df$GT <- NULL
 df$pBAF <- (df$BAF - 0.5) * df$PHASE + 0.5
@@ -61,7 +87,7 @@ pdf(out_pdf)
 fs <- 8
 ggplot(df[!is.na(df$BAF),], aes(x = POS/1e6, y = BAF, color = as.factor(BDEV))) +
   geom_bin2d(binwidth = c(1, .05), alpha = 1/4, show.legend = FALSE) +
-  scale_x_continuous('Mbp position', limits = c(0, hg19['1']/1e6), expand = c(0, 0)) +
+  scale_x_continuous('Mbp position', limits = c(0, chrlen['1']/1e6), expand = c(0, 0)) +
   scale_y_continuous('BAF', limits = c(0, 1), breaks = c()) +
   scale_color_discrete(guide = FALSE) +
   ggtitle(title) +
@@ -81,7 +107,8 @@ if (any(df$LDEV!=0, na.rm=TRUE)) {
     end_pos <- df$POS[mocha_end[i]]
     bdev <- df$BDEV[mocha_start[i]]
     lrr_median <- median(df$LRR[mocha_start[i]:mocha_end[i]])
-    if (end_pos - start_pos < 1e5 || chrom == 'X') next # skip small events and chromosome X events
+    if ( ( end_pos - start_pos < 1e5 ) || ( end_pos - start_pos < maxlen ) || ( chrom == 'X') ) next # skip small events and chromosome X events
+    write(paste0('Plotting call: ', chrom, ':', start_pos, '-', end_pos, ' ', bdev, ' ', lrr_median), stderr())
 
     p <- list()
 
@@ -97,7 +124,7 @@ if (any(df$LDEV!=0, na.rm=TRUE)) {
       theme(plot.title = element_text(hjust = 0.5))
 
     left <- max(4 * start_pos - 3 * end_pos, 0)
-    right <- min(4 * end_pos - 3 * start_pos, hg19[chrom])
+    right <- min(4 * end_pos - 3 * start_pos, chrlen[chrom])
     idx <- df$CHROM == chrom & df$POS >= left & df$POS <= right
     for (s in c(1e5, 1e6)) {
       df_scaled <- data.frame(POS = unname(tapply(df$POS[idx], round(df$POS[idx]/s), median, na.rm=TRUE)),
