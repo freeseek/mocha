@@ -44,7 +44,7 @@
 
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2018-11-05"
+#define MOCHA_VERSION "2018-11-19"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -221,7 +221,7 @@ const float err_prob_default = 1e-04f;
 const float flip_prob_default = 1e-02f;
 const float telomere_prob_default = 1e-02f;
 const float centromere_prob_default = 1e-04f;
-static const char *cnf_default = "1.0,1.5,3.0,4.0";
+static const char *cnf_default = "1.0,3.0";
 static const char *bdev_default = "6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0";
 static const char *short_arm_chrs_default = "13,14,15,21,22,chr13,chr14,chr15,chr21,chr22";
 const float lrr_bias_default = 0.2f;
@@ -375,7 +375,7 @@ static void ad_to_lrr_baf(const int16_t *ad0,
         int cov = (int)(ad0[i]==bcf_int16_missing ? 0 : ad0[i]) + (int)(ad1[i]==bcf_int16_missing ? 0 : ad1[i]);
         if (cov==0)
         {
-            lrr[i] = NAN;
+            lrr[i] = 0;
             baf[i] = NAN;
         }
         else
@@ -824,6 +824,7 @@ static inline float lkl_lrr_ad(float lrr,
     if ( ad0!=bcf_int16_missing && ad1!=bcf_int16_missing )
         ret *= ( expf( lod_gamma_alpha[ad0] + lod_gamma_beta[ad1] - lod_gamma_alpha_beta[ad0 + ad1] ) +
                  expf( lod_gamma_alpha[ad1] + lod_gamma_beta[ad0] - lod_gamma_alpha_beta[ad0 + ad1] ) ) * 0.5f;
+// fprintf(stderr, "ret: %f %d %d %f\n", lrr ,ad0, ad1, ret); // TODO TODO TODO
     return ret < err_prob ? err_prob : ret;
 }
 
@@ -1940,8 +1941,11 @@ static int8_t mocha_type(float ldev,
     if (p_arm != MOCHA_TEL && q_arm != MOCHA_TEL) z2_upd += 2.0f; // penalty for not ending in a telomere
     if (ldev > 0)
     {
-        if ( z2_upd > 5.0 ) return MOCHA_DUP;
-        if ( !(isnan(bdev) || isnan(bdev_se)) )
+        if ( isnan(bdev) || isnan(bdev_se) )
+        {
+            if ( z2_upd > 5.0 ) return MOCHA_DUP;
+        }
+        else
         {
             float z2_dup = sqf( (ldev - 2.0f * M_LOG2E * lrr_hap2dip * bdev ) / ldev_se ) * 0.5f;
             if (z2_upd > z2_dup + 3.0f) return MOCHA_DUP;
@@ -1950,8 +1954,11 @@ static int8_t mocha_type(float ldev,
     }
     else
     {
-        if ( z2_upd > 5.0 ) return MOCHA_DEL;
-        if ( !(isnan(bdev) || isnan(bdev_se)) )
+        if ( isnan(bdev) || isnan(bdev_se) )
+        {
+            if ( z2_upd > 5.0 ) return MOCHA_DEL;
+        }
+        else
         {
             float z2_del = sqf( (ldev + 2.0f * M_LOG2E * lrr_hap2dip * bdev) / ldev_se ) * 0.5f;
             if (z2_upd > z2_del + 3.0f) return MOCHA_DEL;
@@ -2404,7 +2411,6 @@ static int get_medoid(const float *coeffs,
                       int n,
                       int order)
 {
-    n /= order + 1;
     int medoid_idx = -1;
     float prev = INFINITY;
     for (int i=0; i<n; i++)
@@ -2499,12 +2505,13 @@ static float sample_summary(sample_t *self,
     int j = 0;
     for (int i=0; i<n; i++)
         if( !isnan(self[i].x_nonpar_lrr_median) )
-            tmp_arr[j++] = self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
+            tmp_arr[j++] = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
     float cutoff = get_cutoff( tmp_arr, j );
     for (int i=0; i<n; i++)
     {
-        if( self[i].x_nonpar_lrr_median - self[i].stats.lrr_median < cutoff ) self[i].sex = SEX_MAL;
-        else if( self[i].x_nonpar_lrr_median - self[i].stats.lrr_median > cutoff ) self[i].sex = SEX_FEM;
+        float tmp = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
+        if( tmp < cutoff ) self[i].sex = SEX_MAL;
+        else if( tmp > cutoff ) self[i].sex = SEX_FEM;
     }
 
     if ( model->flags & WGS_DATA )
@@ -2516,10 +2523,10 @@ static float sample_summary(sample_t *self,
     if ( isnan(model->lrr_hap2dip) || isnan(model->lrr_auto2sex) )
     {
         j = 0;
-        for (int i=0; i<n; i++) if ( self[i].sex == SEX_MAL ) tmp_arr[j++] = self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
+        for (int i=0; i<n; i++) if ( self[i].sex == SEX_MAL ) tmp_arr[j++] = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
         float lrr_males = get_median( tmp_arr, j, NULL );
         j = 0;
-        for (int i=0; i<n; i++) if ( self[i].sex == SEX_FEM ) tmp_arr[j++] = self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
+        for (int i=0; i<n; i++) if ( self[i].sex == SEX_FEM ) tmp_arr[j++] = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
         float lrr_females = get_median( tmp_arr, j, NULL );
         if ( isnan(model->lrr_hap2dip) ) model->lrr_hap2dip = lrr_females - lrr_males;
         if ( isnan(model->lrr_auto2sex) ) model->lrr_auto2sex = lrr_females;
@@ -3092,8 +3099,7 @@ static void usage()
     fprintf(stderr, "        --use_short_arms              use variants in short arms\n");
     fprintf(stderr, "        --use_centromeres             use variants in centromeres\n");
     fprintf(stderr, "    -p  --cnp <file>                  list of regions to genotype in BED format\n");
-    fprintf(stderr, "    -n, --cnf <list>                  comma separated list of copy number fractions for LRR+BAF model\n");
-    fprintf(stderr, "                                      [%s]\n", cnf_default);
+    fprintf(stderr, "    -n, --cnf <list>                  comma separated list of copy number fractions for LRR+BAF model [%s]\n", cnf_default);
     fprintf(stderr, "    -b, --bdev <list>                 comma separated list of inverse BAF deviations for BAF+phase model\n");
     fprintf(stderr, "                                      [%s]\n", bdev_default);
     fprintf(stderr, "    -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [%d]\n", min_dist_default);
@@ -3403,7 +3409,7 @@ int main_vcfmocha(int argc, char *argv[])
     else if ( (bcf_hdr_id2int( hdr, BCF_DT_ID, "LRR" ) < 0 || bcf_hdr_id2int( hdr, BCF_DT_ID, "BAF" ) < 0) )
         error("Error: input VCF file must contain either the AD format field or the LRR and BAF format fields\n");
     if ( model.order_lrr_gc > 0 && ( bcf_hdr_id2int( hdr, BCF_DT_ID, "GC" ) < 0 ) )
-        error("Error: input VCF has no GC info field\n");
+        error("Error: input VCF has no GC info field: use \"--order-LRR-GC 0/-1\" to disable LRR adjustment through GC correction\n");
 
     // initialize genome parameters
     model.genome.length = (int *)calloc(hdr->n[BCF_DT_CTG], sizeof(int));
@@ -3447,8 +3453,8 @@ int main_vcfmocha(int argc, char *argv[])
     int nsmpl = bcf_hdr_nsamples(hdr);
     if ( nsmpl == 0 ) error("Subsetting has removed all samples\n");
     if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Loading %d samples from the VCF file\n", nsmpl);
-    if ( nsmpl < 30 && !(model.flags & WGS_DATA) && (model.median_baf_adjust >= 0) )
-        fprintf(stderr, "Warning: median BAF adjustment with only %d samples is not recommended\n", nsmpl);
+    if ( nsmpl < model.median_baf_adjust && !(model.flags & WGS_DATA) )
+        error("Error: cannot perform median BAF adjustment with only %d samples: use \"--median-BAF-adjust -1\" to disable BAF adjustment\n", nsmpl);
 
     sample = (sample_t *)calloc(nsmpl, sizeof(sample_t));
     for (int i=0; i<nsmpl; i++)
@@ -3485,7 +3491,7 @@ int main_vcfmocha(int argc, char *argv[])
               "the regions are present in the VCF or specify the parameter\n");
 
     if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Estimated parameters: LRR-hap2dip=%.4f LRR-auto2sex=%.4f LRR-dip2trip=%.4f\n",
-        model.lrr_hap2dip, model.lrr_auto2sex, model.lrr_hap2dip * (log2f(3.0f) - 1.0f));
+        model.lrr_hap2dip, model.lrr_auto2sex, model.lrr_hap2dip * log2f(1.5f));
 
     for (int rid=0; rid < hdr->n[BCF_DT_CTG]; rid++)
     {
