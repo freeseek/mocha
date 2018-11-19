@@ -45,8 +45,7 @@ HMM Options:
         --use_short_arms              use variants in short arms
         --use_centromeres             use variants in centromeres
     -p  --cnp <file>                  list of regions to genotype in BED format
-    -n, --cnf <list>                  comma separated list of copy number fractions for LRR+BAF model
-                                      [1.0,1.5,3.0,4.0]
+    -n, --cnf <list>                  comma separated list of copy number fractions for LRR+BAF model [1.0,3.0]
     -b, --bdev <list>                 comma separated list of inverse BAF deviations for BAF+phase model
                                       [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
     -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [400]
@@ -105,7 +104,7 @@ Notice that you will need some functionalities missing from the base version of 
 
 Install latest version of <a href="https://data.broadinstitute.org/alkesgroup/Eagle/">Eagle</a>
 ```
-wget -O $HOME/bin/eagle https://data.broadinstitute.org/alkesgroup/Eagle/downloads/dev/eagle_v2.4
+wget -O $HOME/bin/eagle https://data.broadinstitute.org/alkesgroup/Eagle/downloads/dev/eagle_v2.4.1
 chmod a+x $HOME/bin/eagle
 ```
 
@@ -349,13 +348,13 @@ Create a minimal binary VCF
 ```
 $HOME/bin/bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/' | \
   $HOME/bin/bcftools reheader -h /dev/stdin $vcf | \
-  $HOME/bin/bcftools filter --no-version -Ou -e "FMT/DP<10 || FMT/GQ<20" --set-GT . | \
+  $HOME/bin/bcftools filter --no-version -Ou -e "FMT/DP<10 | FMT/GQ<20" --set-GT . | \
   $HOME/bin/bcftools annotate --no-version -Ou -x ID,QUAL,INFO,^FMT/GT,^FMT/AD | \
   $HOME/bin/bcftools norm --no-version -Ou -m -any -k | \
   $HOME/bin/bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
   $HOME/bin/bcftools index $dir/$pfx.unphased.bcf
 ```
-This will set to missing heterozygous genotypes that have low coverage or low genotyping quality, as these can cause issues.
+This will set to missing all genotypes that have low coverage or low genotyping quality, as these can cause issues.
 
 Perform basic quality control (the generated list of variants will be excluded from modeling by both eagle and mocha)
 ```
@@ -380,7 +379,7 @@ $HOME/bin/bcftools merge --no-version -Ob -o $dir/$pfx.xcl.bcf -m none $dir/$pfx
 $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 ```
 
-Phasing Pipeline
+Phasing pipeline
 ================
 
 Phase VCF file by chromosome with Eagle
@@ -388,7 +387,6 @@ Phase VCF file by chromosome with Eagle
 for chr in {1..22} X; do
   $HOME/bin/eagle \
     --geneticMapFile $map \
-    --chrom $chr \
     --outPrefix $dir/$pfx.chr$chr \
     --numThreads $thr \
     --vcfRef $kgp_pfx${chr}$kgp_sfx.bcf \
@@ -396,10 +394,13 @@ for chr in {1..22} X; do
     --vcfOutFormat b \
     --noImpMissing \
     --outputUnphased \
-    --vcfExclude $dir/$pfx.xcl.bcf && \
+    --vcfExclude $dir/$pfx.xcl.bcf \
+    --chrom $chr \
+    --pbwtIters 3 && \
   $HOME/bin/bcftools index -f $dir/$pfx.chr$chr.bcf
 done
 ```
+Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events and lower cell fractions.
 
 Extract chromosomes that do not require phasing
 ```
@@ -427,7 +428,7 @@ $HOME/bin/bcftools index -f $dir/$pfx.bcf
 Impute variants using Minimac3 (optional for array data)
 ```
 for chr in {1..22} X; do
-  $HOME/bin/bcftools annotate --no-version -Ou $dir/$pfx.bcf -a $dir/$pfx.xcl.bcf -m +XCL -r \$chr,chr\$chr | \
+  $HOME/bin/bcftools annotate --no-version -Ou $dir/$pfx.bcf -a $dir/$pfx.xcl.bcf -m +XCL -r $chr,chr$chr | \
     $HOME/bin/bcftools view --no-version -Ov -o $dir/$pfx.chr$chr.vcf -e "XCL==1"
   $HOME/bin/Minimac3-omp \
     --cpus $thr \
@@ -454,7 +455,7 @@ Remove unphased VCF and single chromosome files (optional)
 /bin/rm $dir/$pfx.{unphased,chr{{1..22},X},other}.bcf{,.csi} $dir/$pfx.chr{{1..22},X}.dose.bcf
 ```
 
-Chromosomal Alterations Pipeline
+Chromosomal alterations pipeline
 ================================
 
 Preparation steps
@@ -531,6 +532,11 @@ The output VCF will contain the following extra FORMAT fields:
 Bdev_Phase - for heterozygous calls: 1/-1 if the alternate allele is over/under represented
 ```
 
+For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to 9NM bytes. For example, if you are running 4,000 samples and chromosome 1 has ~80K variants, you will need approximately 2-3GB to run MoChA. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the --min-dist parameter (D, 400 by default) and the length of the longest contig (L) and will amount to no more than 9NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter --min-dist 400 and chromosome 1 is ~250Mbp long, you might need up to 5-6GB to run MoChA. Notice that for whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use option --median-BAF-adjust -1).
+
+Allelic imbalance pipeline
+==========================
+
 import results from MoChA into VCF file with imputed genotypes (optional for array data)
 ```
 $HOME/bin/bcftools +$HOME/bin/importFMT.so \
@@ -574,7 +580,7 @@ Split output VCF file by samples (optional)
 $HOME/bin/bcftools +$HOME/bin/split.so -Ob -o $dir/ $dir/$pfx.mocha.bcf -k FMT
 ```
 
-Plot Results
+Plot results
 ============
 
 Install basic tools (Debian/Ubuntu specific):
