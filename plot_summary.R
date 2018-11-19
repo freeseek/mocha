@@ -80,7 +80,7 @@ p2 <- ggplot(df[idx,], aes(x=BDEV, y=LDEV, color=CHROM, shape=CHROM)) +
   theme(plot.title = element_text(hjust = 0.5)) +
   facet_wrap(~SV)
 
-p3 <- ggplot(df[idx,], aes(x=BDEV, y=LDEV, color=(FLIPS!=-1), shape=(FLIPS!=-1))) +
+p3 <- ggplot(df[idx,], aes(x=BDEV, y=LDEV, color=(NFLIPS!=-1), shape=(NFLIPS!=-1))) +
   geom_hline(yintercept = c((log2(3)-1)*lrr_cn1to2, 0, -lrr_cn1to2), color = 'gray', size = .5, linetype = 'dashed') +
   geom_segment(aes(x = 0, y = 0, xend = bdev, yend = ldev1), color = 'gray', size = .5, linetype = 'dashed') +
   geom_segment(aes(x = 0, y = 0, xend = bdev, yend = ldev2), color = 'gray', size = .5, linetype = 'dashed') +
