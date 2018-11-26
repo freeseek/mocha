@@ -44,7 +44,7 @@
 
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2018-11-25"
+#define MOCHA_VERSION "2018-11-26"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -186,6 +186,7 @@ typedef struct
     int nsites;
     int nhets;
     int x_nonpar_nhets;
+    float x_nonpar_dispersion; // either rho(AD0, AD1) for WGS model or sd(BAF)
     float x_nonpar_lrr_median;
     float y_nonpar_lrr_median;
     float mt_lrr_median;
@@ -1241,17 +1242,24 @@ static float compare_wgs_models(const int16_t *ad0,
     return -(float)fx + (float)nflips * flip_log_prb * (float)M_LOG10E;
 }
 
-static double lod_lkl_beta_binomial(const int16_t *ad0,
-                                    const int16_t *ad1,
+// TODO change this or integrate with ad_lod
+static double lod_lkl_beta_binomial(const int16_t *ad0_arr,
+                                    const int16_t *ad1_arr,
                                     int n,
+                                    const int *imap,
                                     double ad_rho)
 {
     if ( n==0 || ad_rho <= 0.0 || ad_rho >= 1.0 ) return -INFINITY;
     float ret = 0.0f;
     int max1, max2;
-    get_max_sum(ad0, ad1, n, NULL, &max1, &max2);
+    get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
     beta_binom_init(&beta_binom_null, max1, max2, 0.0f, ad_rho);
-    for (int i=0; i<n; i++) ret += beta_binom_log_lkl(&beta_binom_null, ad0[i], ad1[i]);
+    for (int i=0; i<n; i++)
+    {
+        int16_t ad0 = imap ? ad0_arr[ imap[i] ] : ad0_arr[i];
+        int16_t ad1 = imap ? ad1_arr[ imap[i] ] : ad1_arr[i];
+        ret += beta_binom_log_lkl(&beta_binom_null, ad0, ad1);
+    }
     return (double)ret * M_LOG10E;
 }
 
@@ -1925,9 +1933,11 @@ static void mocha_print_ucsc(const mocha_t *mocha,
                 const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha[j].sample_idx);
                 const char *seq_name = bcf_hdr_id2name(hdr, mocha[j].rid);
                 if ( strncmp(seq_name, "chr", 3) == 0 ) fprintf(stream, "%s\t%d\t%d\t%s\t%d\t.\t%d\t%d\t%s\n", seq_name,
-                    mocha[j].beg_pos, mocha[j].end_pos, sample_name, (int)(1e3*mocha[j].cf), mocha[j].beg_pos, mocha[j].end_pos, color[i]);
+                    mocha[j].beg_pos, mocha[j].end_pos, sample_name, isnan(mocha[j].cf) ? 0 : (int)(1e3*mocha[j].cf),
+                    mocha[j].beg_pos, mocha[j].end_pos, color[i]);
                 else fprintf(stream, "chr%s\t%d\t%d\t%s\t%d\t.\t%d\t%d\t%s\n", seq_name, mocha[j].beg_pos,
-                    mocha[j].end_pos, sample_name, (int)(1e3*mocha[j].cf), mocha[j].beg_pos, mocha[j].end_pos, color[i]);
+                    mocha[j].end_pos, sample_name, isnan(mocha[j].cf) ? 0 : (int)(1e3*mocha[j].cf), mocha[j].beg_pos,
+                    mocha[j].end_pos, color[i]);
             }
         }
     }
@@ -2570,10 +2580,16 @@ static float get_cutoff(const float *v, int n)
     if ( j <= 1 ) { free(w); return NAN; }
     ks_introsort_float((size_t)j, w);
 
-    // run k-means clustering EM
+    // identify a reasonable initial split allowing for some outliers
     int k = j/2;
+    int d = (int)sqrtf((float)j) - 1;
+    while (k > 1 && w[k-1] - w[d] > w[j-1-d] - w[k-1]) k--;
+    while (k < j && w[k  ] - w[d] < w[j-1-d] - w[k  ]) k++;
+
+    // run k-means clustering EM
     while (k > 0 && w[k-1] - (w[(k-1)/2] + w[k/2])*0.5f > (w[(j+k-1)/2] + w[(j+k)/2])*0.5f - w[k-1]) k--;
     while (k < j && w[k  ] - (w[(k-1)/2] + w[k/2])*0.5f < (w[(j+k-1)/2] + w[(j+k)/2])*0.5f - w[k  ]) k++;
+
     float cutoff = ( k>0 && k<j ) ? ( w[k-1] + w[k] ) * 0.5f : NAN;
     free(w);
     return cutoff;
@@ -2698,6 +2714,17 @@ static void sample_stats(sample_t *self, const model_t *model)
             }
         }
         self->x_nonpar_lrr_median = get_median( lrr, n_imap, imap_arr );
+
+        if ( model->flags & WGS_DATA )
+        {
+            double f(double x, void *data) { return -lod_lkl_beta_binomial(ad0, ad1, n_imap, imap_arr, x); }
+            double x; kmin_brent(f, 0.0, 0.5, NULL, KMIN_EPS, &x);
+            self->x_nonpar_dispersion = (float)x;
+        }
+        else
+        {
+            self->x_nonpar_dispersion = get_sample_sd( baf, n_imap, imap_arr );
+        }
     }
     else if ( model->rid == model->genome.y_rid )
     {
@@ -2727,7 +2754,7 @@ static void sample_stats(sample_t *self, const model_t *model)
 
         if ( model->flags & WGS_DATA )
         {
-            double f(double x, void *data) { return -lod_lkl_beta_binomial(ad0, ad1, n, x); }
+            double f(double x, void *data) { return -lod_lkl_beta_binomial(ad0, ad1, n, NULL, x); }
             double x; kmin_brent(f, 0.0, 0.5, NULL, KMIN_EPS, &x);
             self->stats_arr[self->n_stats - 1].dispersion = (float)x;
         }
@@ -2779,25 +2806,25 @@ static void sample_print(const sample_t *self,
     sex[SEX_FEM] = 'F';
     if ( flags & WGS_DATA )
     {
-        fprintf(stream, "SAMPLE\tCOV_MEDIAN\tCOV_SD\tCOV_AUTO\tBAF_CORR\tBAF_CONC\tBAF_AUTO\tNSITES\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_COV_MEDIAN\tY_NONPAR_COV_MEDIAN\tMT_COV_MEDIAN\tSEX\tREL_ESS\n");
+        fprintf(stream, "SAMPLE\tCOV_MEDIAN\tCOV_SD\tCOV_AUTO\tBAF_CORR\tBAF_CONC\tBAF_AUTO\tNSITES\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_BAF_CORR\tX_NONPAR_COV_MEDIAN\tY_NONPAR_COV_MEDIAN\tMT_COV_MEDIAN\tSEX\tREL_ESS\n");
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, self[i].idx);
-            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\n", sample_name,
+            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%c\t%.4f\n", sample_name,
             expf(self[i].stats.lrr_median), expf(self[i].stats.lrr_median)*self[i].stats.lrr_sd, self[i].stats.lrr_auto, self[i].stats.dispersion,
-            self[i].stats.baf_conc, self[i].stats.baf_auto, self[i].nsites, self[i].nhets, self[i].x_nonpar_nhets, expf(self[i].x_nonpar_lrr_median),
+            self[i].stats.baf_conc, self[i].stats.baf_auto, self[i].nsites, self[i].nhets, self[i].x_nonpar_nhets, self[i].x_nonpar_dispersion, expf(self[i].x_nonpar_lrr_median),
             expf(self[i].y_nonpar_lrr_median), expf(self[i].mt_lrr_median), sex[self[i].sex], self[i].stats.rel_ess);
         }
     }
     else
     {
-        fprintf(stream, "SAMPLE\tLRR_MEDIAN\tLRR_SD\tLRR_AUTO\tBAF_SD\tBAF_CONC\tBAF_AUTO\tNSITES\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_LRR_MEDIAN\tY_NONPAR_LRR_MEDIAN\tMT_LRR_MEDIAN\tSEX\tREL_ESS\n");
+        fprintf(stream, "SAMPLE\tLRR_MEDIAN\tLRR_SD\tLRR_AUTO\tBAF_SD\tBAF_CONC\tBAF_AUTO\tNSITES\tNHETS\tX_NONPAR_NHETS\tX_NONPAR_BAF_SD\tX_NONPAR_LRR_MEDIAN\tY_NONPAR_LRR_MEDIAN\tMT_LRR_MEDIAN\tSEX\tREL_ESS\n");
         for (int i=0; i<n; i++)
         {
             const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, self[i].idx);
-            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%c\t%.4f\n", sample_name,
+            fprintf(stream, "%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%c\t%.4f\n", sample_name,
             self[i].stats.lrr_median, self[i].stats.lrr_sd, self[i].stats.lrr_auto, self[i].stats.dispersion, self[i].stats.baf_conc, self[i].stats.baf_auto,
-            self[i].nsites, self[i].nhets, self[i].x_nonpar_nhets, self[i].x_nonpar_lrr_median, self[i].y_nonpar_lrr_median,
+            self[i].nsites, self[i].nhets, self[i].x_nonpar_nhets, self[i].x_nonpar_dispersion, self[i].x_nonpar_lrr_median, self[i].y_nonpar_lrr_median,
             self[i].mt_lrr_median, sex[self[i].sex], self[i].stats.rel_ess);
         }
     }
@@ -3202,6 +3229,7 @@ static void usage()
     fprintf(stderr, "        --force-samples               only warn about unknown subset samples\n");
     fprintf(stderr, "    -t, --targets [^]<region>         restrict to comma-separated list of regions. Exclude regions with \"^\" prefix\n");
     fprintf(stderr, "    -T, --targets-file [^]<file>      restrict to regions listed in a file. Exclude regions with \"^\" prefix\n");
+    fprintf(stderr, "    -f, --apply-filters <list>        require at least one of the listed FILTER strings (e.g. \"PASS,.\")\n");
     fprintf(stderr, "    -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants\n");
     fprintf(stderr, "                                      to include (or exclude with \"^\" prefix) in the analysis\n");
     fprintf(stderr, "        --threads <int>               number of extra output compression threads [0]\n");
@@ -3307,7 +3335,6 @@ int main_vcfmocha(int argc, char *argv[])
     FILE *out_fm = stdout;
     FILE *out_fg = NULL;
     FILE *out_fu = NULL;
-    bcf_srs_t *sr = NULL;
     bcf_hdr_t *hdr = NULL;
     bcf_hdr_t *out_hdr = NULL;
     htsFile *out_fh = NULL;
@@ -3334,6 +3361,10 @@ int main_vcfmocha(int argc, char *argv[])
     model.genome.y_rid = -1;
     model.genome.mt_rid = -1;
 
+    // create synced reader object
+    bcf_srs_t *sr = bcf_sr_init();
+    bcf_sr_set_opt(sr, BCF_SR_REQUIRE_IDX);
+
     int c;
     char *tmp = NULL;
 
@@ -3344,14 +3375,15 @@ int main_vcfmocha(int argc, char *argv[])
         {"samples", required_argument, NULL, 's'},
         {"samples-file", required_argument, NULL, 'S'},
         {"force-samples", no_argument, NULL, 1},
-        {"targets",required_argument,NULL,'t'},
-        {"targets-file",required_argument,NULL,'T'},
-        {"variants", required_argument, NULL,'v'},
+        {"targets", required_argument, NULL, 't'},
+        {"targets-file", required_argument, NULL, 'T'},
+        {"apply-filters", required_argument, NULL, 'f'},
+        {"variants", required_argument, NULL, 'v'},
         {"threads", required_argument, NULL, 9},
         {"output", required_argument, NULL, 'o'},
         {"output-type", required_argument, NULL, 'O'},
         {"no-version", no_argument, NULL, 8},
-        {"no-annotations", no_argument, NULL,'a'},
+        {"no-annotations", no_argument, NULL, 'a'},
         {"mosaic-calls", required_argument, NULL, 'm'},
         {"genome-stats", required_argument, NULL, 'g'},
         {"ucsc-bed", required_argument, NULL, 'u'},
@@ -3375,7 +3407,7 @@ int main_vcfmocha(int argc, char *argv[])
         {"LRR-weight", required_argument, NULL, 22},
         {NULL, 0, NULL, 0}
     };
-    while ((c = getopt_long(argc, argv, "h?r:R:s:S:t:T:v:o:O:am:g:u:lp:c:b:d:", loptions, NULL)) >= 0)
+    while ((c = getopt_long(argc, argv, "h?r:R:s:S:t:T:f:v:o:O:am:g:u:lp:c:b:d:", loptions, NULL)) >= 0)
     {
         switch (c)
         {
@@ -3386,6 +3418,7 @@ int main_vcfmocha(int argc, char *argv[])
             case  1 : force_samples = 1; break;
             case 't': targets_list = optarg; break;
             case 'T': targets_list = optarg; targets_is_file = 1; break;
+            case 'f': sr->apply_filters = optarg; break;
             case 'v':
                 if (optarg[0]=='^')
                 {
@@ -3522,10 +3555,6 @@ int main_vcfmocha(int argc, char *argv[])
     }
     else input_fname = argv[optind];
     if ( !input_fname ) usage();
-
-    // create synced reader object
-    sr = bcf_sr_init();
-    bcf_sr_set_opt(sr, BCF_SR_REQUIRE_IDX);
 
     // read in the regions from the command line
     if ( targets_list )
