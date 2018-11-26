@@ -116,6 +116,7 @@ typedef struct
     float *cnf, *bdev;
     int cnf_n, bdev_n;
     int min_dst;
+    float lrr_cutoff;
     float lrr_hap2dip;
     float lrr_auto2sex;
     float lrr_bias;
@@ -2568,7 +2569,7 @@ static int get_medoid(const float *coeffs,
 }
 
 // groups numbers in two separate distributions
-static float get_cutoff(const float *v, int n)
+static float get_lrr_cutoff(const float *v, int n)
 {
     if ( n <= 1 ) return NAN;
     float *w = (float *)malloc(n * sizeof(float));
@@ -2596,9 +2597,9 @@ static float get_cutoff(const float *v, int n)
 }
 
 // this function computes the median of contig stats
-static float sample_summary(sample_t *self,
-                            int n,
-                            model_t *model)
+static void sample_summary(sample_t *self,
+                           int n,
+                           model_t *model)
 {
     float *tmp_arr = (float *)malloc(n * sizeof(float));
     int m_tmp = n;
@@ -2640,27 +2641,35 @@ static float sample_summary(sample_t *self,
         free(self[i].stats_arr);
     }
 
-    int j = 0;
-    for (int i=0; i<n; i++)
-        if( !isnan(self[i].x_nonpar_lrr_median) )
-            tmp_arr[j++] = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
-    float cutoff = get_cutoff( tmp_arr, j );
+    if ( model->flags & WGS_DATA )
+    {
+        if ( isnan(model->lrr_cutoff) ) model->lrr_cutoff = -0.3f; // arbitrary cutoff between -M_LN2 and 0
+        if ( isnan(model->lrr_hap2dip) ) model->lrr_hap2dip = (float)M_LN2;
+        if ( isnan(model->lrr_auto2sex) ) model->lrr_auto2sex = 0.0f;
+    }
+
+    // determine LRR cutoff between haploid and diploid
+    if ( isnan(model->lrr_cutoff) )
+    {
+        int j = 0;
+        for (int i=0; i<n; i++)
+            if( !isnan(self[i].x_nonpar_lrr_median) )
+                tmp_arr[j++] = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
+        model->lrr_cutoff = get_lrr_cutoff( tmp_arr, j );
+    }
+
+    // determine sex of samples
     for (int i=0; i<n; i++)
     {
         float tmp = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
-        if( tmp < cutoff ) self[i].sex = SEX_MAL;
-        else if( tmp > cutoff ) self[i].sex = SEX_FEM;
+        if( tmp < model->lrr_cutoff ) self[i].sex = SEX_MAL;
+        else if( tmp > model->lrr_cutoff ) self[i].sex = SEX_FEM;
     }
 
-    if ( model->flags & WGS_DATA )
-    {
-        model->lrr_hap2dip = (float)M_LN2;
-        model->lrr_auto2sex = 0.0f;
-    }
-
+    // determine LRR difference between haploid and diploid
     if ( isnan(model->lrr_hap2dip) || isnan(model->lrr_auto2sex) )
     {
-        j = 0;
+        int j = 0;
         for (int i=0; i<n; i++) if ( self[i].sex == SEX_MAL ) tmp_arr[j++] = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
         float lrr_males = get_median( tmp_arr, j, NULL );
         j = 0;
@@ -2670,7 +2679,6 @@ static float sample_summary(sample_t *self,
         if ( isnan(model->lrr_auto2sex) ) model->lrr_auto2sex = lrr_females;
     }
     free(tmp_arr);
-    return cutoff;
 }
 
 // this function computes several contig stats and then clears the contig data from the sample
@@ -3262,6 +3270,7 @@ static void usage()
     fprintf(stderr, "        --short_arm_chrs <list>       list of chromosomes with short arms [%s]\n", short_arm_chrs_dflt);
     fprintf(stderr, "        --use_short_arms              use variants in short arms\n");
     fprintf(stderr, "        --use_centromeres             use variants in centromeres\n");
+    fprintf(stderr, "        --LRR-cutoff <float>          LRR cutoff between haploid and diploid [estimated from X nonPAR]\n");
     fprintf(stderr, "        --LRR-hap2dip <float>         LRR difference between haploid and diploid [estimated from X nonPAR]\n");
     fprintf(stderr, "        --LRR-auto2sex <float>        LRR difference between autosomes and diploid sex chromosomes [estimated from X nonPAR]\n");
     fprintf(stderr, "        --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [%g]\n", lrr_bias_dflt);
@@ -3353,6 +3362,7 @@ int main_vcfmocha(int argc, char *argv[])
     model.cen_log_prb = logf( cen_prb_dflt );
     model.min_dst = min_dst_dflt;
     model.lrr_bias = lrr_bias_dflt;
+    model.lrr_cutoff = NAN;
     model.lrr_hap2dip = NAN;
     model.lrr_auto2sex = NAN;
     model.median_baf_adj = median_baf_adj_dflt;
@@ -3402,9 +3412,10 @@ int main_vcfmocha(int argc, char *argv[])
         {"short_arm_chrs", required_argument, NULL, 17},
         {"use_short_arms", no_argument, NULL, 18},
         {"use_centromeres", no_argument, NULL, 19},
-        {"LRR-hap2dip", required_argument, NULL, 20},
-        {"LRR-auto2sex", required_argument, NULL, 21},
-        {"LRR-weight", required_argument, NULL, 22},
+        {"LRR-cutoff", required_argument, NULL, 20},
+        {"LRR-hap2dip", required_argument, NULL, 21},
+        {"LRR-auto2sex", required_argument, NULL, 22},
+        {"LRR-weight", required_argument, NULL, 23},
         {NULL, 0, NULL, 0}
     };
     while ((c = getopt_long(argc, argv, "h?r:R:s:S:t:T:f:v:o:O:am:g:u:lp:c:b:d:", loptions, NULL)) >= 0)
@@ -3490,14 +3501,18 @@ int main_vcfmocha(int argc, char *argv[])
             case 18 : model.flags |= USE_SHORT_ARMS; break;
             case 19 : model.flags |= USE_CENTROMERES; break;
             case 20 :
+                model.lrr_cutoff = strtof(optarg, &tmp);
+                if ( *tmp ) error("Could not parse: --LRR-cutoff %s\n", optarg);
+                break;
+            case 21 :
                 model.lrr_hap2dip = strtof(optarg, &tmp);
                 if ( *tmp ) error("Could not parse: --LRR-hap2dip %s\n", optarg);
                 break;
-            case 21 :
+            case 22 :
                 model.lrr_auto2sex = strtof(optarg, &tmp);
                 if ( *tmp ) error("Could not parse: --LRR-auto2sex %s\n", optarg);
                 break;
-            case 22 :
+            case 23 :
                 model.lrr_bias = strtof(optarg, &tmp);
                 if ( *tmp ) error("Could not parse: --LRR-weight %s\n", optarg);
                 break;
@@ -3649,22 +3664,23 @@ int main_vcfmocha(int argc, char *argv[])
         for (int j=0; j<nsmpl; j++) sample_stats(sample + j, &model);
     }
 
-    if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Compute and print sample statistics\n");
-    float cutoff = sample_summary(sample, nsmpl, &model);
-    if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Estimated X nonPAR LRR cutoff for sex determination: %.4f\n", cutoff);
+    sample_summary(sample, nsmpl, &model);
     int cnt[3] = {0, 0, 0}; for (int i=0; i<nsmpl; i++) cnt[sample[i].sex]++;
     if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Estimated %d sample(s) of unknown sex, %d male(s) and %d female(s)\n", cnt[SEX_UNK], cnt[SEX_MAL], cnt[SEX_FEM]);
     sample_print(sample, nsmpl, out_fg, hdr, model.flags);
 
+    if ( isnan( model.lrr_cutoff ) )
+        error("Error: Unable to estimate LRR-cutoff. Make sure "
+              "the X nonPAR region and both male and female samples are present in the VCF or specify the parameter\n");
     if ( isnan( model.lrr_hap2dip ) )
-        error("Error: Unable to estimate LRR-hap2dip from X nonPAR. Make sure "
-              "the regions are present in the VCF or specify the parameter\n");
+        error("Error: Unable to estimate LRR-hap2dip. Make sure "
+              "the X nonPAR region is present in the VCF or specify the parameter\n");
     if ( isnan( model.lrr_auto2sex ) )
-        error("Error: Unable to estimate LRR-auto2sex from autosomes and X nonPAR. Make sure "
-              "the regions are present in the VCF or specify the parameter\n");
+        error("Error: Unable to estimate LRR-auto2sex. Make sure "
+              "the both autosomes and the X nonPAR region are present in the VCF or specify the parameter\n");
 
-    if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Estimated parameters: LRR-hap2dip=%.4f LRR-auto2sex=%.4f LRR-dip2trip=%.4f\n",
-        model.lrr_hap2dip, model.lrr_auto2sex, model.lrr_hap2dip * log2f(1.5f));
+    if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Model LRR parameters: LRR-cutoff=%.4f LRR-hap2dip=%.4f LRR-auto2sex=%.4f\n",
+        model.lrr_cutoff, model.lrr_hap2dip, model.lrr_auto2sex);
 
     for (int rid=0; rid < hdr->n[BCF_DT_CTG]; rid++)
     {
