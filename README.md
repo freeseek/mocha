@@ -56,6 +56,7 @@ HMM Options:
         --short_arm_chrs <list>       list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
         --use_short_arms              use variants in short arms
         --use_centromeres             use variants in centromeres
+        --LRR-cutoff <float>          LRR cutoff between haploid and diploid [estimated from X nonPAR]
         --LRR-hap2dip <float>         LRR difference between haploid and diploid [estimated from X nonPAR]
         --LRR-auto2sex <float>        LRR difference between autosomes and diploid sex chromosomes [estimated from X nonPAR]
         --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [0.2]
