@@ -21,6 +21,8 @@ General Options:
     -s, --samples [^]<list>           comma separated list of samples to include (or exclude with "^" prefix)
     -S, --samples-file [^]<file>      file of samples to include (or exclude with "^" prefix)
         --force-samples               only warn about unknown subset samples
+    -t, --targets [^]<region>         restrict to comma-separated list of regions. Exclude regions with "^" prefix
+    -T, --targets-file [^]<file>      restrict to regions listed in a file. Exclude regions with "^" prefix
     -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants
                                       to include (or exclude with "^" prefix) in the analysis
         --threads <int>               number of extra output compression threads [0]
@@ -36,30 +38,30 @@ Output Options:
     -l  --no-log                      suppress progress report on standard error
 
 HMM Options:
-    -x, --xy-prob <float>             transition probability [1e-09]
-    -z, --err-prob <float>            uniform error probability [1e-04]
-    -f, --flip-prob <float>           phase flip probability [1e-02]
-    -t, --telomere-advantage <float>  telomere advantage [1e-02]
-    -c, --centromere-penalty <float>  centromere penalty [1e-04]
-        --short_arm_chrs <list>       list of short arm chromosomes [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
-        --use_short_arms              use variants in short arms
-        --use_centromeres             use variants in centromeres
     -p  --cnp <file>                  list of regions to genotype in BED format
-    -n, --cnf <list>                  comma separated list of copy number fractions for LRR+BAF model [1.0,3.0]
+    -c, --cnf <list>                  comma separated list of copy number fractions for LRR+BAF model [1.0,3.0]
     -b, --bdev <list>                 comma separated list of inverse BAF deviations for BAF+phase model
                                       [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
     -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [400]
-        --LRR-hap2dip <float>         LRR difference between haploid and diploid [estimated from X nonPAR]
-        --LRR-auto2sex <float>        LRR difference between autosomes and diploid sex chromosomes [estimated from X nonPAR]
-        --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [0.2]
         --median-BAF-adjust <int>     minimum number of heterozygous genotypes required to perform
                                       median BAF adjustment (-1 for no BAF adjustment) [5]
         --order-LRR-GC <int>          order of polynomial in local GC content to be used for polynomial
                                       regression of LRR (-1 for no LRR adjustment, 5 maximum) [2]
+        --xy-prob <float>             transition probability [1e-09]
+        --err-prob <float>            uniform error probability [1e-04]
+        --flip-prob <float>           phase flip probability [1e-02]
+        --telomere-advantage <float>  telomere advantage [1e-02]
+        --centromere-penalty <float>  centromere penalty [1e-04]
+        --short_arm_chrs <list>       list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
+        --use_short_arms              use variants in short arms
+        --use_centromeres             use variants in centromeres
+        --LRR-hap2dip <float>         LRR difference between haploid and diploid [estimated from X nonPAR]
+        --LRR-auto2sex <float>        LRR difference between autosomes and diploid sex chromosomes [estimated from X nonPAR]
+        --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [0.2]
 
 Examples:
     bcftools mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed
-    bcftools mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -n 1.0 --LRR-weight 0.5
+    bcftools mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -c 1.0 --LRR-weight 0.5
 ```
 
 Installation
@@ -400,7 +402,7 @@ for chr in {1..22} X; do
   $HOME/bin/bcftools index -f $dir/$pfx.chr$chr.bcf
 done
 ```
-Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events and lower cell fractions.
+Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions.
 
 Extract chromosomes that do not require phasing
 ```
@@ -491,7 +493,8 @@ The genome statistics file contains information for each sample analyzed in the 
   BAF_SD / BAF_CORR - BAF standard deviation or beta-binomial intra class correlation for read counts
            BAF_CONC - BAF phase concordance across phased heterozygous sites (see Vattathil et al. 2012)
            BAF_AUTO - phased BAF auto correlation across phased heterozygous sites
-              NHETS - number of heterozygous sites across the genome used for calling
+	     NSITES - number of sites across the genome for model based on LRR and BAF
+              NHETS - number of heterozygous sites across the genome for model based on BAF and genotype phase
      X_NONPAR_NHETS - number of heterozygous sites in the X nonPAR region
 X_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the X nonPAR region
 Y_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the Y nonPAR region
@@ -512,15 +515,16 @@ The mosaic calls file contains information about each mosaic and germline chromo
                Q_ARM - whether the call extends to the long arm and whether it reaches the telomere
               NSITES - number of sites used for the call
                NHETS - number of heterozygous sites used for the call
-            N50_HETS - N50 value for heterozygous sites distance
+            N50_HETS - N50 value for consecutive heterozygous sites distances
                 BDEV - BAF deviation estimate from 0.5
              BDEV_SE - standard deviation estimate for BAF deviation
       LDEV / REL_COV - LRR deviation estimate / relative coverage estimate
 LDEV_SE / REL_COV_SE - standard deviation estimate for LRR deviation / relative coverage
          LOD_LRR_BAF - LOD score for model based on LRR and BAF
        LOD_BAF_PHASE - LOD score for model based on BAF and genotype phase
-              NFLIPS - number of phase flips for calls based on BAF and genotype phase model
+              NFLIPS - number of phase flips for calls based on BAF and genotype phase model (-1 if LRR and BAF model used)
             BAF_CONC - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
+	LOD_BAF_CONC - LOD score for model based on BAF phase concordance (genome-wide corrected)
                 TYPE - Type of call based on LRR / relative coverage
                   CF - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
 ```
