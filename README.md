@@ -23,6 +23,7 @@ General Options:
         --force-samples               only warn about unknown subset samples
     -t, --targets [^]<region>         restrict to comma-separated list of regions. Exclude regions with "^" prefix
     -T, --targets-file [^]<file>      restrict to regions listed in a file. Exclude regions with "^" prefix
+    -f, --apply-filters <list>        require at least one of the listed FILTER strings (e.g. "PASS,.")
     -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants
                                       to include (or exclude with "^" prefix) in the analysis
         --threads <int>               number of extra output compression threads [0]
@@ -265,7 +266,7 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
   tabix -f -p bed $HOME/res/dup.grch38.bed.gz
 ```
 
-1000 Genomes project phase 3 imputation	panel for Minimac3 (optional for array data)
+1000 Genomes project phase 3 imputation panel for Minimac3 (optional for array data)
 ```
 cd $HOME/res/kgp
 for chr in {1..22} X; do
@@ -486,21 +487,22 @@ $HOME/bin/bcftools index -f $dir/$pfx.mocha.bcf
 
 The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns:
 ```
-             SAMPLE - sample ID
-         XXX_MEDIAN - median LRR or sequencing coverage across autosomes
-             XXX_SD - standard deviation of LRR or sequencing coverage
-           XXX_AUTO - auto correlation of LRR or sequencing coverage (after GC correction)
-  BAF_SD / BAF_CORR - BAF standard deviation or beta-binomial intra class correlation for read counts
-           BAF_CONC - BAF phase concordance across phased heterozygous sites (see Vattathil et al. 2012)
-           BAF_AUTO - phased BAF auto correlation across phased heterozygous sites
-	     NSITES - number of sites across the genome for model based on LRR and BAF
-              NHETS - number of heterozygous sites across the genome for model based on BAF and genotype phase
-     X_NONPAR_NHETS - number of heterozygous sites in the X nonPAR region
-X_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the X nonPAR region
-Y_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the Y nonPAR region
-      MT_XXX_MEDIAN - median LRR or sequencing coverage over the mitochondrial genome
-                SEX - estimated sample sex from X nonPAR region (not heterozygous sites count)
-            REL_ESS - LRR or sequencing coverage explained sum of squares fraction using local GC content
+               SAMPLE - sample ID
+           XXX_MEDIAN - median LRR or sequencing coverage across autosomes
+               XXX_SD - standard deviation of LRR or sequencing coverage
+             XXX_AUTO - auto correlation of LRR or sequencing coverage (after GC correction)
+         BAF_SD/_CORR - BAF standard deviation or beta-binomial overdispersion for read counts
+             BAF_CONC - BAF phase concordance across phased heterozygous sites (see Vattathil et al. 2012)
+             BAF_AUTO - phased BAF auto correlation across phased heterozygous sites
+               NSITES - number of sites across the genome for model based on LRR and BAF
+                NHETS - number of heterozygous sites across the genome for model based on BAF and genotype phase
+       X_NONPAR_NHETS - number of heterozygous sites in the X nonPAR region
+X_NONPAR_BAF_SD/_CORR - BAF standard deviation or beta-binomial overdispersion for read counts in the X nonPAR region
+  X_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the X nonPAR region
+  Y_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the Y nonPAR region
+        MT_XXX_MEDIAN - median LRR or sequencing coverage over the mitochondrial genome
+                  SEX - estimated sample sex from X nonPAR region (not heterozygous sites count)
+              REL_ESS - LRR or sequencing coverage explained sum of squares fraction using local GC content
 ```
 
 The mosaic calls file contains information about each mosaic and germline chromosomal alteration called and it includes the following columns:
@@ -524,7 +526,7 @@ LDEV_SE / REL_COV_SE - standard deviation estimate for LRR deviation / relative 
        LOD_BAF_PHASE - LOD score for model based on BAF and genotype phase
               NFLIPS - number of phase flips for calls based on BAF and genotype phase model (-1 if LRR and BAF model used)
             BAF_CONC - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
-	LOD_BAF_CONC - LOD score for model based on BAF phase concordance (genome-wide corrected)
+        LOD_BAF_CONC - LOD score for model based on BAF phase concordance (genome-wide corrected)
                 TYPE - Type of call based on LRR / relative coverage
                   CF - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
 ```
