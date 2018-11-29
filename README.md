@@ -92,8 +92,8 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 
 Add patches and code for plugin
 ```
-/bin/rm -f bcftools/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c,sumlog.c} bcftools/plugins/{trio-phase,mochatools,importFMT,extendFMT}.c
-wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c,sumlog.c}
+/bin/rm -f bcftools/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c} bcftools/plugins/{trio-phase,mochatools,importFMT,extendFMT}.c
+wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c}
 wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools,importFMT,extendFMT}.c
 cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.patch && cd ..
 ```
