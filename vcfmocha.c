@@ -44,7 +44,7 @@
 
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2018-11-26"
+#define MOCHA_VERSION "2018-11-29"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -2035,6 +2035,8 @@ static int get_cnp_edges(const int *pos,
 }
 
 // classify mosaic chromosomal alteration type based on LRR and BAF
+// LDEV = -log2( 1 - 2 x BDEV ) * LRR-hap2dip for duplications
+// LDEV = -log2( 1 + 2 x BDEV ) * LRR-hap2dip for deletions
 static int8_t mocha_type(float ldev,
                          float ldev_se,
                          float bdev,
@@ -2056,7 +2058,7 @@ static int8_t mocha_type(float ldev,
         }
         else
         {
-            float expected_ldev = -logf(1.0f - 2.0f * bdev) * M_LOG2E * lrr_hap2dip;
+            float expected_ldev = -logf(1.0f - 2.0f * bdev > 2.0f / 3.0f ? 1.0f - 2.0f * bdev : 2.0f / 3.0f) * M_LOG2E * lrr_hap2dip;
             float z2_dup = sqf( ( ldev - expected_ldev ) / ldev_se );
             if (z2_upd > z2_dup + 6.0f * M_LN10) return MOCHA_DUP;
             if (z2_dup > z2_upd + 6.0f * M_LN10) return MOCHA_UPD;
@@ -2083,6 +2085,7 @@ static int8_t mocha_type(float ldev,
 // BDEV = | 1 / 2 - 1 / CNF |
 // CNF = 2 / ( 1 + 2 x BDEV ) for deletions
 // CNF = 2 / ( 1 - 2 x BDEV ) for duplications
+// CNF = 2 x 2^( LDEV / LRR-hap2dip )
 static float mocha_cell_fraction(float ldev,
                                  float ldev_se,
                                  float bdev,
@@ -2095,9 +2098,9 @@ static float mocha_cell_fraction(float ldev,
         switch (type)
         {
             case MOCHA_DEL:
-                return -2.0f * (expf( ldev / lrr_hap2dip * (float)M_LN2 ) - 1.0f);
+                return ldev < -lrr_hap2dip ? 1.0f : -2.0f * (expf( ldev / lrr_hap2dip * (float)M_LN2 ) - 1.0f);
             case MOCHA_DUP:
-                return 2.0f * (expf( ldev / lrr_hap2dip * (float)M_LN2 ) - 1.0f);
+                return ldev * (float)M_LN2 > lrr_hap2dip * logf(1.5f) ? 1.0f : 2.0f * (expf( ldev / lrr_hap2dip * (float)M_LN2 ) - 1.0f);
             default:
                 return NAN;
         }
@@ -2111,7 +2114,7 @@ static float mocha_cell_fraction(float ldev,
             case MOCHA_DEL:
                 return 4.0f * bdev / (1.0f + 2.0f * bdev);
             case MOCHA_DUP:
-                return 4.0f * bdev / (1.0f - 2.0f * bdev);
+                return bdev > 1.0f / 6.0f ? 1.0f : 4.0f * bdev / (1.0f - 2.0f * bdev);
             case MOCHA_UPD:
                 return 2.0f * bdev;
             default:
