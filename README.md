@@ -168,7 +168,7 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
   bedtools groupby -c 4 -o min | \
   awk 'BEGIN {i=0; s[0]="+"; s[1]="-"} {if ($4!=x) i=(i+1)%2; x=$4; print $0"\t0\t"s[i]}' | \
   bedtools merge -s -c 4 -o distinct | \
-  cut -f1-3,5 | sed 's/^chr//' | grep -v gl | bgzip > $HOME/res/dup.grch37.bed.gz && \
+  sed 's/^chr//' | grep -v gl | bgzip > $HOME/res/dup.grch37.bed.gz && \
   tabix -f -p bed $HOME/res/dup.grch37.bed.gz
 ```
 
@@ -263,7 +263,7 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
   bedtools groupby -c 4 -o min | \
   awk 'BEGIN {i=0; s[0]="+"; s[1]="-"} {if ($4!=x) i=(i+1)%2; x=$4; print $0"\t0\t"s[i]}' | \
   bedtools merge -s -c 4 -o distinct | \
-  cut -f1-3,5 | grep -v "GL\|KI" | bgzip > $HOME/res/dup.grch38.bed.gz && \
+  grep -v "GL\|KI" | bgzip > $HOME/res/dup.grch38.bed.gz && \
   tabix -f -p bed $HOME/res/dup.grch38.bed.gz
 ```
 
@@ -490,11 +490,11 @@ The genome statistics file contains information for each sample analyzed in the 
 ```
                SAMPLE - sample ID
            XXX_MEDIAN - median LRR or sequencing coverage across autosomes
-               XXX_SD - standard deviation of LRR or sequencing coverage
-             XXX_AUTO - auto correlation of LRR or sequencing coverage (after GC correction)
+               XXX_SD - standard deviation for LRR or sequencing coverage
+             XXX_AUTO - auto correlation across consecutive sites for LRR or sequencing coverage (after GC correction)
          BAF_SD/_CORR - BAF standard deviation or beta-binomial overdispersion for read counts
              BAF_CONC - BAF phase concordance across phased heterozygous sites (see Vattathil et al. 2012)
-             BAF_AUTO - phased BAF auto correlation across phased heterozygous sites
+             BAF_AUTO - phased BAF auto correlation across consecutive phased heterozygous sites
                NSITES - number of sites across the genome for model based on LRR and BAF
                 NHETS - number of heterozygous sites across the genome for model based on BAF and genotype phase
        X_NONPAR_NHETS - number of heterozygous sites in the X nonPAR region
