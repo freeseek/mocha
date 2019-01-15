@@ -97,6 +97,7 @@ wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{Makefi
 wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools,importFMT,extendFMT}.c
 cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.patch && cd ..
 ```
+If for any reason the patches fail with an error message, contact the <a href="mailto:giulio.genovese@gmail.com">author</a> for a fix.
 
 Compile latest version of HTSlib (optionally disable bz2 and lzma) and BCFtools (make sure you are using gcc version 5 or newer or else include the -std=gnu99 compilation flag)
 ```
@@ -233,6 +234,7 @@ for chr in {1..22} X Y; do
   $HOME/bin/bcftools index -f ALL.chr${chr}_GRCh38.genotypes.20170504.bcf
 done
 ```
+Do notice though that the 1000 Genomes project team incorrectly lifted over chromosome X genotypes over PAR1 and PAR2 regions, despite this issue not being reported in the <a href="http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/README_GRCh38_liftover_20170504.txt">README</a>. This will directly affect the ability to detect chromosome Y loss events.
 
 List of common germline duplications and deletions
 ```
@@ -373,7 +375,7 @@ echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
     -x FILTER,^INFO/JK,^INFO/NS,^INFO/ExcHet,^INFO/AC_Sex_Test && \
   $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
 ```
-This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6).
+This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6). If you are using WGS data and you don't have a file with sex information, you can skip the quality control line using this information. When later running MoChA, sex will be imputed and a sex file can be computed from MoChA's output.
 
 If a file with additional variants to be excluded is available, further merge it with the generated list
 ```
