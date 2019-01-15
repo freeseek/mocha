@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2015-2018 Giulio Genovese
+   Copyright (C) 2015-2019 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -44,7 +44,7 @@
 
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2018-11-29"
+#define MOCHA_VERSION "2019-01-09"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -222,18 +222,18 @@ static inline double sq(double x) { return x*x; }
 static inline float log_mean_expf(float x, float y) { return x == y ? x : ( x > y ? x + logf( 1 + expf(y-x) ) : y + logf( 1 + expf(x-y) ) ) - (float)M_LN2; }
 
 // default values for the model
+static const char *cnf_dflt = "1.0,3.0";
+static const char *bdev_dflt = "6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0";
+static const int min_dst_dflt = 400;
+static const int median_baf_adj_dflt = 5;
+static const int order_lrr_gc_dflt = 2;
 static const float xy_prb_dflt = 1e-09f;
 static const float err_prb_dflt = 1e-04f;
 static const float flip_prb_dflt = 1e-02f;
 static const float tel_prb_dflt = 1e-02f;
 static const float cen_prb_dflt = 1e-04f;
-static const char *cnf_dflt = "1.0,3.0";
-static const char *bdev_dflt = "6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0";
 static const char *short_arm_chrs_dflt = "13,14,15,21,22,chr13,chr14,chr15,chr21,chr22";
 static const float lrr_bias_dflt = 0.2f;
-static const int min_dst_dflt = 400;
-static const int median_baf_adj_dflt = 5;
-static const int order_lrr_gc_dflt = 2;
 
 /****************************************
  * CONVERT FLOAT TO INT16 AND VICEVERSA *
@@ -470,11 +470,12 @@ static int8_t *retrace_viterbi(int T,
 }
 
 // rescale Viterbi log probabilities to avoid underflow issues
-static void rescale_log_prb(float *log_prb, int n)
+static inline void rescale_log_prb(float *log_prb, int n)
 {
     float max = -INFINITY;
     for (int i=0; i<n; i++) max = max > log_prb[i] ? max : log_prb[i];
     for (int i=0; i<n; i++) log_prb[i] -= max;
+
 }
 
 // compute the Viterbi path from BAF
@@ -616,13 +617,17 @@ static void rescale_emis_log_lkl(float *log_prb,
                                  int n,
                                  float err_log_prb)
 {
-    float min = log_prb[0] + err_log_prb;
-    float max = log_prb[0] - err_log_prb;
-    for (int i=1; i<n; i++)
-    {
-        if (log_prb[i] < min) log_prb[i] = min;
-        else if (log_prb[i] > max) log_prb[i] = max;
-    }
+//    float min = log_prb[0] + err_log_prb;
+//    float max = log_prb[0] - err_log_prb;
+//    for (int i=1; i<n; i++)
+//    {
+//        if (log_prb[i] < min) log_prb[i] = min;
+//        else if (log_prb[i] > max) log_prb[i] = max;
+//    }
+    float min_thr = -INFINITY;
+    for (int i=0; i<n; i++) if ( min_thr < log_prb[i] ) min_thr = log_prb[i];
+    min_thr += err_log_prb;
+    for (int i=0; i<n; i++) if ( log_prb[i] < min_thr ) log_prb[i] = min_thr;
 }
 
 static inline float norm_log_lkl(float x,
@@ -862,7 +867,7 @@ static float compare_models(const float *baf,
     int nflips = 0;
     for (int i=1; i<n; i++) if ( path[i-1] && path[i] && path[i-1] != path[i] ) nflips++;
     double f(double x, void *data) { return -baf_phase_lod(baf, gt_phase, n, imap, path, err_log_prb, baf_sd, x); }
-    double x, fx = kmin_brent(f, -0.5, 0.5, NULL, KMIN_EPS, &x);
+    double x, fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
     free(path);
     return -(float)fx + (float)nflips * flip_log_prb * (float)M_LOG10E;
 }
@@ -880,8 +885,8 @@ static float compare_models(const float *baf,
 
 typedef struct
 {
-    float bdev;
-    float ad_rho;
+    float p;
+    float rho;
     int max1;
     int max2;
     double *log_gamma_alpha;
@@ -895,12 +900,12 @@ typedef struct
 static beta_binom_t beta_binom_null = {NAN, NAN, 1, 1, NULL, NULL, NULL, 0, 0, 0};
 static beta_binom_t beta_binom_alt = {NAN, NAN, 1, 1, NULL, NULL, NULL, 0, 0, 0};
 
-static void get_max_sum(const int16_t *ad0,
-                        const int16_t *ad1,
-                        int n,
-                        const int *imap,
-                        int *max1,
-                        int *max2)
+void get_max_sum(const int16_t *ad0,
+                 const int16_t *ad1,
+                 int n,
+                 const int *imap,
+                 int *max1,
+                 int *max2)
 {
     *max1 = 0;
     *max2 = 0;
@@ -917,16 +922,18 @@ static void get_max_sum(const int16_t *ad0,
     }
 }
 
+// beta binomial model with parameters p and rho
+// think of p as the expected number of observed reference alleles
 static void beta_binom_init(beta_binom_t *self,
                             int max1,
                             int max2,
-                            float bdev,
-                            float ad_rho)
+                            float p,
+                            float rho)
 {
-    if ( self->bdev != bdev || self->ad_rho != ad_rho )
+    if ( self->p != p || self->rho != rho )
     {
-        self->bdev = bdev;
-        self->ad_rho = ad_rho;
+        self->p = p;
+        self->rho = rho;
         self->max1 = 1;
         self->max2 = 1;
     }
@@ -939,8 +946,8 @@ static void beta_binom_init(beta_binom_t *self,
     self->log_gamma_beta[0] = 0.0f;
     self->log_gamma_alpha_beta[0] = 0.0f;
 
-    float alpha = ( 0.5f + bdev ) * ( 1.0f - ad_rho ) / ad_rho;
-    float beta = ( 0.5f - bdev ) * ( 1.0f - ad_rho ) / ad_rho;
+    float alpha = p * ( 1.0f - rho ) / rho;
+    float beta = ( 1.0f - p ) * ( 1.0f - rho ) / rho;
 
     while ( self->max1 <= max1 )
     {
@@ -959,7 +966,7 @@ static void beta_binom_init(beta_binom_t *self,
     }
 }
 
-static inline float beta_binom_log_lkl(beta_binom_t *self, int16_t ad0, int16_t ad1)
+static inline float beta_binom_log_lkl(const beta_binom_t *self, int16_t ad0, int16_t ad1)
 {
     return ad0 == bcf_int16_missing || ad1 == bcf_int16_missing ? 0.0f : self->log_gamma_alpha[ad0] + self->log_gamma_beta[ad1] - self->log_gamma_alpha_beta[ad0 + ad1];
 }
@@ -981,7 +988,7 @@ static inline float lrr_ad_log_lkl(float lrr,
                                    float ldev,
                                    float lrr_sd,
                                    float lrr_bias,
-                                   beta_binom_t *beta_binom)
+                                   const beta_binom_t *beta_binom)
 {
     return norm_log_lkl( lrr, ldev, lrr_sd, lrr_bias ) +
         log_mean_expf( beta_binom_log_lkl( beta_binom, ad0, ad1 ),
@@ -991,7 +998,7 @@ static inline float lrr_ad_log_lkl(float lrr,
 static inline float ad_phase_log_lkl(int16_t ad0,
                                      int16_t ad1,
                                      int8_t phase,
-                                     beta_binom_t *beta_binom)
+                                     const beta_binom_t *beta_binom)
 {
     return phase == 0 ? log_mean_expf( beta_binom_log_lkl( beta_binom, ad0, ad1 ),
                                        beta_binom_log_lkl( beta_binom, ad1, ad0 ) ) :
@@ -1021,7 +1028,7 @@ static float *lrr_ad_emis_log_lkl(const float *lrr,
         int max1, max2;
         get_max_sum(ad0, ad1, T, NULL, &max1, &max2);
         beta_binom_t *beta_binom = i==0 ? &beta_binom_null : &beta_binom_alt;
-        beta_binom_init(beta_binom, max1, max2, bdev, ad_rho);
+        beta_binom_init(beta_binom, max1, max2, 0.5f + bdev, ad_rho);
 
         for (int t=0; t<T; t++)
         {
@@ -1050,10 +1057,11 @@ static float *ad_phase_emis_log_lkl(const int16_t *ad0,
     for (int i=0; i<1+m; i++)
     {
         float bdev = i==0 ? 0.0f : bdev_arr[i-1];
+        // TODO this function should come out of the loop
         int max1, max2;
         get_max_sum(ad0, ad1, T, imap, &max1, &max2);
         beta_binom_t *beta_binom = i==0 ? &beta_binom_null : &beta_binom_alt;
-        beta_binom_init(beta_binom, max1, max2, bdev, ad_rho);
+        beta_binom_init(beta_binom, max1, max2, 0.5f + bdev, ad_rho);
 
         for (int t=0; t<T; t++)
         {
@@ -1085,8 +1093,8 @@ static int cnp_edge_is_not_cn2_lrr_ad(const float *lrr,
 {
     int max1, max2;
     get_max_sum(ad0, ad1, n, NULL, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.0f, ad_rho);
-    beta_binom_init(&beta_binom_alt, max1, max2, bdev, ad_rho);
+    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
+    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + bdev, ad_rho);
 
     // test left edge
     float sum_log_lkl = 0.0f;
@@ -1137,8 +1145,8 @@ static double lrr_ad_lod(const float *lrr_arr,
     float bdev = fabsf( 0.5f - 1.0f / cnf );
     int max1, max2;
     get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.0f, ad_rho);
-    beta_binom_init(&beta_binom_alt, max1, max2, bdev, ad_rho);
+    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
+    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + bdev, ad_rho);
     float ret = 0.0f;
     for (int i=0; i<n; i++)
     {
@@ -1167,8 +1175,8 @@ static double ad_lod(const int16_t *ad0_arr,
 
     int max1, max2;
     get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.0f, ad_rho);
-    beta_binom_init(&beta_binom_alt, max1, max2, (float)bdev, ad_rho);
+    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
+    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + (float)bdev, ad_rho);
     float ret = 0.0f;
     for (int i=0; i<n; i++)
     {
@@ -1199,8 +1207,8 @@ static double ad_phase_lod(const int16_t *ad0_arr,
 
     int max1, max2;
     get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.0f, ad_rho);
-    beta_binom_init(&beta_binom_alt, max1, max2, (float)bdev, ad_rho);
+    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
+    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + (float)bdev, ad_rho);
     float ret = 0.0f;
     for (int i=0; i<n; i++)
     {
@@ -1238,7 +1246,7 @@ static float compare_wgs_models(const int16_t *ad0,
     int nflips = 0;
     for (int i=1; i<n; i++) if ( path[i-1] && path[i] && path[i-1] != path[i] ) nflips++;
     double f(double x, void *data) { return -ad_phase_lod(ad0, ad1, gt_phase, n, imap, path, err_log_prb, ad_rho, x); }
-    double x, fx = kmin_brent(f, -0.5, 0.5, NULL, KMIN_EPS, &x);
+    double x, fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
     free(path);
     return -(float)fx + (float)nflips * flip_log_prb * (float)M_LOG10E;
 }
@@ -1254,7 +1262,7 @@ static double lod_lkl_beta_binomial(const int16_t *ad0_arr,
     float ret = 0.0f;
     int max1, max2;
     get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.0f, ad_rho);
+    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
     for (int i=0; i<n; i++)
     {
         int16_t ad0 = imap ? ad0_arr[ imap[i] ] : ad0_arr[i];
@@ -1919,26 +1927,42 @@ static void mocha_print_ucsc(const mocha_t *mocha,
     desc[MOCHA_DEL] = "Deletions";
     desc[MOCHA_DUP] = "Duplications";
     desc[MOCHA_UPD] = "CNN-LOHs";
-    const char *color[4];
-    color[MOCHA_UNK] = "127,127,127";
-    color[MOCHA_DEL] = "255,0,0";
-    color[MOCHA_DUP] = "0,0,255";
-    color[MOCHA_UPD] = "0,255,0";
     for (int i=0; i<4; i++)
     {
         fprintf(stream, "track name=%s description=\"%s\" visibility=4 priority=1 itemRgb=\"On\"\n", name[i], desc[i]);
         for (int j=0; j<n; j++)
         {
+            uint8_t red = 0, green = 0, blue = 0;
+            uint8_t color_shift = (uint8_t)( ( 1.0f - mocha[j].cf * mocha[j].cf ) * 128.0f );
+            switch (i)
+            {
+                case MOCHA_UNK: red = 127; green = 127; blue = 127; break;
+                case MOCHA_DEL:
+                    red = (uint8_t)255 - color_shift;
+                    green = color_shift;
+                    blue = color_shift;
+                    break;
+                case MOCHA_DUP:
+                    red = color_shift;
+                    green = color_shift;
+                    blue = (uint8_t)255 - color_shift;
+                    break;
+                case MOCHA_UPD:
+                    red = color_shift;
+                    green = (uint8_t)255 - color_shift;
+                    blue = color_shift;
+                    break;
+            }
             if (i == mocha[j].type)
             {
                 const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha[j].sample_idx);
                 const char *seq_name = bcf_hdr_id2name(hdr, mocha[j].rid);
-                if ( strncmp(seq_name, "chr", 3) == 0 ) fprintf(stream, "%s\t%d\t%d\t%s\t%d\t.\t%d\t%d\t%s\n", seq_name,
+                if ( strncmp(seq_name, "chr", 3) == 0 ) fprintf(stream, "%s\t%d\t%d\t%s\t%d\t.\t%d\t%d\t%d,%d,%d\n", seq_name,
                     mocha[j].beg_pos, mocha[j].end_pos, sample_name, isnan(mocha[j].cf) ? 0 : (int)(1e3*mocha[j].cf),
-                    mocha[j].beg_pos, mocha[j].end_pos, color[i]);
-                else fprintf(stream, "chr%s\t%d\t%d\t%s\t%d\t.\t%d\t%d\t%s\n", seq_name, mocha[j].beg_pos,
+                    mocha[j].beg_pos, mocha[j].end_pos, red, green ,blue);
+                else fprintf(stream, "chr%s\t%d\t%d\t%s\t%d\t.\t%d\t%d\t%d,%d,%d\n", seq_name, mocha[j].beg_pos,
                     mocha[j].end_pos, sample_name, isnan(mocha[j].cf) ? 0 : (int)(1e3*mocha[j].cf), mocha[j].beg_pos,
-                    mocha[j].end_pos, color[i]);
+                    mocha[j].end_pos, red, green ,blue);
             }
         }
     }
@@ -1950,7 +1974,8 @@ static void mocha_print(const mocha_t *mocha,
                         FILE *restrict stream,
                         const bcf_hdr_t *hdr,
                         int flags,
-                        char *genome)
+                        char *genome,
+                        float lrr_hap2dip)
 {
     if (stream == NULL) return;
     char sex[3];
@@ -1968,36 +1993,51 @@ static void mocha_print(const mocha_t *mocha,
     arm_type[MOCHA_NAN] = 'N';
     arm_type[MOCHA_ARM] = 'Y';
     arm_type[MOCHA_TEL] = 'T';
-    if ( flags & WGS_DATA )
+    fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tLOD_BAF_CONC\tTYPE\tCF\n", genome, genome);
+    for (int i=0; i<n; i++)
     {
-        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tLOD_BAF_CONC\tTYPE\tCF\n", genome, genome);
-        for (int i=0; i<n; i++)
-        {
-            const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
-            const char *seq_name = bcf_hdr_id2name(hdr, mocha->rid);
-            fprintf(stream, "%s\t%c\t%s\t%d\t%d\t%d\t%c\t%c\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.2f\t%.2f\t%d\t%.4f\t%.2f\t%s\t%.4f\n",
-                sample_name, sex[mocha->sex], seq_name, mocha->beg_pos, mocha->end_pos, mocha->length,
-                arm_type[mocha->p_arm], arm_type[mocha->q_arm], mocha->nsites, mocha->nhets, mocha->n50_hets,
-                mocha->bdev, mocha->bdev_se, 2.0f * expf(mocha->ldev), 2.0f * expf(mocha->ldev) * mocha->ldev_se,
-                mocha->lod_lrr_baf, mocha->lod_baf_phase, mocha->nflips, mocha->baf_conc, mocha->lod_baf_conc, type[mocha->type], mocha->cf);
-            mocha++;
-        }
+        const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
+        const char *seq_name = bcf_hdr_id2name(hdr, mocha->rid);
+        fprintf(stream, "%s\t%c\t%s\t%d\t%d\t%d\t%c\t%c\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.2f\t%.2f\t%d\t%.4f\t%.2f\t%s\t%.4f\n",
+            sample_name, sex[mocha->sex], seq_name, mocha->beg_pos, mocha->end_pos, mocha->length,
+            arm_type[mocha->p_arm], arm_type[mocha->q_arm], mocha->nsites, mocha->nhets, mocha->n50_hets,
+            mocha->bdev, mocha->bdev_se, 2.0f * expf(mocha->ldev / lrr_hap2dip * (float)M_LN2),
+            2.0f * expf(mocha->ldev / lrr_hap2dip * (float)M_LN2) * mocha->ldev_se  / lrr_hap2dip * (float)M_LN2,
+            mocha->lod_lrr_baf, mocha->lod_baf_phase, mocha->nflips, mocha->baf_conc, mocha->lod_baf_conc, type[mocha->type], mocha->cf);
+        mocha++;
     }
-    else
-    {
-        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tLDEV\tLDEV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tLOD_BAF_CONC\tTYPE\tCF\n", genome, genome);
-        for (int i=0; i<n; i++)
-        {
-            const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
-            const char *seq_name = bcf_hdr_id2name(hdr, mocha->rid);
-            fprintf(stream, "%s\t%c\t%s\t%d\t%d\t%d\t%c\t%c\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.2f\t%.2f\t%d\t%.4f\t%.2f\t%s\t%.4f\n",
-                sample_name, sex[mocha->sex], seq_name, mocha->beg_pos, mocha->end_pos, mocha->length,
-                arm_type[mocha->p_arm], arm_type[mocha->q_arm], mocha->nsites, mocha->nhets, mocha->n50_hets,
-                mocha->bdev, mocha->bdev_se, mocha->ldev, mocha->ldev_se, mocha->lod_lrr_baf, mocha->lod_baf_phase,
-                mocha->nflips, mocha->baf_conc, mocha->lod_baf_conc, type[mocha->type], mocha->cf);
-            mocha++;
-        }
-    }
+//    if ( flags & WGS_DATA )
+//    {
+//        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tLOD_BAF_CONC\tTYPE\tCF\n", genome, genome);
+//        for (int i=0; i<n; i++)
+//        {
+//            const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
+//            const char *seq_name = bcf_hdr_id2name(hdr, mocha->rid);
+//            fprintf(stream, "%s\t%c\t%s\t%d\t%d\t%d\t%c\t%c\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.2f\t%.2f\t%d\t%.4f\t%.2f\t%s\t%.4f\n",
+//                sample_name, sex[mocha->sex], seq_name, mocha->beg_pos, mocha->end_pos, mocha->length,
+//                arm_type[mocha->p_arm], arm_type[mocha->q_arm], mocha->nsites, mocha->nhets, mocha->n50_hets,
+//                mocha->bdev, mocha->bdev_se, 2.0f * expf(mocha->ldev), 2.0f * expf(mocha->ldev) * mocha->ldev_se,
+//                mocha->lod_lrr_baf, mocha->lod_baf_phase, mocha->nflips, mocha->baf_conc, mocha->lod_baf_conc, type[mocha->type], mocha->cf);
+//            mocha++;
+//        }
+//    }
+//    else
+//    {
+//        // fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tLDEV\tLDEV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tLOD_BAF_CONC\tTYPE\tCF\n", genome, genome);
+//        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tLOD_BAF_CONC\tTYPE\tCF\n", genome, genome);
+//        for (int i=0; i<n; i++)
+//        {
+//            const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
+//            const char *seq_name = bcf_hdr_id2name(hdr, mocha->rid);
+//            fprintf(stream, "%s\t%c\t%s\t%d\t%d\t%d\t%c\t%c\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.2f\t%.2f\t%d\t%.4f\t%.2f\t%s\t%.4f\n",
+//                sample_name, sex[mocha->sex], seq_name, mocha->beg_pos, mocha->end_pos, mocha->length,
+//                arm_type[mocha->p_arm], arm_type[mocha->q_arm], mocha->nsites, mocha->nhets, mocha->n50_hets,
+//                mocha->bdev, mocha->bdev_se, 2.0f * expf(mocha->ldev / lrr_hap2dip * (float)M_LN2),
+//                2.0f * expf(mocha->ldev / lrr_hap2dip * (float)M_LN2) * mocha->ldev_se  / lrr_hap2dip * (float)M_LN2,
+//                mocha->lod_lrr_baf, mocha->lod_baf_phase, mocha->nflips, mocha->baf_conc, mocha->lod_baf_conc, type[mocha->type], mocha->cf);
+//            mocha++;
+//        }
+//    }
     if (stream != stdout && stream != stderr) fclose(stream);
 }
 
@@ -2040,7 +2080,7 @@ static int get_cnp_edges(const int *pos,
 static int8_t mocha_type(float ldev,
                          float ldev_se,
                          float bdev,
-                         float bdev_se,
+                         int nhets,
                          float lrr_hap2dip,
                          int8_t p_arm,
                          int8_t q_arm)
@@ -2050,9 +2090,10 @@ static int8_t mocha_type(float ldev,
     // equivalent of a 2 LOD score bonus for ending in one but not two telomeres
     if ( ( p_arm == MOCHA_TEL && q_arm != MOCHA_TEL ) || ( p_arm != MOCHA_TEL && q_arm == MOCHA_TEL ) ) z2_upd -= 4.0f * M_LN10;
     // if one model has 3 LOD scores point more than the other model, select the better model
+
     if (ldev > 0)
     {
-        if ( isnan(bdev) || isnan(bdev_se) )
+        if ( nhets < 5 || isnan(bdev) )
         {
             if ( z2_upd > 10.0 * M_LN10 ) return MOCHA_DUP;
         }
@@ -2066,7 +2107,7 @@ static int8_t mocha_type(float ldev,
     }
     else
     {
-        if ( isnan(bdev) || isnan(bdev_se) )
+        if ( nhets < 5 || isnan(bdev) )
         {
             if ( z2_upd > 10.0 * M_LN10 ) return MOCHA_DEL;
         }
@@ -2089,11 +2130,11 @@ static int8_t mocha_type(float ldev,
 static float mocha_cell_fraction(float ldev,
                                  float ldev_se,
                                  float bdev,
-                                 float bdev_se,
+                                 int nhets,
                                  int8_t type,
                                  float lrr_hap2dip)
 {
-    if (isnan(bdev) || isnan(bdev_se))
+    if ( nhets < 5 || isnan(bdev) )
     {
         switch (type)
         {
@@ -2109,14 +2150,14 @@ static float mocha_cell_fraction(float ldev,
     {
         switch (type)
         {
-            case MOCHA_UNK:
-                return 4.0f * bdev; // here it assumes it is either a deletion or a duplication
             case MOCHA_DEL:
                 return 4.0f * bdev / (1.0f + 2.0f * bdev);
             case MOCHA_DUP:
                 return bdev > 1.0f / 6.0f ? 1.0f : 4.0f * bdev / (1.0f - 2.0f * bdev);
             case MOCHA_UPD:
                 return 2.0f * bdev;
+            case MOCHA_UNK:
+                return bdev < 0.05f ? 4.0f * bdev : NAN; // here it assumes it is either a deletion or a duplication
             default:
                 return NAN;
         }
@@ -2343,7 +2384,7 @@ static void sample_run(sample_t *self,
                             else return -baf_lod(baf + a, b + 1 - a, NULL, model->err_log_prb, self->stats.dispersion, x);
                         }
                         double x;
-                        kmin_brent(f, 0.0, 0.5, NULL, KMIN_EPS, &x);
+                        kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
                         mocha.bdev = fabsf((float)x);
                     }
                     else mocha.bdev = NAN;
@@ -2444,7 +2485,7 @@ static void sample_run(sample_t *self,
                 if ( model->flags & WGS_DATA ) return -lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.nsites, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
                 else return -lrr_baf_lod(lrr + a, baf + a, mocha.nsites, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
             }
-            double x, fx = kmin_brent(f, ( mocha.ldev > 0 ) ? 2.0 : 0, ( mocha.ldev > 0 ) ? 4.0 : 2.0, NULL, KMIN_EPS, &x);
+            double x, fx = kmin_brent(f, 1.0, 3.0, NULL, KMIN_EPS, &x);
             mocha.lod_lrr_baf = -(float)fx;
 
             if ( hmm_model == LRR_BAF )
@@ -2478,7 +2519,7 @@ static void sample_run(sample_t *self,
                         if ( model->flags & WGS_DATA ) return -ad_lod(ad0, ad1, n_hets_imap, hets_imap_arr, model->err_log_prb, self->stats.dispersion, x);
                         else return -baf_lod(baf, n_hets_imap, hets_imap_arr, model->err_log_prb, self->stats.dispersion, x);
                     }
-                    fx = kmin_brent(f, 0.0, 0.5, NULL, KMIN_EPS, &x);
+                    fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
                     mocha.bdev = fabsf((float)x);
                 }
                 else mocha.bdev = NAN;
@@ -2496,7 +2537,7 @@ static void sample_run(sample_t *self,
                     if ( model->flags & WGS_DATA ) return -ad_phase_lod(ad0, ad1, gt_phase, mocha.nhets, imap_arr + beg[i], path + beg[i], model->err_log_prb, self->stats.dispersion, x);
                     else return -baf_phase_lod(baf, gt_phase, mocha.nhets, imap_arr + beg[i], path + beg[i], model->err_log_prb, self->stats.dispersion, x);
                 }
-                double x, fx = kmin_brent(f, -0.5f, 0.5f, NULL, KMIN_EPS, &x);
+                double x, fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
                 mocha.bdev = fabsf((float)x);
                 mocha.lod_baf_phase = -(float)fx + (float)mocha.nflips * model->flip_log_prb * (float)M_LOG10E;
 
@@ -2505,8 +2546,8 @@ static void sample_run(sample_t *self,
                 for (int j=beg[i]; j<=end[i]; j++) bdev_phase[ imap_arr[j] ] = (int8_t)SIGN( path[j] ) * gt_phase[ imap_arr[j] ];
             }
 
-            mocha.type = mocha_type(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.bdev_se, model->lrr_hap2dip, mocha.p_arm, mocha.q_arm);
-            mocha.cf = mocha_cell_fraction(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.bdev_se, mocha.type, model->lrr_hap2dip);
+            mocha.type = mocha_type(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.nhets, model->lrr_hap2dip, mocha.p_arm, mocha.q_arm);
+            mocha.cf = mocha_cell_fraction(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.nhets, mocha.type, model->lrr_hap2dip);
             mocha_table->n++;
             hts_expand(mocha_t, mocha_table->n, mocha_table->m, mocha_table->a);
             mocha_table->a[mocha_table->n - 1] = mocha;
@@ -2609,7 +2650,8 @@ static void sample_summary(sample_t *self,
 
     for (int i=0; i<n; i++)
     {
-        hts_expand(float, self[i].n_stats * (model->order_lrr_gc + 1), m_tmp, tmp_arr);
+        hts_expand(float, self[i].n_stats * (model->order_lrr_gc < 0 ? 1 : model->order_lrr_gc + 1), m_tmp, tmp_arr);
+
         for (int j=0; j<self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_median;
         self[i].stats.lrr_median = get_median( tmp_arr, self[i].n_stats, NULL );
         for (int j=0; j<self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_sd;
@@ -2729,7 +2771,7 @@ static void sample_stats(sample_t *self, const model_t *model)
         if ( model->flags & WGS_DATA )
         {
             double f(double x, void *data) { return -lod_lkl_beta_binomial(ad0, ad1, n_imap, imap_arr, x); }
-            double x; kmin_brent(f, 0.0, 0.5, NULL, KMIN_EPS, &x);
+            double x; kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x); // dispersions above 0.5 are not allowed
             self->x_nonpar_dispersion = (float)x;
         }
         else
@@ -2755,7 +2797,7 @@ static void sample_stats(sample_t *self, const model_t *model)
     }
     else if ( model->rid == model->genome.mt_rid )
     {
-        self->mt_lrr_median = get_median(lrr, n, NULL );
+        self->mt_lrr_median = get_median( lrr, n, NULL );
     }
     else
     {
@@ -2766,7 +2808,7 @@ static void sample_stats(sample_t *self, const model_t *model)
         if ( model->flags & WGS_DATA )
         {
             double f(double x, void *data) { return -lod_lkl_beta_binomial(ad0, ad1, n, NULL, x); }
-            double x; kmin_brent(f, 0.0, 0.5, NULL, KMIN_EPS, &x);
+            double x; kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x); // dispersions above 0.5 are not allowed
             self->stats_arr[self->n_stats - 1].dispersion = (float)x;
         }
         else
@@ -2774,7 +2816,7 @@ static void sample_stats(sample_t *self, const model_t *model)
             self->stats_arr[self->n_stats - 1].dispersion = get_sample_sd( baf, n, NULL );
         }
         for (int i=0; i<n; i++) if ( !isnan( baf[i] ) ) self->nhets++;
-        self->stats_arr[self->n_stats - 1].lrr_median = get_median(lrr, n, NULL );
+        self->stats_arr[self->n_stats - 1].lrr_median = get_median( lrr, n, NULL );
         self->stats_arr[self->n_stats - 1].lrr_sd = get_sample_sd( lrr, n, NULL );
 
         int conc, disc;
@@ -2847,7 +2889,7 @@ static void sample_print(const sample_t *self,
  *********************************/
 
 // moves synced bcf reader to first useful line for reader0
-static int bcf_sr_next_line_reader0(bcf_srs_t *sr)
+static inline int bcf_sr_next_line_reader0(bcf_srs_t *sr)
 {
     int nret = bcf_sr_next_line(sr);
     while ( nret > 0 && !bcf_sr_has_line(sr, 0) ) nret = bcf_sr_next_line(sr);
@@ -3539,7 +3581,7 @@ int main_vcfmocha(int argc, char *argv[])
         usage();
     }
 
-    if (model.order_lrr_gc > MAX_ORDER)
+    if ( model.order_lrr_gc > MAX_ORDER )
     {
         fprintf(stderr, "Polynomial order must not be greater than %d: --order-LRR-GC %d\n", MAX_ORDER, model.order_lrr_gc);
         usage();
@@ -3598,6 +3640,9 @@ int main_vcfmocha(int argc, char *argv[])
         error("Error: input VCF file must contain either the AD format field or the LRR and BAF format fields\n");
     if ( model.order_lrr_gc > 0 && ( bcf_hdr_id2int( hdr, BCF_DT_ID, "GC" ) < 0 ) )
         error("Error: input VCF has no GC info field: use \"--order-LRR-GC 0/-1\" to disable LRR adjustment through GC correction\n");
+
+    // median adjustment is necessary with sequencing counts data
+    if ( ( model.order_lrr_gc < 0 ) && ( model.flags & WGS_DATA ) ) model.order_lrr_gc = 0;
 
     fprintf(stderr, "Running MoChA version %s\n", MOCHA_VERSION);
     fprintf(stderr, "For updates: https://github.com/freeseek/mocha\n");
@@ -3729,7 +3774,7 @@ int main_vcfmocha(int argc, char *argv[])
     beta_binom_destroy(&beta_binom_alt);
 
     // write table with mosaic chromosomal alterations (and UCSC bed track)
-    mocha_print(mocha_table.a, mocha_table.n, out_fm, hdr, model.flags, rules);
+    mocha_print(mocha_table.a, mocha_table.n, out_fm, hdr, model.flags, rules, model.lrr_hap2dip);
     mocha_print_ucsc(mocha_table.a, mocha_table.n, out_fu, hdr);
     free(mocha_table.a);
 
