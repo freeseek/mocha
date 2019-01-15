@@ -44,7 +44,7 @@
 
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2019-01-09"
+#define MOCHA_VERSION "2019-01-14"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
