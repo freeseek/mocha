@@ -35,22 +35,20 @@ mocha <- args[3]
 df_stats <- read.table(stats, sep = '\t', header = TRUE)
 df <- read.table(mocha, sep = '\t', header = TRUE)
 
-if ('LDEV' %in% colnames(df)) {
+if ('LRR_MEDIAN' %in% colnames(df_stats)) {
   model <- 'array'
   df_stats$X_NONPAR_ADJ_LRR_MEDIAN <- df_stats$X_NONPAR_LRR_MEDIAN - df_stats$LRR_MEDIAN
   df_stats$Y_NONPAR_ADJ_LRR_MEDIAN <- df_stats$Y_NONPAR_LRR_MEDIAN - df_stats$LRR_MEDIAN
   df_stats$MT_ADJ_LRR_MEDIAN <- df_stats$MT_LRR_MEDIAN - df_stats$LRR_MEDIAN
-  lrr_hap2dip <- median(df_stats$X_NONPAR_ADJ_LRR_MEDIAN[df_stats$SEX=='F']) - median(df_stats$X_NONPAR_ADJ_LRR_MEDIAN[df_stats$SEX=='M'])
 } else {
   model <- 'wgs'
-  df$LDEV <- log(df$REL_COV/2)
+  # df$LDEV <- log(df$REL_COV/2)
   df_stats$X_NONPAR_ADJ_LRR_MEDIAN <- log(df_stats$X_NONPAR_COV_MEDIAN) - log(df_stats$COV_MEDIAN)
   df_stats$Y_NONPAR_ADJ_LRR_MEDIAN <- log(df_stats$Y_NONPAR_COV_MEDIAN) - log(df_stats$COV_MEDIAN)
   df_stats$MT_ADJ_LRR_MEDIAN <- log(df_stats$MT_COV_MEDIAN) - log(df_stats$COV_MEDIAN)
-  lrr_hap2dip <- log(2)
 }
 
-idx <- !( df$CHROM %in% c('X', 'Y', 'MT') ) & (df$LDEV > -3*lrr_hap2dip)
+idx <- !( df$CHROM %in% c('X', 'Y', 'MT') ) & (df$REL_COV > 0.25)
 df$SV <- factor(df$CHROM, levels = c('0-2 Mbp', '2-10 Mbp', '10-50 Mbp', '50-250 Mbp'))
 df$SV[df$LENGTH < 250e6] <- '50-250 Mbp'
 df$SV[df$LENGTH < 50e6] <- '10-50 Mbp'
@@ -59,56 +57,48 @@ df$SV[df$LENGTH <= 2e6] <- '0-2 Mbp'
 
 bdev <- .3;
 df$BDEV[is.na(df$BDEV)] <- bdev
-cnf1 <- 1 / (0.5 - bdev);
-ldev1 <- ( log2(cnf1) - 1.0 ) * lrr_hap2dip;
-cnf2 <- 1 / (0.5 + bdev);
-ldev2 <- ( log2(cnf2) - 1.0 ) * lrr_hap2dip;
+cnf_dup <- 1 / (0.5 - bdev);
+cnf_del <- 1 / (0.5 + bdev);
 fs <- 16
 
-p1 <- ggplot(df[idx,], aes(x=BDEV, y=LDEV, color=TYPE, shape=TYPE)) +
-  geom_hline(yintercept = c((log2(3)-1)*lrr_hap2dip, 0, -lrr_hap2dip), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_segment(aes(x = 0, y = 0, xend = bdev, yend = ldev1), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_segment(aes(x = 0, y = 0, xend = bdev, yend = ldev2), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_vline(xintercept = c(0, 1/6, bdev), color = 'gray', size = .5, linetype = 'dashed') +
+p1 <- ggplot(df[idx,], aes(x=BDEV, y=REL_COV, color=TYPE, shape=TYPE)) +
+  geom_hline(yintercept = c(1.0, 2.0, 3.0), color = 'gray', size = .5, linetype = 'dashed') +
+  geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_dup), color = 'gray', size = .5, linetype = 'dashed') +
+  geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_del), color = 'gray', size = .5, linetype = 'dashed') +
   geom_point(size=1, alpha=1/2) +
   scale_color_manual('', breaks = c("CNN-LOH", "CNP Deletion", "CNP Duplication", "Deletion", "Duplication", "Undetermined"), values=c("green", "orange", "cyan", "red", "blue", "gray")) +
   scale_shape_manual('', values=0:5) +
-  scale_x_continuous('Bdev') +
-  scale_y_continuous('Ldev') +
-  ggtitle(paste('LRR-hap2dip:', lrr_hap2dip)) +
+  scale_x_continuous('Bdev', breaks = c(0,.1,.2,.3)) +
+  scale_y_log10('Rel_Cov', breaks = c(1,2,3,4)) +
   theme_bw(base_size = fs) +
   theme(plot.title = element_text(hjust = 0.5)) +
   facet_wrap(~SV)
 
-p2 <- ggplot(df[idx,], aes(x=BDEV, y=LDEV, color=CHROM, shape=CHROM)) +
-  geom_hline(yintercept = c((log2(3)-1)*lrr_hap2dip, 0, -lrr_hap2dip), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_segment(aes(x = 0, y = 0, xend = bdev, yend = ldev1), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_segment(aes(x = 0, y = 0, xend = bdev, yend = ldev2), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_vline(xintercept = c(0, 1/6, bdev), color = 'gray', size = .5, linetype = 'dashed') +  geom_point(size=1, alpha=1/2) +
+p2 <- ggplot(df[idx,], aes(x=BDEV, y=REL_COV, color=CHROM, shape=CHROM)) +
+  geom_hline(yintercept = c(1.0, 2.0, 3.0), color = 'gray', size = .5, linetype = 'dashed') +
+  geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_dup), color = 'gray', size = .5, linetype = 'dashed') +
+  geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_del), color = 'gray', size = .5, linetype = 'dashed') +
   scale_color_discrete('Chromosome') +
   scale_shape_manual('Chromosome', values=0:23) +
-  scale_x_continuous('Bdev') +
-  scale_y_continuous('Ldev') +
-  ggtitle(paste('LRR-hap2dip:', lrr_hap2dip)) +
+  scale_x_continuous('Bdev', breaks = c(0,.1,.2,.3)) +
+  scale_y_log10('Rel_Cov', breaks = c(1,2,3,4)) +
   theme_bw(base_size = fs) +
   theme(plot.title = element_text(hjust = 0.5)) +
   facet_wrap(~SV)
 
-p3 <- ggplot(df[idx,], aes(x=BDEV, y=LDEV, color=(NFLIPS!=-1), shape=(NFLIPS!=-1))) +
-  geom_hline(yintercept = c((log2(3)-1)*lrr_hap2dip, 0, -lrr_hap2dip), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_segment(aes(x = 0, y = 0, xend = bdev, yend = ldev1), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_segment(aes(x = 0, y = 0, xend = bdev, yend = ldev2), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_vline(xintercept = c(0, 1/6, bdev), color = 'gray', size = .5, linetype = 'dashed') +  geom_point(size=1, alpha=1/2) +
+p3 <- ggplot(df[idx,], aes(x=BDEV, y=REL_COV, color=(NFLIPS!=-1), shape=(NFLIPS!=-1))) +
+  geom_hline(yintercept = c(1.0, 2.0, 3.0), color = 'gray', size = .5, linetype = 'dashed') +
+  geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_dup), color = 'gray', size = .5, linetype = 'dashed') +
+  geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_del), color = 'gray', size = .5, linetype = 'dashed') +
   scale_color_discrete('Model', labels = c('LRR+BAF', 'BAF+phase')) +
   scale_shape_manual('Model', values=0:1, labels = c('LRR+BAF', 'BAF+phase')) +
-  scale_x_continuous('Bdev') +
-  scale_y_continuous('Ldev') +
-  ggtitle(paste('LRR-hap2dip:', lrr_hap2dip)) +
+  scale_x_continuous('Bdev', breaks = c(0,.1,.2,.3)) +
+  scale_y_log10('Rel_Cov', breaks = c(1,2,3,4)) +
   theme_bw(base_size = fs) +
   theme(plot.title = element_text(hjust = 0.5)) +
   facet_wrap(~SV)
 
-idx <- df$LENGTH > 2e6 | df$BDEV<.12 | df$LDEV<.05 # non-germline events
+idx <- df$LENGTH > 2e6 | df$BDEV<.12 | df$REL_COV<2.5 # non-germline events
 df <- as.data.frame.matrix(table(df[idx, c('CHROM', 'TYPE')]))
 df$CHROM <- rownames(df)
 idx <- !( df$CHROM %in% c('X', 'Y', 'MT') )
