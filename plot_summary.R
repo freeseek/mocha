@@ -68,8 +68,8 @@ p1 <- ggplot(df[idx,], aes(x=BDEV, y=REL_COV, color=TYPE, shape=TYPE)) +
   geom_point(size=1, alpha=1/2) +
   scale_color_manual('', breaks = c("CNN-LOH", "CNP Deletion", "CNP Duplication", "Deletion", "Duplication", "Undetermined"), values=c("green", "orange", "cyan", "red", "blue", "gray")) +
   scale_shape_manual('', values=0:5) +
-  scale_x_continuous('Bdev', breaks = c(0,.1,.2,.3)) +
-  scale_y_log10('Rel_Cov', breaks = c(1,2,3,4)) +
+  scale_x_continuous('Bdev', breaks = c(0, .1, .2, .3)) +
+  scale_y_log10('Rel_Cov', breaks = c(1, 2, 3, 4)) +
   theme_bw(base_size = fs) +
   theme(plot.title = element_text(hjust = 0.5)) +
   facet_wrap(~SV)
@@ -78,10 +78,11 @@ p2 <- ggplot(df[idx,], aes(x=BDEV, y=REL_COV, color=CHROM, shape=CHROM)) +
   geom_hline(yintercept = c(1.0, 2.0, 3.0), color = 'gray', size = .5, linetype = 'dashed') +
   geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_dup), color = 'gray', size = .5, linetype = 'dashed') +
   geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_del), color = 'gray', size = .5, linetype = 'dashed') +
+  geom_point(size=1, alpha=1/2) +
   scale_color_discrete('Chromosome') +
   scale_shape_manual('Chromosome', values=0:23) +
-  scale_x_continuous('Bdev', breaks = c(0,.1,.2,.3)) +
-  scale_y_log10('Rel_Cov', breaks = c(1,2,3,4)) +
+  scale_x_continuous('Bdev', breaks = c(0, .1, .2, .3)) +
+  scale_y_log10('Rel_Cov', breaks = c(1, 2, 3, 4)) +
   theme_bw(base_size = fs) +
   theme(plot.title = element_text(hjust = 0.5)) +
   facet_wrap(~SV)
@@ -90,6 +91,7 @@ p3 <- ggplot(df[idx,], aes(x=BDEV, y=REL_COV, color=(NFLIPS!=-1), shape=(NFLIPS!
   geom_hline(yintercept = c(1.0, 2.0, 3.0), color = 'gray', size = .5, linetype = 'dashed') +
   geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_dup), color = 'gray', size = .5, linetype = 'dashed') +
   geom_segment(aes(x = 0, y = 2.0, xend = bdev, yend = cnf_del), color = 'gray', size = .5, linetype = 'dashed') +
+  geom_point(size=1, alpha=1/2) +
   scale_color_discrete('Model', labels = c('LRR+BAF', 'BAF+phase')) +
   scale_shape_manual('Model', values=0:1, labels = c('LRR+BAF', 'BAF+phase')) +
   scale_x_continuous('Bdev', breaks = c(0,.1,.2,.3)) +
