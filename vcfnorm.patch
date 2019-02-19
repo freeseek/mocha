@@ -23,7 +23,7 @@
              { \
                  dst_vals[0] = src_vals[0]; \
 +                if (args->keep_sum_ad && fmt->id==bcf_hdr_id2int(args->hdr,BCF_DT_ID,"AD") ) \
-+                  for (j=1; j<nvals; j++) if ( j!=ialt+1 ) dst_vals[0] += src_vals[j]; \
++                  for (j=1; j<nvals; j++) if ( j!=ialt+1 && !(is_vector_end) ) dst_vals[0] += src_vals[j]; \
                  dst_vals[1] = src_vals[ialt+1]; \
                  dst_vals += 2; \
                  src_vals += nvals; \
