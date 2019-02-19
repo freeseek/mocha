@@ -64,7 +64,6 @@ ind_t;
 
 typedef struct
 {
-
     bcf_hdr_t *in_hdr, *out_hdr;
     ind_t *inds;
     set_t children;
