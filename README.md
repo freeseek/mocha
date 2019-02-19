@@ -44,6 +44,7 @@ HMM Options:
     -b, --bdev <list>                 comma separated list of inverse BAF deviations for BAF+phase model
                                       [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
     -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [400]
+        --no-BAF-flip                 do not correct BAF at flipped sites
         --median-BAF-adjust <int>     minimum number of heterozygous genotypes required to perform
                                       median BAF adjustment (-1 for no BAF adjustment) [5]
         --order-LRR-GC <int>          order of polynomial in local GC content to be used for polynomial
@@ -510,28 +511,28 @@ X_NONPAR_BAF_SD/_CORR - BAF standard deviation or beta-binomial overdispersion f
 
 The mosaic calls file contains information about each mosaic and germline chromosomal alteration called and it includes the following columns:
 ```
-              SAMPLE - sample ID
-                 SEX - inferred sample sex
-               CHROM - chromosome
-          BEG_XXXXXX - beginning base pair position for the call (according to XXXXXX genome reference)
-          END_XXXXXX - end base pair position for the call (according to XXXXXX genome reference)
-              LENGTH - base pair length of the call
-               P_ARM - whether the call extends to the small arm and whether it reaches the telomere
-               Q_ARM - whether the call extends to the long arm and whether it reaches the telomere
-              NSITES - number of sites used for the call
-               NHETS - number of heterozygous sites used for the call
-            N50_HETS - N50 value for consecutive heterozygous sites distances
-                BDEV - BAF deviation estimate from 0.5
-             BDEV_SE - standard deviation estimate for BAF deviation
-      LDEV / REL_COV - LRR deviation estimate / relative coverage estimate
-LDEV_SE / REL_COV_SE - standard deviation estimate for LRR deviation / relative coverage
-         LOD_LRR_BAF - LOD score for model based on LRR and BAF
-       LOD_BAF_PHASE - LOD score for model based on BAF and genotype phase
-              NFLIPS - number of phase flips for calls based on BAF and genotype phase model (-1 if LRR and BAF model used)
-            BAF_CONC - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
-        LOD_BAF_CONC - LOD score for model based on BAF phase concordance (genome-wide corrected)
-                TYPE - Type of call based on LRR / relative coverage
-                  CF - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
+       SAMPLE - sample ID
+          SEX - inferred sample sex
+        CHROM - chromosome
+   BEG_XXXXXX - beginning base pair position for the call (according to XXXXXX genome reference)
+   END_XXXXXX - end base pair position for the call (according to XXXXXX genome reference)
+       LENGTH - base pair length of the call
+        P_ARM - whether the call extends to the small arm and whether it reaches the telomere
+        Q_ARM - whether the call extends to the long arm and whether it reaches the telomere
+       NSITES - number of sites used for the call
+        NHETS - number of heterozygous sites used for the call
+     N50_HETS - N50 value for consecutive heterozygous sites distances
+         BDEV - BAF deviation estimate from 0.5
+      BDEV_SE - standard deviation estimate for BAF deviation
+      REL_COV - relative coverage estimate from LRR or sequencing coverage
+   REL_COV_SE - standard deviation estimate for relative coverage
+  LOD_LRR_BAF - LOD score for model based on LRR and BAF
+LOD_BAF_PHASE - LOD score for model based on BAF and genotype phase
+       NFLIPS - number of phase flips for calls based on BAF and genotype phase model (-1 if LRR and BAF model used)
+     BAF_CONC - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
+ LOD_BAF_CONC - LOD score for model based on BAF phase concordance (genome-wide corrected)
+         TYPE - Type of call based on LRR / relative coverage
+           CF - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
 ```
 
 The output VCF will contain the following extra FORMAT fields:
@@ -586,7 +587,8 @@ $HOME/bin/bcftools query \
 
 Split output VCF file by samples (optional)
 ```
-$HOME/bin/bcftools +$HOME/bin/split.so -Ob -o $dir/ $dir/$pfx.mocha.bcf -k FMT
+$HOME/bin/bcftools annotate --no-version -Ou -x INFO $dir/$pfx.mocha.bcf | \
+  $HOME/bin/bcftools +$HOME/bin/split.so -Ob -o $dir/
 ```
 
 Plot results
@@ -599,21 +601,20 @@ sudo apt install r-cran-ggplot2 r-cran-data.table r-cran-gridextra
 
 Download R scripts
 ```
-/bin/rm -f $HOME/bin/plot_{summary,mocha}.R
-wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,mocha}.R
-chmod a+x $HOME/bin/plot_{summary,mocha}.R
+/bin/rm -f $HOME/bin/plot_{summary,array}.R
+wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,array}.R
+chmod a+x $HOME/bin/plot_{summary,array}.R
 ```
 
 Generate summary plot
 ```
-$HOME/bin/plot_summary.R $dir/$pfx.pdf $dir/$pfx.stats.tsv $dir/$pfx.mocha.tsv
+$HOME/bin/plot_summary.R --pdf $dir/$pfx.pdf --stats $dir/$pfx.stats.tsv --calls $dir/$pfx.mocha.tsv
 ```
 
-Plot mosaic chromosomal alterations
+Plot mosaic chromosomal alterations (for array data)
 ```
-for sm in $($HOME/bin/bcftools query -l $dir/$pfx.mocha.bcf | tr ' ' '_'); do
-  $HOME/bin/plot_mocha.R array/wgs $rule $dir/$sm.pdf $dir/$sm.bcf
-done
+sm="..."
+$HOME/bin/plot_array.R --rules $rule --pdf $dir/$sm.pdf --vcf $dir/$pfx.mocha.bcf --samples $sm --regions 8:2792875-4852328
 ```
 
 Acknowledgements
