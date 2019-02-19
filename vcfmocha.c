@@ -44,7 +44,7 @@
 
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2019-01-14"
+#define MOCHA_VERSION "2019-02-18"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -53,6 +53,7 @@
 #define NO_ANNOT         (1<<4)
 #define USE_SHORT_ARMS   (1<<5)
 #define USE_CENTROMERES  (1<<6)
+#define NO_BAF_FLIP      (1<<7)
 
 #define LRR 0
 #define BAF 1
@@ -113,8 +114,9 @@ typedef struct
     float flip_log_prb;
     float tel_log_prb;
     float cen_log_prb;
-    float *cnf, *bdev;
-    int cnf_n, bdev_n;
+    // TODO make this an array
+    float *bdev_lrr_baf, *bdev_baf_phase;
+    int bdev_lrr_baf_n, bdev_baf_phase_n;
     int min_dst;
     float lrr_cutoff;
     float lrr_hap2dip;
@@ -133,6 +135,7 @@ typedef struct
     int m_pos;
     float *gc_arr;
     int m_gc;
+    int n_flipped;
 } model_t;
 
 typedef struct
@@ -219,11 +222,11 @@ KSORT_INIT_GENERIC(float)
 static inline float sqf(float x) { return x*x; }
 static inline double sq(double x) { return x*x; }
 // the x == y is necessary in case x == -INFINITY
-static inline float log_mean_expf(float x, float y) { return x == y ? x : ( x > y ? x + logf( 1 + expf(y-x) ) : y + logf( 1 + expf(x-y) ) ) - (float)M_LN2; }
+static inline float log_mean_expf(float x, float y) { return x == y ? x : ( x > y ? x + logf( 1.0f + expf(y-x) ) : y + logf( 1.0f + expf(x-y) ) ) - (float)M_LN2; }
 
 // default values for the model
-static const char *cnf_dflt = "1.0,3.0";
-static const char *bdev_dflt = "6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0";
+static const char *bdev_lrr_baf_dflt = "-2.0,-4.0,-6.0,6.0,4.0";
+static const char *bdev_baf_phase_dflt = "6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0";
 static const int min_dst_dflt = 400;
 static const int median_baf_adj_dflt = 5;
 static const int order_lrr_gc_dflt = 2;
@@ -617,13 +620,6 @@ static void rescale_emis_log_lkl(float *log_prb,
                                  int n,
                                  float err_log_prb)
 {
-//    float min = log_prb[0] + err_log_prb;
-//    float max = log_prb[0] - err_log_prb;
-//    for (int i=1; i<n; i++)
-//    {
-//        if (log_prb[i] < min) log_prb[i] = min;
-//        else if (log_prb[i] > max) log_prb[i] = max;
-//    }
     float min_thr = -INFINITY;
     for (int i=0; i<n; i++) if ( min_thr < log_prb[i] ) min_thr = log_prb[i];
     min_thr += err_log_prb;
@@ -672,11 +668,11 @@ static float *lrr_baf_emis_log_lkl(const float *lrr,
                                    float lrr_hap2dip,
                                    float lrr_sd,
                                    float baf_sd,
-                                   const float *cnf,
+                                   const float *bdev_lrr_baf,
                                    int m)
 {
-    float *ldev = (float *)malloc(m * sizeof(float));
-    for (int i=0; i<m; i++) ldev[i] = ( logf(cnf[i]) / (float)M_LN2 - 1.0f ) * lrr_hap2dip;
+    float *ldev = (float *)malloc(2*m * sizeof(float));
+    for (int i=0; i<m; i++) ldev[i] = -logf( 1.0f - 2.0f * bdev_lrr_baf[i] ) / (float)M_LN2 * lrr_hap2dip;
     int N = 1 + m;
     float *emis_log_lkl = (float *)malloc(N * T * sizeof(float));
     for (int t=0; t<T; t++)
@@ -686,8 +682,7 @@ static float *lrr_baf_emis_log_lkl(const float *lrr,
         emis_log_lkl[t*N] = lrr_baf_log_lkl( x, y, 0.0f, 0.0f, lrr_sd, baf_sd, lrr_bias );
         for (int i=0; i<m; i++)
         {
-            float bdev = fabsf( 0.5f - 1 / cnf[i] );
-            emis_log_lkl[t*N + 1+i] = lrr_baf_log_lkl( x, y, ldev[i], bdev, lrr_sd, baf_sd, lrr_bias );
+            emis_log_lkl[t*N + 1+i] = lrr_baf_log_lkl( x, y, ldev[i], bdev_lrr_baf[i], lrr_sd, baf_sd, lrr_bias );
         }
         rescale_emis_log_lkl(&emis_log_lkl[t*N], N, err_log_prb);
     }
@@ -776,18 +771,17 @@ static double lrr_baf_lod(const float *lrr_arr,
                           float lrr_hap2dip,
                           float lrr_sd,
                           float baf_sd,
-                          double cnf)
+                          double bdev_lrr_baf)
 {
-    if ( n==0 || cnf < 0.0 || cnf > 4.0 ) return -INFINITY; // kmin_brent does not handle NAN
+    if ( n==0 || bdev_lrr_baf < -0.5 || bdev_lrr_baf > 0.25 ) return -INFINITY; // kmin_brent does not handle NAN
 
-    float ldev = ( logf((float)cnf) / (float)M_LN2 - 1.0f ) * lrr_hap2dip;
-    float bdev = fabsf( 0.5f - 1.0f / (float)cnf );
+    float ldev = -logf( 1.0f - 2.0f * (float)bdev_lrr_baf ) / (float)M_LN2 * lrr_hap2dip;
     float ret = 0.0f;
     for (int i=0; i<n; i++)
     {
         float lrr = imap ? lrr_arr[ imap[i] ] : lrr_arr[i];
         float baf = imap ? baf_arr[ imap[i] ] : baf_arr[i];
-        float log_lkl = lrr_baf_log_lkl( lrr, baf, ldev, bdev, lrr_sd, baf_sd, lrr_bias ) -
+        float log_lkl = lrr_baf_log_lkl( lrr, baf, ldev, (float)bdev_lrr_baf, lrr_sd, baf_sd, lrr_bias ) -
                         lrr_baf_log_lkl( lrr, baf, 0.0f, 0.0f, lrr_sd, baf_sd, lrr_bias );
         if ( log_lkl < err_log_prb ) log_lkl = err_log_prb;
         else if ( log_lkl > -err_log_prb ) log_lkl = -err_log_prb;
@@ -1016,15 +1010,15 @@ static float *lrr_ad_emis_log_lkl(const float *lrr,
                                   float lrr_hap2dip,
                                   float lrr_sd,
                                   float ad_rho,
-                                  const float *cnf_arr,
+                                  const float *bdev_lrr_baf_arr,
                                   int m)
 {
     int N = 1 + m;
     float *emis_log_lkl = (float *)malloc(N * T * sizeof(float));
     for (int i=0; i<1+m; i++)
     {
-        float ldev = i==0 ? 0.0f : ( logf(cnf_arr[i-1]) / (float)M_LN2 - 1.0f ) * lrr_hap2dip;
-        float bdev = i==0 ? 0.0f : fabsf( 0.5f - 1.0f / cnf_arr[i-1] );
+        float ldev = i==0 ? 0.0f : -logf( 1.0f - 2.0f * bdev_lrr_baf_arr[i] ) / (float)M_LN2 * lrr_hap2dip;
+        float bdev = i==0 ? 0.0f : fabsf( bdev_lrr_baf_arr[i-1] );
         int max1, max2;
         get_max_sum(ad0, ad1, T, NULL, &max1, &max2);
         beta_binom_t *beta_binom = i==0 ? &beta_binom_null : &beta_binom_alt;
@@ -1137,16 +1131,15 @@ static double lrr_ad_lod(const float *lrr_arr,
                          float lrr_hap2dip,
                          float lrr_sd,
                          float ad_rho,
-                         double cnf)
+                         double bdev_lrr_baf)
 {
-    if ( n==0 || cnf < 0.0 || cnf > 4.0 ) return -INFINITY; // kmin_brent does not handle NAN
+    if ( n==0 || bdev_lrr_baf < -0.5 || bdev_lrr_baf > 0.25 ) return -INFINITY; // kmin_brent does not handle NAN
 
-    float ldev = ( logf((float)cnf) / (float)M_LN2 - 1.0f ) * lrr_hap2dip;
-    float bdev = fabsf( 0.5f - 1.0f / cnf );
+    float ldev = -logf( 1.0f - 2.0f * (float)bdev_lrr_baf ) / (float)M_LN2 * lrr_hap2dip;
     int max1, max2;
     get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
     beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
-    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + bdev, ad_rho);
+    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + (float)bdev_lrr_baf, ad_rho);
     float ret = 0.0f;
     for (int i=0; i<n; i++)
     {
@@ -2006,38 +1999,6 @@ static void mocha_print(const mocha_t *mocha,
             mocha->lod_lrr_baf, mocha->lod_baf_phase, mocha->nflips, mocha->baf_conc, mocha->lod_baf_conc, type[mocha->type], mocha->cf);
         mocha++;
     }
-//    if ( flags & WGS_DATA )
-//    {
-//        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tLOD_BAF_CONC\tTYPE\tCF\n", genome, genome);
-//        for (int i=0; i<n; i++)
-//        {
-//            const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
-//            const char *seq_name = bcf_hdr_id2name(hdr, mocha->rid);
-//            fprintf(stream, "%s\t%c\t%s\t%d\t%d\t%d\t%c\t%c\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.2f\t%.2f\t%d\t%.4f\t%.2f\t%s\t%.4f\n",
-//                sample_name, sex[mocha->sex], seq_name, mocha->beg_pos, mocha->end_pos, mocha->length,
-//                arm_type[mocha->p_arm], arm_type[mocha->q_arm], mocha->nsites, mocha->nhets, mocha->n50_hets,
-//                mocha->bdev, mocha->bdev_se, 2.0f * expf(mocha->ldev), 2.0f * expf(mocha->ldev) * mocha->ldev_se,
-//                mocha->lod_lrr_baf, mocha->lod_baf_phase, mocha->nflips, mocha->baf_conc, mocha->lod_baf_conc, type[mocha->type], mocha->cf);
-//            mocha++;
-//        }
-//    }
-//    else
-//    {
-//        // fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tLDEV\tLDEV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tLOD_BAF_CONC\tTYPE\tCF\n", genome, genome);
-//        fprintf(stream, "SAMPLE\tSEX\tCHROM\tBEG_%s\tEND_%s\tLENGTH\tP_ARM\tQ_ARM\tNSITES\tNHETS\tN50_HETS\tBDEV\tBDEV_SE\tREL_COV\tREL_COV_SE\tLOD_LRR_BAF\tLOD_BAF_PHASE\tNFLIPS\tBAF_CONC\tLOD_BAF_CONC\tTYPE\tCF\n", genome, genome);
-//        for (int i=0; i<n; i++)
-//        {
-//            const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx);
-//            const char *seq_name = bcf_hdr_id2name(hdr, mocha->rid);
-//            fprintf(stream, "%s\t%c\t%s\t%d\t%d\t%d\t%c\t%c\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%.2f\t%.2f\t%d\t%.4f\t%.2f\t%s\t%.4f\n",
-//                sample_name, sex[mocha->sex], seq_name, mocha->beg_pos, mocha->end_pos, mocha->length,
-//                arm_type[mocha->p_arm], arm_type[mocha->q_arm], mocha->nsites, mocha->nhets, mocha->n50_hets,
-//                mocha->bdev, mocha->bdev_se, 2.0f * expf(mocha->ldev / lrr_hap2dip * (float)M_LN2),
-//                2.0f * expf(mocha->ldev / lrr_hap2dip * (float)M_LN2) * mocha->ldev_se  / lrr_hap2dip * (float)M_LN2,
-//                mocha->lod_lrr_baf, mocha->lod_baf_phase, mocha->nflips, mocha->baf_conc, mocha->lod_baf_conc, type[mocha->type], mocha->cf);
-//            mocha++;
-//        }
-//    }
     if (stream != stdout && stream != stderr) fclose(stream);
 }
 
@@ -2088,35 +2049,36 @@ static int8_t mocha_type(float ldev,
     // a LOD score can be computed from a chi-squared statistic by dividing by 2ln(10) ~ 4.6
     float z2_upd = sqf( ldev / ldev_se );
     // equivalent of a 2 LOD score bonus for ending in one but not two telomeres
-    if ( ( p_arm == MOCHA_TEL && q_arm != MOCHA_TEL ) || ( p_arm != MOCHA_TEL && q_arm == MOCHA_TEL ) ) z2_upd -= 4.0f * M_LN10;
-    // if one model has 3 LOD scores point more than the other model, select the better model
+    if ( ( p_arm != MOCHA_TEL && q_arm != MOCHA_TEL ) || ( p_arm == MOCHA_TEL && q_arm == MOCHA_TEL ) ) z2_upd += 4.0f * M_LN10;
+    else z2_upd -= 4.0f * M_LN10;
 
+    // if one model has 2 LOD scores point more than the other model, select the better model
     if (ldev > 0)
     {
         if ( nhets < 5 || isnan(bdev) )
         {
-            if ( z2_upd > 10.0 * M_LN10 ) return MOCHA_DUP;
+            return MOCHA_DUP;
         }
         else
         {
             float expected_ldev = -logf(1.0f - 2.0f * bdev > 2.0f / 3.0f ? 1.0f - 2.0f * bdev : 2.0f / 3.0f) * M_LOG2E * lrr_hap2dip;
             float z2_dup = sqf( ( ldev - expected_ldev ) / ldev_se );
-            if (z2_upd > z2_dup + 6.0f * M_LN10) return MOCHA_DUP;
-            if (z2_dup > z2_upd + 6.0f * M_LN10) return MOCHA_UPD;
+            if (z2_upd > z2_dup + 4.0f * M_LN10) return MOCHA_DUP;
+            if (z2_dup > z2_upd + 4.0f * M_LN10) return MOCHA_UPD;
         }
     }
     else
     {
         if ( nhets < 5 || isnan(bdev) )
         {
-            if ( z2_upd > 10.0 * M_LN10 ) return MOCHA_DEL;
+            return MOCHA_DEL;
         }
         else
         {
             float expected_ldev = -logf(1.0f + 2.0f * bdev) * M_LOG2E * lrr_hap2dip;
             float z2_del = sqf( ( ldev - expected_ldev ) / ldev_se );
-            if (z2_upd > z2_del + 6.0f * M_LN10) return MOCHA_DEL;
-            if (z2_del > z2_upd + 6.0f * M_LN10) return MOCHA_UPD;
+            if (z2_upd > z2_del + 4.0f * M_LN10) return MOCHA_DEL;
+            if (z2_del > z2_upd + 4.0f * M_LN10) return MOCHA_UPD;
         }
     }
     return MOCHA_UNK;
@@ -2127,6 +2089,8 @@ static int8_t mocha_type(float ldev,
 // CNF = 2 / ( 1 + 2 x BDEV ) for deletions
 // CNF = 2 / ( 1 - 2 x BDEV ) for duplications
 // CNF = 2 x 2^( LDEV / LRR-hap2dip )
+// LDEV = - LRR-hap2dip / ln(2) * ln( 1 + 2 x BDEV ) for deletions
+// LDEV = - LRR-hap2dip / ln(2) * ln( 1 - 2 x BDEV ) for duplications
 static float mocha_cell_fraction(float ldev,
                                  float ldev_se,
                                  float bdev,
@@ -2218,17 +2182,17 @@ static void get_mocha_stats(const int *pos,
     mocha->lod_baf_phase = NAN;
 }
 
-// return segments called by the HMM or state with consecutive call
+// return segments called by the HMM or a suggestion of what state should be added to the HMM
 static int get_path_segs(const int8_t *path,
                          int n,
-                         int except,
+                         int middle,
                          int **beg,
+                         int *m_beg,
                          int **end,
+                         int *m_end,
                          int *nseg)
 {
-    int beg_m = 0, end_m = 0, a = 0, b = 0;
-    *beg = NULL;
-    *end = NULL;
+    int a = 0, b = 0;
     *nseg = 0;
     for (b=0; b<n; b++)
     {
@@ -2238,26 +2202,22 @@ static int get_path_segs(const int8_t *path,
             int curr = abs(path[b]);
             int next = abs(path[b+1]);
             if ( curr == next ) continue;
-
-            // if two consecutive segments have consecutive HMM states
-            if ( abs( curr - next ) == 1 )
+            if ( middle )
             {
-                // if the consecutive HMM states are non-zero and do not correspond to consecutive deletions and duplications
-                if ( curr && next && ( ( curr != except && curr != except+1 ) || ( next != except && next != except+1 ) ) )
-                {
-                    free(*beg);
-                    free(*end);
-                    return curr < next ? curr : next;
-                }
+                curr = curr > middle ? curr - middle : ( curr == 0 ? -middle : curr - middle - 1 );
+                next = next > middle ? next - middle : ( next == 0 ? -middle : next - middle - 1 );
             }
+
+            // if two consecutive segments have consecutive HMM states or states -1 and 1
+            if ( abs( curr - next ) == 1 || curr * next == -1 ) return curr < next ? curr : next;
         }
 
         if ( path[b] )
         {
             (*nseg)++;
-            hts_expand(int, *nseg, beg_m, *beg);
+            hts_expand(int, *nseg, *m_beg, *beg);
             (*beg)[(*nseg)-1] = a;
-            hts_expand(int, *nseg, end_m, *end);
+            hts_expand(int, *nseg, *m_end, *end);
             (*end)[(*nseg)-1] = b;
         }
         a = b + 1;
@@ -2271,7 +2231,13 @@ static void sample_run(sample_t *self,
                        const model_t *model)
 {
     // do nothing if chromosome Y or MT are being tested
-    if ( model->rid == model->genome.y_rid || model->rid == model->genome.mt_rid ) return;
+    if ( model->rid == model->genome.y_rid || model->rid == model->genome.mt_rid )
+    {
+        memset(self->data_arr[LDEV], 0, self->n * sizeof(int16_t));
+        memset(self->data_arr[BDEV], 0, self->n * sizeof(int16_t));
+        memset(self->phase_arr, 0, self->n * sizeof(int8_t));
+        return;
+    }
 
     mocha_t mocha;
     mocha.sample_idx = self->idx;
@@ -2342,8 +2308,8 @@ static void sample_run(sample_t *self,
                 mocha.ldev = get_median( lrr + a, b + 1 - a, NULL );
                 if ( mocha.ldev > 0 && ( cnp_type == MOCHA_CNP_DUP || cnp_type == MOCHA_CNP_CNV ) )
                 {
-                    if ( model->flags & WGS_DATA ) mocha.lod_lrr_baf = lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, 3.0f);
-                    else mocha.lod_lrr_baf = lrr_baf_lod(lrr + a, baf + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, 3.0f);
+                    if ( model->flags & WGS_DATA ) mocha.lod_lrr_baf = lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, 1.0f/6.0f);
+                    else mocha.lod_lrr_baf = lrr_baf_lod(lrr + a, baf + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, 1.0f/6.0f);
                     if ( mocha.lod_lrr_baf > -model->xy_log_prb * (float)M_LOG10E )
                     {
                         mocha.type = MOCHA_CNP_DUP;
@@ -2354,8 +2320,8 @@ static void sample_run(sample_t *self,
                 }
                 else if ( mocha.ldev <= 0 && ( cnp_type == MOCHA_CNP_DEL || cnp_type == MOCHA_CNP_CNV ) )
                 {
-                    if ( model->flags & WGS_DATA ) mocha.lod_lrr_baf = lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, 1.0f);
-                    else mocha.lod_lrr_baf = lrr_baf_lod(lrr + a, baf + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, 1.0f);
+                    if ( model->flags & WGS_DATA ) mocha.lod_lrr_baf = lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, -0.5f);
+                    else mocha.lod_lrr_baf = lrr_baf_lod(lrr + a, baf + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, -0.5f);
                     if ( mocha.lod_lrr_baf > -model->xy_log_prb * (float)M_LOG10E )
                     {
                         mocha.type = MOCHA_CNP_DEL;
@@ -2420,26 +2386,27 @@ static void sample_run(sample_t *self,
         if ( n_imap == 0 ) continue;
 
         // compute emission probabilities and Viterbi path according to HMM model
-        int except = 0;
+        int middle = 0;
+        // TODO eliminate this redundancy
         if ( hmm_model == LRR_BAF )
         {
-            n_hs = model->cnf_n;
+            n_hs = model->bdev_lrr_baf_n;
             hts_expand(float, n_hs, m_hs, hs_arr);
-            for (int i=0; i<model->cnf_n; i++)
+            for (int i=0; i<model->bdev_lrr_baf_n; i++)
             {
-                hs_arr[i] = model->cnf[i];
-                if ( model->cnf[i] < 2.0f ) except++;
+                hs_arr[i] = model->bdev_lrr_baf[i];
+                if ( model->bdev_lrr_baf[i] < 0.0f ) middle++;
             }
         }
         else if ( hmm_model == BAF_PHASE )
         {
-            n_hs = model->bdev_n;
+            n_hs = model->bdev_baf_phase_n;
             hts_expand(float, n_hs, m_hs, hs_arr);
-            for (int i=0; i<model->bdev_n; i++)
-                hs_arr[i] = model->bdev[i];
+            for (int i=0; i<model->bdev_baf_phase_n; i++)
+                hs_arr[i] = model->bdev_baf_phase[i];
         }
         int8_t *path;
-        int ret, *beg, *end, nseg;
+        int ret, *beg = NULL, m_beg = 0, *end = NULL, m_end = 0, nseg;
         do
         {
             float *emis_log_lkl;
@@ -2456,14 +2423,33 @@ static void sample_run(sample_t *self,
             path = log_viterbi_run(emis_log_lkl, n_imap, n_hs, model->xy_log_prb, hmm_model==LRR_BAF ? NAN : model->flip_log_prb, model->tel_log_prb, model->cen_log_prb, last_p, first_q);
             free(emis_log_lkl);
 
-            ret = get_path_segs(path, n_imap, except, &beg, &end, &nseg);
+            ret = get_path_segs(path, n_imap, middle, &beg, &m_beg, &end, &m_end, &nseg);
 
             if ( ret ) // two consecutive hidden states were used, hinting that testing of a middle state might be necessary
             {
                 free(path);
                 n_hs++;
                 hts_expand(float, n_hs, m_hs, hs_arr);
-                hs_arr[n_hs - 1] = (hs_arr[ret-1] + hs_arr[ret]) * 0.5f;
+
+                if ( middle )
+                {
+                    if ( ret > 0 )
+                    {
+                        if ( ret == 1 ) hs_arr[n_hs-1] = hs_arr[middle + ret - 1] * 0.5f;
+                        else hs_arr[n_hs-1] = (hs_arr[middle + ret - 2] + hs_arr[middle + ret - 1]) * 0.5f;
+                    }
+                    else
+                    {
+                        if ( ret == -1 ) hs_arr[n_hs-1] = hs_arr[middle + ret] * 0.5f;
+                        else hs_arr[n_hs-1] = (hs_arr[middle + ret] + hs_arr[middle + ret + 1]) * 0.5f;
+                        middle++;
+                    }
+                }
+                else
+                {
+                    if ( ret == 1 ) hs_arr[n_hs-1] = hs_arr[0] * 0.5f;
+                    else hs_arr[n_hs-1] = (hs_arr[ret-1] + hs_arr[ret]) * 0.5f;
+                }
                 ks_introsort_float(n_hs, hs_arr);
             }
         }
@@ -2485,7 +2471,7 @@ static void sample_run(sample_t *self,
                 if ( model->flags & WGS_DATA ) return -lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.nsites, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
                 else return -lrr_baf_lod(lrr + a, baf + a, mocha.nsites, NULL, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
             }
-            double x, fx = kmin_brent(f, 1.0, 3.0, NULL, KMIN_EPS, &x);
+            double x, fx = kmin_brent(f, -0.15, 0.15, NULL, KMIN_EPS, &x);
             mocha.lod_lrr_baf = -(float)fx;
 
             if ( hmm_model == LRR_BAF )
@@ -2502,12 +2488,12 @@ static void sample_run(sample_t *self,
                 if ( model->flags & WGS_DATA )
                 {
                     mocha.lod_baf_phase = compare_wgs_models(ad0, ad1, gt_phase, n_hets_imap, hets_imap_arr, model->xy_log_prb,
-                        model->err_log_prb, model->flip_log_prb, model->tel_log_prb, self->stats.dispersion, model->bdev, model->bdev_n);
+                        model->err_log_prb, model->flip_log_prb, model->tel_log_prb, self->stats.dispersion, model->bdev_baf_phase, model->bdev_baf_phase_n);
                 }
                 else
                 {
                     mocha.lod_baf_phase = compare_models(baf, gt_phase, n_hets_imap, hets_imap_arr, model->xy_log_prb,
-                        model->err_log_prb, model->flip_log_prb, model->tel_log_prb, self->stats.dispersion, model->bdev, model->bdev_n);
+                        model->err_log_prb, model->flip_log_prb, model->tel_log_prb, self->stats.dispersion, model->bdev_baf_phase, model->bdev_baf_phase_n);
                 }
                 if (mocha.lod_baf_phase > mocha.lod_lrr_baf) continue;
 
@@ -3027,6 +3013,62 @@ int bcf_get_genotype_phase(bcf_fmt_t *fmt,
     return 1;
 }
 
+// check whether the BAF is flipped at homozygous sites
+// if the BAF is completely flipped, complement the BAF values
+// return -1 in case of error, 0 in case of an okay site, and 1 in case of a flipped site
+int bcf_check_baf_flipped(bcf_fmt_t *gt_fmt,
+                          bcf_fmt_t *baf_fmt,
+                          int nsmpl)
+{
+    if ( !gt_fmt || gt_fmt->n != 2 || !baf_fmt || baf_fmt->n != 1 || baf_fmt->type != BCF_BT_FLOAT ) return -1;
+
+    int okay = 0, flipped = 0;
+
+    // temporarily store genotype alleles in AD array
+    #define BRANCH(type_t, bcf_type_vector_end) { \
+        type_t *p = (type_t *)gt_fmt->p; \
+        float *q = (float *)baf_fmt->p; \
+        for (int i=0; i<nsmpl; i++, p+=2, q++) \
+        { \
+            if ( p[0]==bcf_type_vector_end || bcf_gt_is_missing(p[0]) || \
+                 p[1]==bcf_type_vector_end || bcf_gt_is_missing(p[1]) ) \
+            { \
+                continue; \
+            } \
+            else if ( bcf_gt_allele(p[0])==0 && bcf_gt_allele(p[1])==0 ) \
+            { \
+                okay += q[0] < .5f; \
+                flipped += q[0] > .5f; \
+            } \
+            else if ( bcf_gt_allele(p[0])>0 && bcf_gt_allele(p[1])>0 ) \
+            { \
+                okay += q[0] > .5f; \
+                flipped += q[0] < .5f; \
+            } \
+        } \
+    }
+    switch (gt_fmt->type) {
+        case BCF_BT_INT8:  BRANCH(int8_t, bcf_int8_vector_end); break;
+        case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end); break;
+        case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end); break;
+        default: error("Unexpected type %d", gt_fmt->type);
+    }
+    #undef BRANCH
+
+    if (okay > 0 && flipped > 0) return -1;
+    else if (flipped > 0)
+    {
+        float *q = (float *)baf_fmt->p;
+        for (int i=0; i<nsmpl; i++, q++)
+        {
+            q[0] = 1.0f - q[0];
+        }
+        return 1;
+    }
+
+    return 0;
+}
+
 // retrive genotype alleles information from BCF record
 // assumes little endian architecture
 int bcf_get_genotype_alleles(const bcf_fmt_t *fmt,
@@ -3153,6 +3195,7 @@ static int get_contig(bcf_srs_t *sr,
     int *last_pos = (int *)calloc(nsmpl, sizeof(int));
 
     model->n = 0;
+    model->n_flipped = 0;
     for (int j=0; j<nsmpl; j++) sample[j].n = 0;
 
     for (i=0; bcf_sr_next_line_reader0(sr); i++)
@@ -3188,6 +3231,15 @@ static int get_contig(bcf_srs_t *sr,
         else
         {
             if ( !(lrr_fmt = bcf_get_fmt_id(line, lrr_id)) || !(baf_fmt = bcf_get_fmt_id(line, baf_id)) ) continue;
+
+            // check whether you need to flip the BAF but only for bi-allelic sites
+            if ( !(model->flags & NO_BAF_FLIP) && line->n_allele == 2 )
+            {
+                int ret = bcf_check_baf_flipped(gt_fmt, baf_fmt, nsmpl);
+                if ( ret < 0 ) error("Error: site contains a mix of okay and flipped BAF values at position %s:%d\n",
+                    bcf_hdr_id2name(hdr, line->rid), pos);
+                else model->n_flipped += ret;
+            }
 
             // make nan all BAF values for non heterozygous SNPs (we do not use those BAFs)
             int nbaf = 0;
@@ -3299,10 +3351,11 @@ static void usage()
     fprintf(stderr, "\n");
     fprintf(stderr, "HMM Options:\n");
     fprintf(stderr, "    -p  --cnp <file>                  list of regions to genotype in BED format\n");
-    fprintf(stderr, "    -c, --cnf <list>                  comma separated list of copy number fractions for LRR+BAF model [%s]\n", cnf_dflt);
-    fprintf(stderr, "    -b, --bdev <list>                 comma separated list of inverse BAF deviations for BAF+phase model\n");
-    fprintf(stderr, "                                      [%s]\n", bdev_dflt);
+    fprintf(stderr, "        --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model [%s]\n", bdev_lrr_baf_dflt);
+    fprintf(stderr, "        --bdev-BAF-phase <list>       comma separated list of inverse BAF deviations for BAF+phase model\n");
+    fprintf(stderr, "                                      [%s]\n", bdev_baf_phase_dflt);
     fprintf(stderr, "    -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [%d]\n", min_dst_dflt);
+    fprintf(stderr, "        --no-BAF-flip                 do not correct BAF at flipped sites\n");
     fprintf(stderr, "        --median-BAF-adjust <int>     minimum number of heterozygous genotypes required to perform\n");
     fprintf(stderr, "                                      median BAF adjustment (-1 for no BAF adjustment) [%d]\n", median_baf_adj_dflt);
     fprintf(stderr, "        --order-LRR-GC <int>          order of polynomial in local GC content to be used for polynomial\n");
@@ -3333,23 +3386,24 @@ static void usage()
     exit(1);
 }
 
-static float *readlistf(const char *str,
-                        int *n,
-                        float min,
-                        float max)
+static float *read_list_invf(const char *str,
+                             int *n,
+                             float min,
+                             float max)
 {
     char *tmp, **list = hts_readlist(str, 0, n);
     if ( *n >= 128 ) error("Cannot handle list of 128 or more parameters: %s\n", str);
     float *ret = (float *)malloc(*n * sizeof(float));
     for (int i=0; i<*n; i++)
     {
-        ret[i] = strtof(list[i], &tmp);
+        ret[i] = 1.0f / strtof(list[i], &tmp);
         if ( *tmp ) error("Could not parse: %s\n", list[i]);
-        if ( min!=max && (ret[i]<min || ret[i]>max) )
-            error("Expected values from the interval [%f,%f], found %s\n", min, max, list[i]);
+        if ( ret[i]<min || ret[i]>max )
+            error("Expected values from the interval [%f,%f], found 1/%s\n", min, max, list[i]);
         free(list[i]);
     }
     free(list);
+    ks_introsort_float((size_t)*n, ret);
     return ret;
 }
 
@@ -3394,8 +3448,8 @@ int main_vcfmocha(int argc, char *argv[])
     htsFile *out_fh = NULL;
     mocha_table_t mocha_table = {0, 0, NULL};
     const char *short_arm_chrs = short_arm_chrs_dflt;
-    const char *cnf = cnf_dflt;
-    const char *bdev = bdev_dflt;
+    const char *bdev_lrr_baf = bdev_lrr_baf_dflt;
+    const char *bdev_baf_phase = bdev_baf_phase_dflt;
 
     // model parameters
     model_t model;
@@ -3444,23 +3498,24 @@ int main_vcfmocha(int argc, char *argv[])
         {"ucsc-bed", required_argument, NULL, 'u'},
         {"no-log", no_argument, NULL, 'l'},
         {"cnp", required_argument, NULL, 'p'},
-        {"cnf", required_argument, NULL, 'c'},
-        {"bdev", required_argument, NULL, 'b'},
+        {"bdev-LRR-BAF", required_argument, NULL, 10},
+        {"bdev-BAF-phase", required_argument, NULL, 11},
         {"min-dist", required_argument, NULL, 'd'},
-        {"median-BAF-adjust", required_argument, NULL, 10},
-        {"order-LRR-GC", required_argument, NULL, 11},
-        {"xy-prob", required_argument, NULL, 12},
-        {"err-prob", required_argument, NULL, 13},
-        {"flip-prob", required_argument, NULL, 14},
-        {"telomere-advantage", required_argument, NULL, 15},
-        {"centromere-penalty", required_argument, NULL, 16},
-        {"short_arm_chrs", required_argument, NULL, 17},
-        {"use_short_arms", no_argument, NULL, 18},
-        {"use_centromeres", no_argument, NULL, 19},
-        {"LRR-cutoff", required_argument, NULL, 20},
-        {"LRR-hap2dip", required_argument, NULL, 21},
-        {"LRR-auto2sex", required_argument, NULL, 22},
-        {"LRR-weight", required_argument, NULL, 23},
+        {"no-BAF-flip", no_argument, NULL, 12},
+        {"median-BAF-adjust", required_argument, NULL, 13},
+        {"order-LRR-GC", required_argument, NULL, 14},
+        {"xy-prob", required_argument, NULL, 15},
+        {"err-prob", required_argument, NULL, 16},
+        {"flip-prob", required_argument, NULL, 17},
+        {"telomere-advantage", required_argument, NULL, 18},
+        {"centromere-penalty", required_argument, NULL, 19},
+        {"short_arm_chrs", required_argument, NULL, 20},
+        {"use_short_arms", no_argument, NULL, 21},
+        {"use_centromeres", no_argument, NULL, 22},
+        {"LRR-cutoff", required_argument, NULL, 23},
+        {"LRR-hap2dip", required_argument, NULL, 24},
+        {"LRR-auto2sex", required_argument, NULL, 25},
+        {"LRR-weight", required_argument, NULL, 26},
         {NULL, 0, NULL, 0}
     };
     while ((c = getopt_long(argc, argv, "h?r:R:s:S:t:T:f:v:o:O:am:g:u:lp:c:b:d:", loptions, NULL)) >= 0)
@@ -3508,56 +3563,57 @@ int main_vcfmocha(int argc, char *argv[])
             case 'u': ucsc_fname = optarg; break;
             case 'l': model.flags |= NO_LOG; break;
             case 'p': cnp_fname = optarg; break;
-            case 'c': cnf = optarg; break;
-            case 'b': bdev = optarg; break;
+            case 10 : bdev_lrr_baf = optarg; break;
+            case 11 : bdev_baf_phase = optarg; break;
             case 'd':
                 model.min_dst = (int)strtol(optarg, &tmp, 0);
                 if ( *tmp ) error("Could not parse: --min-dist %s\n", optarg);
                 break;
-            case 10 :
+            case 12 : model.flags |= NO_BAF_FLIP; break;
+            case 13 :
                 model.median_baf_adj = (int)strtol(optarg, &tmp, 0);
                 if ( *tmp ) error("Could not parse: --median-BAF-adjust %s\n", optarg);
                 break;
-            case 11 :
+            case 14 :
                 model.order_lrr_gc = (int)strtol(optarg, &tmp, 0);
                 if ( *tmp ) error("Could not parse: --order-LRR-GC %s\n", optarg);
                 break;
-            case 12 :
+            case 15 :
                 model.xy_log_prb = logf( strtof(optarg, &tmp) );
                 if ( *tmp ) error("Could not parse: --xy-prob %s\n", optarg);
                 break;
-            case 13 :
+            case 16 :
                 model.err_log_prb = logf( strtof(optarg, &tmp) );
                 if ( *tmp ) error("Could not parse: --err-prob %s\n", optarg);
                 break;
-            case 14 :
+            case 17 :
                 model.flip_log_prb = logf( strtof(optarg, &tmp) );
                 if ( *tmp ) error("Could not parse: --flip-prob %s\n", optarg);
                 break;
-            case 15 :
+            case 18 :
                 model.tel_log_prb = logf( strtof(optarg, &tmp) );
                 if ( *tmp ) error("Could not parse: --telomere-advantage %s\n", optarg);
                 break;
-            case 16 :
+            case 19 :
                 model.cen_log_prb = logf( strtof(optarg, &tmp) );
                 if ( *tmp ) error("Could not parse: --centromere-penalty %s\n", optarg);
                 break;
-            case 17 : short_arm_chrs = optarg; break;
-            case 18 : model.flags |= USE_SHORT_ARMS; break;
-            case 19 : model.flags |= USE_CENTROMERES; break;
-            case 20 :
+            case 20 : short_arm_chrs = optarg; break;
+            case 21 : model.flags |= USE_SHORT_ARMS; break;
+            case 22 : model.flags |= USE_CENTROMERES; break;
+            case 23 :
                 model.lrr_cutoff = strtof(optarg, &tmp);
                 if ( *tmp ) error("Could not parse: --LRR-cutoff %s\n", optarg);
                 break;
-            case 21 :
+            case 24 :
                 model.lrr_hap2dip = strtof(optarg, &tmp);
                 if ( *tmp ) error("Could not parse: --LRR-hap2dip %s\n", optarg);
                 break;
-            case 22 :
+            case 25 :
                 model.lrr_auto2sex = strtof(optarg, &tmp);
                 if ( *tmp ) error("Could not parse: --LRR-auto2sex %s\n", optarg);
                 break;
-            case 23 :
+            case 26 :
                 model.lrr_bias = strtof(optarg, &tmp);
                 if ( *tmp ) error("Could not parse: --LRR-weight %s\n", optarg);
                 break;
@@ -3588,11 +3644,8 @@ int main_vcfmocha(int argc, char *argv[])
     }
 
     // parse parameters defining hidden states
-    model.cnf = readlistf(cnf, &model.cnf_n, 0.0f, 4.0f);
-    ks_introsort_float((size_t)model.cnf_n, model.cnf);
-    model.bdev = readlistf(bdev, &model.bdev_n, 2.0f, INFINITY);
-    for (int i=0; i<model.bdev_n; i++) model.bdev[i] = 1.0f / model.bdev[i]; // compute inverses
-    ks_introsort_float((size_t)model.bdev_n, model.bdev);
+    model.bdev_lrr_baf = read_list_invf(bdev_lrr_baf, &model.bdev_lrr_baf_n, -0.5f, 0.25f);
+    model.bdev_baf_phase = read_list_invf(bdev_baf_phase, &model.bdev_baf_phase_n, 0.0f, 0.5f);
 
     // output tables with mosaic chromosomal alteration calls
     if ( mocha_fname ) out_fm = get_file_handle( mocha_fname );
@@ -3706,7 +3759,11 @@ int main_vcfmocha(int argc, char *argv[])
         model.rid = rid;
         int nret = get_contig(sr, sample, &model);
         if ( nret<=0 ) continue;
-        if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Read %d variants from contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
+        if ( !(model.flags & NO_LOG) )
+        {
+            if ( model.flags & NO_BAF_FLIP || model.n_flipped == 0 ) fprintf(stderr, "Read %d variants from contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
+            else fprintf(stderr, "Read %d variants (%d BAF flipped) from contig %s\n", nret, model.n_flipped, bcf_hdr_id2name( hdr, rid ));
+        }
         if( model.genome.length[rid] < model.pos_arr[model.n-1] )
             model.genome.length[rid] = model.pos_arr[model.n-1];
         for (int j=0; j<nsmpl; j++) sample_stats(sample + j, &model);
@@ -3735,7 +3792,11 @@ int main_vcfmocha(int argc, char *argv[])
         model.rid = rid;
         int nret = get_contig(sr, sample, &model);
         if ( nret<=0 ) continue;
-        if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Read %d variants from contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
+        if ( !(model.flags & NO_LOG) )
+        {
+            if ( model.flags & NO_BAF_FLIP || model.n_flipped == 0 ) fprintf(stderr, "Read %d variants from contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
+            else fprintf(stderr, "Read %d variants (%d BAF flipped) from contig %s\n", nret, model.n_flipped, bcf_hdr_id2name( hdr, rid ));
+        }
         for (int j=0; j<nsmpl; j++)
         {
             if ( model.cnp_idx ) regidx_overlap(model.cnp_idx, bcf_hdr_id2name( hdr, rid ), 0, model.genome.length[rid], model.cnp_itr);
@@ -3761,8 +3822,8 @@ int main_vcfmocha(int argc, char *argv[])
     // clear model data
     free(model.pos_arr);
     free(model.gc_arr);
-    free(model.cnf);
-    free(model.bdev);
+    free(model.bdev_lrr_baf);
+    free(model.bdev_baf_phase);
     free(model.genome.length);
     free(model.genome.cen_beg);
     free(model.genome.cen_end);
