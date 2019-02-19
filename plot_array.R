@@ -40,7 +40,6 @@ parser$add_argument('--samples', metavar = '<id>', type = 'character', required 
 parser$add_argument('--regions', metavar = '<file.pdf>', type = 'character', default = 'all', help = 'comma-separated list of regions to plot [all]')
 parser$add_argument('--fontsize', metavar = '<integer>', type = 'integer', default = 12, help = 'font size [12]')
 args <- parser$parse_args(commandArgs(trailingOnly = TRUE))
-# args <- parser$parse_args(c('--rules', 'GRCh37', '--vcf', '/tmp/csmd1_dlg2/cirm.core.gsa.mocha.bcf', '--pdf', '/tmp/cazzo.pdf', '--samples', 'CW70255C,RP-1468_CW70255', '--regions', '8:2792875-4852328'))
 if (is.null(args$pdf) && is.null(args$png)) stop('either --pdf or --png is required')
 if (!is.null(args$pdf) && !is.null(args$png)) stop('cannot use --pdf and --png at the same time')
 regions <- unlist(strsplit(args$regions, ','))
