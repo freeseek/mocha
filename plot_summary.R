@@ -72,19 +72,19 @@ p <- ggplot(df_calls[idx,], aes(x=BDEV, y=REL_COV, color=TYPE, shape=TYPE)) +
   geom_segment(aes(x = 0.0, y = 2.0, xend = 1.0/6.0, yend = 3.0), color = 'gray', size = .5, linetype = 'dashed') +
   geom_segment(aes(x = 0.0, y = 2.0, xend = 1.0/6.0, yend = 1.5), color = 'gray', size = .5, linetype = 'dashed') +
   geom_point(size = 1, alpha = 1/2) +
-  scale_color_manual('', values = c('CNN-LOH' = 'green', 'CNP Deletion' = 'orange', 'CNP Duplication' = 'cyan', 'Deletion' = 'red', 'Duplication' = 'blue', 'Undetermined' = 'gray')) +
+  scale_color_manual('', values = c('CNN-LOH' = 'orange', 'CNP Deletion' = 'lightblue', 'CNP Duplication' = 'violetred', 'Deletion' = 'blue', 'Duplication' = 'red', 'Undetermined' = 'gray50')) +
   scale_shape_manual('', values = 0:5) +
   theme_bw(base_size = args$fontsize) +
   theme(strip.background = element_rect(color=NA, fill=NA), legend.position = 'bottom', legend.box = 'horizontal') +
   facet_wrap(~SV)
-print(p + scale_x_continuous('BAF deviation (Bdev)', breaks = c(-0.05, 0.0, 0.05, 0.1, 0.15, 0.2)) + scale_y_continuous(expression(paste('Relative coverage (rescaled ', e^LRR, ')')), breaks = c(0, 1, 2, 3, 4)) + coord_cartesian(xlim = c(-0.05, 0.2), ylim = c(0, 4)))
-print(p + scale_x_continuous('BAF deviation (Bdev)', breaks = c(0.0, 0.01, 0.02, 0.03, 0.04, 0.05)) + scale_y_continuous(expression(paste('Relative coverage (rescaled ', e^LRR, ')')), breaks = c(1.8, 1.9, 2.0, 2.1, 2.2)) + coord_cartesian(xlim = c(0.0, 0.05), ylim = c(1.8, 2.2)))
+print(p + scale_x_continuous('BAF deviation (Bdev)', breaks = c(-0.05, 0.0, 0.05, 0.1, 0.15, 0.2)) + scale_y_continuous(expression(paste('Relative coverage (rescaled ', 2^LRR, ')')), breaks = c(0, 1, 2, 3, 4)) + coord_cartesian(xlim = c(-0.05, 0.2), ylim = c(0, 4)))
+print(p + scale_x_continuous('BAF deviation (Bdev)', breaks = c(0.0, 0.01, 0.02, 0.03, 0.04, 0.05)) + scale_y_continuous(expression(paste('Relative coverage (rescaled ', 2^LRR, ')')), breaks = c(1.8, 1.9, 2.0, 2.1, 2.2)) + coord_cartesian(xlim = c(0.0, 0.05), ylim = c(1.8, 2.2)))
 
-idx <- !( df_calls$CHROM %in% c('X', 'Y', 'MT') ) & !( df_calls$TYPE %in% c('CNP Deletion', 'CNP Duplication') ) & (df_calls$LENGTH > 2e6 | df_calls$BDEV<.12 | df_calls$REL_COV<2.5 & df_calls$REL_COV>1.5) # non-germline events
+idx <- !( df_calls$CHROM %in% c('X', 'Y', 'MT') ) & !( df_calls$TYPE %in% c('CNP Deletion', 'CNP Duplication') ) & (df_calls$LENGTH > 5e5 | df_calls$BDEV<.12 | df_calls$REL_COV<2.5 & df_calls$REL_COV>1.5) # non-germline events
 p <- ggplot(df_calls[idx,], aes(x=CHROM, fill=TYPE)) +
   geom_bar(stat = 'count', color = 'black') +
   scale_y_continuous(expand = c(0, 0)) +
-  scale_fill_manual('', values = c('CNN-LOH' = 'green', 'Deletion' = 'red', 'Duplication' = 'blue', 'Undetermined' = 'gray')) +
+  scale_fill_manual('', values = c('CNN-LOH' = 'orange', 'Deletion' = 'blue', 'Duplication' = 'red', 'Undetermined' = 'gray50')) +
   theme_bw(base_size = args$fontsize) +
   theme(legend.position = 'bottom', legend.box = 'horizontal')
 print(p)

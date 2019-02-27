@@ -40,8 +40,9 @@ Output Options:
 
 HMM Options:
     -p  --cnp <file>                  list of regions to genotype in BED format
-    -c, --cnf <list>                  comma separated list of copy number fractions for LRR+BAF model [1.0,3.0]
-    -b, --bdev <list>                 comma separated list of inverse BAF deviations for BAF+phase model
+        --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model [-2.0,-4.0,-6.0,10.0,6.0,4.0]
+        --bdev-LRR-BAF-noise <list>   comma separated list of inverse BAF deviations for LRR+BAF noise model [-6.0,-10.0,14.0,10.0,6.0]
+        --bdev-BAF-phase <list>       comma separated list of inverse BAF deviations for BAF+phase model
                                       [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
     -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [400]
         --no-BAF-flip                 do not correct BAF at flipped sites
@@ -58,7 +59,7 @@ HMM Options:
         --use_short_arms              use variants in short arms
         --use_centromeres             use variants in centromeres
         --LRR-cutoff <float>          LRR cutoff between haploid and diploid [estimated from X nonPAR]
-        --LRR-hap2dip <float>         LRR difference between haploid and diploid [estimated from X nonPAR]
+        --LRR-hap2dip <float>         LRR difference between haploid and diploid [0.45]
         --LRR-auto2sex <float>        LRR difference between autosomes and diploid sex chromosomes [estimated from X nonPAR]
         --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [0.2]
 
