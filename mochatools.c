@@ -271,6 +271,9 @@ int init(int argc,
     return 0;
 }
 
+// Petr Danecek's implementation in bcftools/mcall.c
+double binom_dist(int N, double p, int k);
+
 // returns 2*pbinom(k,n,1/2) if k<n/2 by precomputing values in a table
 static double binom_exact(int k, int n)
 {
@@ -285,6 +288,8 @@ static double binom_exact(int k, int n)
     }
 
     if ( n < 0 || k < 0 || k > n ) return NAN;
+
+    if ( n > 1000 ) return binom_dist(n, 0.5, k);
 
     if ( k == n>>1 ) return 1.0;
 
@@ -367,7 +372,7 @@ static int cmpfunc(const void * a, const void * b) {
 }
 
 // it currently does not handle nans
-// adapted from Petr Danecek's implementation in calc_mwu_bias_cdf() in bcftools/bam2bcf.c
+// adapted from Petr Danecek's implementation of calc_mwu_bias_cdf() in bcftools/bam2bcf.c
 static double mann_whitney_u(float *a,
                              float *b,
                              int na,

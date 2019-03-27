@@ -33,15 +33,15 @@ Output Options:
     -O, --output-type <b|u|z|v>       b: compressed BCF, u: uncompressed BCF, z: compressed VCF, v: uncompressed VCF [v]
         --no-version                  do not append version and command line to the header
     -a  --no-annotations              omit Ldev and Bdev FORMAT from output VCF (requires --output)
+        --no-log                      suppress progress report on standard error
+    -l  --log <file>                  write log to file [standard error]
     -m, --mosaic-calls <file>         write mosaic chromosomal alterations to a file [standard output]
     -g, --genome-stats <file>         write sample genome-wide statistics to a file [no output]
     -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]
-    -l  --no-log                      suppress progress report on standard error
 
 HMM Options:
     -p  --cnp <file>                  list of regions to genotype in BED format
         --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model [-2.0,-4.0,-6.0,10.0,6.0,4.0]
-        --bdev-LRR-BAF-noise <list>   comma separated list of inverse BAF deviations for LRR+BAF noise model [-6.0,-10.0,14.0,10.0,6.0]
         --bdev-BAF-phase <list>       comma separated list of inverse BAF deviations for BAF+phase model
                                       [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
     -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [400]
@@ -94,8 +94,8 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 
 Add patches and code for plugin
 ```
-/bin/rm -f bcftools/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c} bcftools/plugins/{trio-phase,mochatools,importFMT,extendFMT}.c
-wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{Makefile.patch,main.patch,vcfnorm.patch,vcfmocha.c}
+/bin/rm -f bcftools/{{Makefile,main,vcfnorm}.patch,vcfmocha.c,{beta_binom,genome_rules}.{c,h}} bcftools/plugins/{trio-phase,mochatools,importFMT,extendFMT}.c
+wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{{Makefile,main,vcfnorm}.patch,vcfmocha.c,{beta_binom,genome_rules}.{c,h}}
 wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools,importFMT,extendFMT}.c
 cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.patch && cd ..
 ```

@@ -36,15 +36,18 @@
 #include <htslib/ksort.h>
 #include "regidx.h"
 #include "kmin.h"
+#include "beta_binom.h"
+#include "genome_rules.h"
 #include "bcftools.h"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
  ****************************************/
 
+// TODO replace SIGN with copysignf()
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2019-02-26"
+#define MOCHA_VERSION "2019-03-26"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -87,26 +90,6 @@
  * DATA STRUCTURES                      *
  ****************************************/
 
-// structure defining regions of interest in the genome
-typedef struct
-{
-    int *length;
-    int *cen_beg;
-    int *cen_end;
-    int *is_short_arm;
-    int x_rid;
-    int x_nonpar_beg;
-    int x_nonpar_end;
-    int x_xtr_beg;
-    int x_xtr_end;
-    int y_rid;
-    int y_nonpar_beg;
-    int y_nonpar_end;
-    int y_xtr_beg;
-    int y_xtr_end;
-    int mt_rid;
-} genome_t;
-
 typedef struct
 {
     float xy_log_prb;
@@ -115,8 +98,8 @@ typedef struct
     float tel_log_prb;
     float cen_log_prb;
     // TODO make this an array
-    float *bdev_lrr_baf, *noise_bdev_lrr_baf, *bdev_baf_phase;
-    int bdev_lrr_baf_n, noise_bdev_lrr_baf_n, bdev_baf_phase_n;
+    float *bdev_lrr_baf, *bdev_baf_phase;
+    int bdev_lrr_baf_n, bdev_baf_phase_n;
     int min_dst;
     float lrr_cutoff;
     float lrr_hap2dip;
@@ -125,7 +108,7 @@ typedef struct
     int median_baf_adj;
     int order_lrr_gc;
     int flags;
-    genome_t genome;
+    genome_rules_t *genome_rules;
     regidx_t *cnp_idx;
     regitr_t *cnp_itr;
 
@@ -224,9 +207,14 @@ static inline double sq(double x) { return x*x; }
 // the x == y is necessary in case x == -INFINITY
 static inline float log_mean_expf(float x, float y) { return x == y ? x : ( x > y ? x + logf( 1.0f + expf(y-x) ) : y + logf( 1.0f + expf(x-y) ) ) - (float)M_LN2; }
 
+static beta_binom_t *beta_binom_null, *beta_binom_alt;
+static inline float beta_binom_log_lkl(const beta_binom_t *self, int16_t ad0, int16_t ad1)
+{
+    return ad0 == bcf_int16_missing || ad1 == bcf_int16_missing ? 0.0f : beta_binom_log_unsafe(self, ad0, ad1);
+}
+
 // default values for the model
 static const char *bdev_lrr_baf_dflt = "-2.0,-4.0,-6.0,10.0,6.0,4.0";
-static const char *noise_bdev_lrr_baf_dflt = "-6.0,-10.0,14.0,10.0,6.0";
 static const char *bdev_baf_phase_dflt = "6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0";
 static const int min_dst_dflt = 400;
 static const int median_baf_adj_dflt = 5;
@@ -623,7 +611,7 @@ static int8_t *log_viterbi_run(const float *emis_log_lkl,
  *********************************/
 
 // rescale emission probabilities to avoid problems with outliers
-// TODO change name, this is not cool
+// TODO find a better name for this function
 static void rescale_emis_log_lkl(float *log_prb,
                                  int n,
                                  float err_log_prb)
@@ -676,16 +664,12 @@ static float *lrr_baf_emis_log_lkl(const float *lrr,
                                    float lrr_hap2dip,
                                    float lrr_sd,
                                    float baf_sd,
-                                   const float *bdev_lrr_baf,
-                                   int m,
-                                   const float *noise_bdev_lrr_baf,
-                                   int noise_m)
+                                   const float *bdev_lrr_baf_arr,
+                                   int m)
 {
     float *ldev = (float *)malloc(m * sizeof(float));
-    float *noise_ldev = (float *)malloc(noise_m * sizeof(float));
-    for (int i=0; i<m; i++) ldev[i] = -logf( 1.0f - 2.0f * bdev_lrr_baf[i] ) / (float)M_LN2 * lrr_hap2dip;
-    for (int i=0; i<noise_m; i++) noise_ldev[i] = -logf( 1.0f - 2.0f * noise_bdev_lrr_baf[i] ) / (float)M_LN2 * lrr_hap2dip;
-    int N = 1 + m + noise_m;
+    for (int i=0; i<m; i++) ldev[i] = -logf( 1.0f - 2.0f * bdev_lrr_baf_arr[i] ) / (float)M_LN2 * lrr_hap2dip;
+    int N = 1 + 2*m;
     float *emis_log_lkl = (float *)malloc(N * T * sizeof(float));
     for (int t=0; t<T; t++)
     {
@@ -694,12 +678,15 @@ static float *lrr_baf_emis_log_lkl(const float *lrr,
         emis_log_lkl[t*N] = lrr_baf_log_lkl( x, y, 0.0f, 0.0f, lrr_sd, baf_sd, lrr_bias );
         for (int i=0; i<m; i++)
         {
-            emis_log_lkl[t*N + 1+i] = lrr_baf_log_lkl( x, y, ldev[i], bdev_lrr_baf[i], lrr_sd, baf_sd, lrr_bias );
+            emis_log_lkl[t*N + 1+i] = lrr_baf_log_lkl( x, y, ldev[i], bdev_lrr_baf_arr[i], lrr_sd, baf_sd, lrr_bias );
         }
         // add states to distinguish LRR waves from true mosaic duplications/deletions
-        for (int i=0; i<noise_m; i++)
+        for (int i=0; i<m; i++)
         {
-            emis_log_lkl[t*N + 1+m+i] = lrr_baf_log_lkl( x, y, noise_ldev[i], 0.0f, lrr_sd, baf_sd, lrr_bias );
+            if ( bdev_lrr_baf_arr[i] < -1.0f / 6.0f || bdev_lrr_baf_arr[i] >= 1.0f / 6.0f )
+                emis_log_lkl[t*N + 1+m+i] = emis_log_lkl[t*N] + err_log_prb;
+            else
+                emis_log_lkl[t*N + 1+m+i] = lrr_baf_log_lkl( x, y, bdev_lrr_baf_arr[i], 0.0f, lrr_sd, baf_sd, lrr_bias );
         }
         rescale_emis_log_lkl(&emis_log_lkl[t*N], N, err_log_prb);
     }
@@ -859,7 +846,7 @@ static double baf_phase_lod(const float *baf_arr,
     return (double)ret * M_LOG10E;
 }
 
-// TODO need a better title here
+// TODO find a better title for this function
 static float compare_models(const float *baf,
                             const int8_t *gt_phase,
                             int n,
@@ -884,110 +871,26 @@ static float compare_models(const float *baf,
     return -(float)fx + (float)nflips * flip_log_prb * (float)M_LOG10E;
 }
 
-/*********************************
- * BETA BINOMIAL AUXILIARY       *
- *********************************/
-
-// computes beta-binomial likelihood by keeping internal tables for null (bdev=0) and alternative model
-// f(n, x) = log( \gamma(n+x) / \gamma(x) / n! )
-// log_gamma_alpha[n] = f(n, \alpha)
-// log_gamma_beta[n] = f(n, \beta)
-// log_gamma_alpha_beta[n] = f(n, \alpha + \beta)
-// see https://en.wikipedia.org/wiki/Beta-binomial_distribution#As_a_compound_distribution
-
-typedef struct
-{
-    float p;
-    float rho;
-    int max1;
-    int max2;
-    double *log_gamma_alpha;
-    double *log_gamma_beta;
-    double *log_gamma_alpha_beta;
-    int m_log_gamma_alpha;
-    int m_log_gamma_beta;
-    int m_log_gamma_alpha_beta;
-} beta_binom_t;
-
-static beta_binom_t beta_binom_null = {NAN, NAN, 1, 1, NULL, NULL, NULL, 0, 0, 0};
-static beta_binom_t beta_binom_alt = {NAN, NAN, 1, 1, NULL, NULL, NULL, 0, 0, 0};
-
 void get_max_sum(const int16_t *ad0,
                  const int16_t *ad1,
                  int n,
                  const int *imap,
-                 int *max1,
-                 int *max2)
+                 int *n1,
+                 int *n2)
 {
-    *max1 = 0;
-    *max2 = 0;
+    *n1 = 0;
+    *n2 = 0;
     for (int i=0; i<n; i++)
     {
         int a = imap ? ad0[ imap[i] ] : ad0[i];
         int b = imap ? ad1[ imap[i] ] : ad1[i];
         if ( a!=bcf_int16_missing && b!=bcf_int16_missing )
         {
-            if (a > *max1) *max1 = a;
-            if (b > *max1) *max1 = b;
-            if (a + b > *max2) *max2 = a + b;
+            if (a > *n1) *n1 = a;
+            if (b > *n1) *n1 = b;
+            if (a + b > *n2) *n2 = a + b;
         }
     }
-}
-
-// beta binomial model with parameters p and rho
-// think of p as the expected number of observed reference alleles
-static void beta_binom_init(beta_binom_t *self,
-                            int max1,
-                            int max2,
-                            float p,
-                            float rho)
-{
-    if ( self->p != p || self->rho != rho )
-    {
-        self->p = p;
-        self->rho = rho;
-        self->max1 = 1;
-        self->max2 = 1;
-    }
-
-    hts_expand(double, max1 + 1, self->m_log_gamma_alpha, self->log_gamma_alpha);
-    hts_expand(double, max1 + 1, self->m_log_gamma_beta, self->log_gamma_beta);
-    hts_expand(double, max2 + 1, self->m_log_gamma_alpha_beta, self->log_gamma_alpha_beta);
-
-    self->log_gamma_alpha[0] = 0.0f;
-    self->log_gamma_beta[0] = 0.0f;
-    self->log_gamma_alpha_beta[0] = 0.0f;
-
-    float alpha = p * ( 1.0f - rho ) / rho;
-    float beta = ( 1.0f - p ) * ( 1.0f - rho ) / rho;
-
-    while ( self->max1 <= max1 )
-    {
-        self->log_gamma_alpha[self->max1] = self->log_gamma_alpha[self->max1 - 1] +
-            logf((alpha + (float)self->max1 - 1.0f) / (float)self->max1);
-        self->log_gamma_beta[self->max1] = self->log_gamma_beta[self->max1 - 1] +
-            logf((beta + (float)self->max1 - 1.0f) / (float)self->max1);
-        self->max1++;
-    }
-
-    while ( self->max2 <= max2 )
-    {
-        self->log_gamma_alpha_beta[self->max2] = self->log_gamma_alpha_beta[self->max2-1] +
-            logf((alpha + beta + (float)self->max2 - 1.0f) / (float)self->max2);
-        self->max2++;
-    }
-}
-
-static inline float beta_binom_log_lkl(const beta_binom_t *self, int16_t ad0, int16_t ad1)
-{
-    return ad0 == bcf_int16_missing || ad1 == bcf_int16_missing ? 0.0f : self->log_gamma_alpha[ad0] + self->log_gamma_beta[ad1] - self->log_gamma_alpha_beta[ad0 + ad1];
-}
-
-static void beta_binom_destroy(beta_binom_t *self)
-{
-    free(self->log_gamma_alpha);
-    free(self->log_gamma_beta);
-    free(self->log_gamma_alpha_beta);
 }
 
 /*********************************
@@ -1029,20 +932,18 @@ static float *lrr_ad_emis_log_lkl(const float *lrr,
                                   float lrr_sd,
                                   float ad_rho,
                                   const float *bdev_lrr_baf_arr,
-                                  int m,
-                                  const float *noise_bdev_lrr_baf,
-                                  int noise_m)
+                                  int m)
 {
-    int N = 1 + m + noise_m;
-    int max1, max2;
-    get_max_sum(ad0, ad1, T, NULL, &max1, &max2);
+    int N = 1 + 2*m;
+    int n1, n2;
+    get_max_sum(ad0, ad1, T, NULL, &n1, &n2);
     float *emis_log_lkl = (float *)malloc(N * T * sizeof(float));
     for (int i=0; i<1+m; i++)
     {
         float ldev = i==0 ? 0.0f : -logf( 1.0f - 2.0f * bdev_lrr_baf_arr[i] ) / (float)M_LN2 * lrr_hap2dip;
         float bdev = i==0 ? 0.0f : fabsf( bdev_lrr_baf_arr[i-1] );
-        beta_binom_t *beta_binom = i==0 ? &beta_binom_null : &beta_binom_alt;
-        beta_binom_init(beta_binom, max1, max2, 0.5f + bdev, ad_rho);
+        beta_binom_t *beta_binom = i==0 ? beta_binom_null : beta_binom_alt;
+        beta_binom_update(beta_binom, 0.5f + bdev, ad_rho, n1, n2);
 
         for (int t=0; t<T; t++)
         {
@@ -1052,15 +953,24 @@ static float *lrr_ad_emis_log_lkl(const float *lrr,
             emis_log_lkl[t*N + i] = lrr_ad_log_lkl( x, a, b, ldev, lrr_sd, lrr_bias, beta_binom );
         }
     }
-    for (int i=0; i<noise_m; i++)
+    // generate states that should attract LRR waves with no BAF signal
+    for (int i=0; i<m; i++)
     {
-        float ldev = -logf( 1.0f - 2.0f * noise_bdev_lrr_baf[i] ) / (float)M_LN2 * lrr_hap2dip;
-        for (int t=0; t<T; t++)
+        // do not make exterme states compete with LRR waves
+        if ( bdev_lrr_baf_arr[i] < -1.0f / 6.0f || bdev_lrr_baf_arr[i] >= 1.0f / 6.0f )
         {
-            float x = imap ? lrr[ imap[t] ] : lrr[t];
-            int16_t a = imap ? ad0[ imap[t] ] : ad0[t];
-            int16_t b = imap ? ad1[ imap[t] ] : ad1[t];
-            emis_log_lkl[t*N + 1+m+i] = lrr_ad_log_lkl( x, a, b, ldev, lrr_sd, lrr_bias, &beta_binom_null );
+            for (int t=0; t<T; t++) emis_log_lkl[t*N + 1+m+i] = emis_log_lkl[t*N] + err_log_prb;
+        }
+        else
+        {
+            float ldev = -logf( 1.0f - 2.0f * bdev_lrr_baf_arr[i] ) / (float)M_LN2 * lrr_hap2dip;
+            for (int t=0; t<T; t++)
+            {
+                float x = imap ? lrr[ imap[t] ] : lrr[t];
+                int16_t a = imap ? ad0[ imap[t] ] : ad0[t];
+                int16_t b = imap ? ad1[ imap[t] ] : ad1[t];
+                emis_log_lkl[t*N + 1+m+i] = lrr_ad_log_lkl( x, a, b, ldev, lrr_sd, lrr_bias, beta_binom_null );
+            }
         }
     }
     for (int t=0; t<T; t++) rescale_emis_log_lkl(&emis_log_lkl[t*N], N, err_log_prb);
@@ -1083,10 +993,10 @@ static float *ad_phase_emis_log_lkl(const int16_t *ad0,
     {
         float bdev = i==0 ? 0.0f : bdev_arr[i-1];
         // TODO this function should come out of the loop
-        int max1, max2;
-        get_max_sum(ad0, ad1, T, imap, &max1, &max2);
-        beta_binom_t *beta_binom = i==0 ? &beta_binom_null : &beta_binom_alt;
-        beta_binom_init(beta_binom, max1, max2, 0.5f + bdev, ad_rho);
+        int n1, n2;
+        get_max_sum(ad0, ad1, T, imap, &n1, &n2);
+        beta_binom_t *beta_binom = i==0 ? beta_binom_null : beta_binom_alt;
+        beta_binom_update(beta_binom, 0.5f + bdev, ad_rho, n1, n2);
 
         for (int t=0; t<T; t++)
         {
@@ -1116,17 +1026,17 @@ static int cnp_edge_is_not_cn2_lrr_ad(const float *lrr,
                                       float ldev,
                                       float bdev)
 {
-    int max1, max2;
-    get_max_sum(ad0, ad1, n, NULL, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
-    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + bdev, ad_rho);
+    int n1, n2;
+    get_max_sum(ad0, ad1, n, NULL, &n1, &n2);
+    beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
+    beta_binom_update(beta_binom_alt, 0.5f + bdev, ad_rho, n1, n2);
 
     // test left edge
     float sum_log_lkl = 0.0f;
     for (int i=a-1; i>=0; i--)
     {
-        float log_lkl = lrr_ad_log_lkl( lrr[i], ad0[i], ad1[i], ldev, lrr_sd, lrr_bias, &beta_binom_alt ) -
-                        lrr_ad_log_lkl( lrr[i], ad0[i], ad1[i], 0.0f, lrr_sd, lrr_bias, &beta_binom_null );
+        float log_lkl = lrr_ad_log_lkl( lrr[i], ad0[i], ad1[i], ldev, lrr_sd, lrr_bias, beta_binom_alt ) -
+                        lrr_ad_log_lkl( lrr[i], ad0[i], ad1[i], 0.0f, lrr_sd, lrr_bias, beta_binom_null );
 
         if ( log_lkl < err_log_prb ) log_lkl = err_log_prb;
         else if ( log_lkl > -err_log_prb ) log_lkl = -err_log_prb;
@@ -1139,8 +1049,8 @@ static int cnp_edge_is_not_cn2_lrr_ad(const float *lrr,
     sum_log_lkl = 0.0f;
     for (int i=b+1; i<n; i++)
     {
-        float log_lkl = lrr_ad_log_lkl( lrr[i], ad0[i], ad1[i], ldev, lrr_sd, lrr_bias, &beta_binom_alt ) -
-                        lrr_ad_log_lkl( lrr[i], ad0[i], ad1[i], 0.0f, lrr_sd, lrr_bias, &beta_binom_null );
+        float log_lkl = lrr_ad_log_lkl( lrr[i], ad0[i], ad1[i], ldev, lrr_sd, lrr_bias, beta_binom_alt ) -
+                        lrr_ad_log_lkl( lrr[i], ad0[i], ad1[i], 0.0f, lrr_sd, lrr_bias, beta_binom_null );
         if ( log_lkl < err_log_prb ) log_lkl = err_log_prb;
         else if ( log_lkl > -err_log_prb ) log_lkl = -err_log_prb;
         sum_log_lkl += log_lkl;
@@ -1167,18 +1077,18 @@ static double lrr_ad_lod(const float *lrr_arr,
     if ( n==0 || bdev_lrr_baf < -0.5 || bdev_lrr_baf > 0.25 ) return -INFINITY; // kmin_brent does not handle NAN
 
     float ldev = -logf( 1.0f - 2.0f * (float)bdev_lrr_baf ) / (float)M_LN2 * lrr_hap2dip;
-    int max1, max2;
-    get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
-    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + (float)bdev_lrr_baf, ad_rho);
+    int n1, n2;
+    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
+    beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
+    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev_lrr_baf, ad_rho, n1, n2);
     float ret = 0.0f;
     for (int i=0; i<n; i++)
     {
         float lrr = imap ? lrr_arr[ imap[i] ] : lrr_arr[i];
         int16_t ad0 = imap ? ad0_arr[ imap[i] ] : ad0_arr[i];
         int16_t ad1 = imap ? ad1_arr[ imap[i] ] : ad1_arr[i];
-        float log_lkl = lrr_ad_log_lkl( lrr, ad0, ad1, ldev, lrr_sd, lrr_bias, &beta_binom_alt ) -
-                        lrr_ad_log_lkl( lrr, ad0, ad1, 0.0f, lrr_sd, lrr_bias, &beta_binom_null );
+        float log_lkl = lrr_ad_log_lkl( lrr, ad0, ad1, ldev, lrr_sd, lrr_bias, beta_binom_alt ) -
+                        lrr_ad_log_lkl( lrr, ad0, ad1, 0.0f, lrr_sd, lrr_bias, beta_binom_null );
         if ( log_lkl < err_log_prb ) log_lkl = err_log_prb;
         else if ( log_lkl > -err_log_prb ) log_lkl = -err_log_prb;
         ret += log_lkl;
@@ -1197,18 +1107,18 @@ static double ad_lod(const int16_t *ad0_arr,
 {
     if ( n==0 || bdev < 0.0 || bdev > 0.5 ) return -INFINITY; // kmin_brent does not handle NAN
 
-    int max1, max2;
-    get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
-    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + (float)bdev, ad_rho);
+    int n1, n2;
+    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
+    beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
+    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, ad_rho, n1, n2);
     float ret = 0.0f;
     for (int i=0; i<n; i++)
     {
         int16_t ad0 = imap ? ad0_arr[ imap[i] ] : ad0_arr[i];
         int16_t ad1 = imap ? ad1_arr[ imap[i] ] : ad1_arr[i];
-        float log_lkl = log_mean_expf( beta_binom_log_lkl( &beta_binom_alt, ad0, ad1 ),
-                                       beta_binom_log_lkl( &beta_binom_alt, ad1, ad0 ) ) -
-                                       beta_binom_log_lkl( &beta_binom_null, ad0, ad1 );
+        float log_lkl = log_mean_expf( beta_binom_log_lkl( beta_binom_alt, ad0, ad1 ),
+                                       beta_binom_log_lkl( beta_binom_alt, ad1, ad0 ) ) -
+                                       beta_binom_log_lkl( beta_binom_null, ad0, ad1 );
         if ( log_lkl < err_log_prb ) log_lkl = err_log_prb;
         else if ( log_lkl > -err_log_prb ) log_lkl = -err_log_prb;
         ret += log_lkl;
@@ -1229,10 +1139,10 @@ static double ad_phase_lod(const int16_t *ad0_arr,
 {
     if ( n==0 || bdev < 0.0 || bdev > 0.5 ) return -INFINITY; // kmin_brent does not handle NAN
 
-    int max1, max2;
-    get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
-    beta_binom_init(&beta_binom_alt, max1, max2, 0.5f + (float)bdev, ad_rho);
+    int n1, n2;
+    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
+    beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
+    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, ad_rho, n1, n2);
     float ret = 0.0f;
     for (int i=0; i<n; i++)
     {
@@ -1240,8 +1150,8 @@ static double ad_phase_lod(const int16_t *ad0_arr,
         int16_t ad1 = imap ? ad1_arr[ imap[i] ] : ad1_arr[i];
         int8_t p = imap ? gt_phase[ imap[i] ] : gt_phase[i];
         if ( bdev_phase ) p *= (int8_t)SIGN( bdev_phase[i] ); // notice bdev_phase has no imap
-        float log_lkl = ad_phase_log_lkl( ad0, ad1, p, &beta_binom_alt ) -
-                        ad_phase_log_lkl( ad0, ad1, 0, &beta_binom_null );
+        float log_lkl = ad_phase_log_lkl( ad0, ad1, p, beta_binom_alt ) -
+                        ad_phase_log_lkl( ad0, ad1, 0, beta_binom_null );
         if ( log_lkl < err_log_prb ) log_lkl = err_log_prb;
         else if ( log_lkl > -err_log_prb ) log_lkl = -err_log_prb;
         ret += log_lkl;
@@ -1249,7 +1159,7 @@ static double ad_phase_lod(const int16_t *ad0_arr,
     return (double)ret * M_LOG10E;
 }
 
-// TODO need a better title here
+// TODO find a better title for this function
 static float compare_wgs_models(const int16_t *ad0,
                                 const int16_t *ad1,
                                 const int8_t *gt_phase,
@@ -1284,14 +1194,14 @@ static double lod_lkl_beta_binomial(const int16_t *ad0_arr,
 {
     if ( n==0 || ad_rho <= 0.0 || ad_rho >= 1.0 ) return -INFINITY;
     float ret = 0.0f;
-    int max1, max2;
-    get_max_sum(ad0_arr, ad1_arr, n, imap, &max1, &max2);
-    beta_binom_init(&beta_binom_null, max1, max2, 0.5f, ad_rho);
+    int n1, n2;
+    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
+    beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
     for (int i=0; i<n; i++)
     {
         int16_t ad0 = imap ? ad0_arr[ imap[i] ] : ad0_arr[i];
         int16_t ad1 = imap ? ad1_arr[ imap[i] ] : ad1_arr[i];
-        ret += beta_binom_log_lkl(&beta_binom_null, ad0, ad1);
+        ret += beta_binom_log_lkl(beta_binom_null, ad0, ad1);
     }
     return (double)ret * M_LOG10E;
 }
@@ -1483,8 +1393,8 @@ static float get_se_mean(const float *v,
 
 // compute the median of a vector using the ksort library (with iterator)
 float get_median(const float *v,
-                 int n,
-                 const int *imap)
+                        int n,
+                        const int *imap)
 {
     if ( n == 0 ) return NAN;
     float tmp, *w = (float *)malloc(n * sizeof(float));
@@ -1502,445 +1412,15 @@ float get_median(const float *v,
 }
 
 /*********************************
- * GENOME REFERENCE CONTIG RULES *
- *********************************/
-
-// inspired by Petr Danecek's implementation of bcftools/vcfcall.c and bcftools/plugins/mendelian.c
-typedef struct
-{
-    const char *alias, *about, *rules;
-}
-rules_predef_t;
-
-// the following definitions were derived from these files:
-// http://hgdownload.cse.ucsc.edu/goldenPath/hg18/database/chr{{1..22},{X,Y}}_gap.txt.gz
-// http://hgdownload.cse.ucsc.edu/goldenPath/hg18/database/genomicSuperDups.txt.gz
-// http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/gap.txt.gz
-// http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/genomicSuperDups.txt.gz
-// http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/centromeres.txt.gz
-// http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/genomicSuperDups.txt.gz
-static rules_predef_t rules_predefs[] =
-{
-    { .alias = "NCBI36",
-      .about = "Human Genome reference assembly NCBI36 / hg18, both chr naming conventions",
-      .rules =
-            "   1:121236957-123476957     centromere\n"
-            "   2:91689898-94689898       centromere\n"
-            "   3:90587544-93487544       centromere\n"
-            "   4:49354874-52354874       centromere\n"
-            "   5:46441398-49441398       centromere\n"
-            "   6:58938125-61938125       centromere\n"
-            "   7:58058273-61058273       centromere\n"
-            "   8:43958052-46958052       centromere\n"
-            "   9:47107499-50107499       centromere\n"
-            "   10:39244941-41624941      centromere\n"
-            "   11:51450781-54450781      centromere\n"
-            "   12:34747961-36142961      centromere\n"
-            "   13:16000000-17868000      centromere\n"
-            "   14:15070000-18070000      centromere\n"
-            "   15:15260000-18260000      centromere\n"
-            "   16:35143302-36943302      centromere\n"
-            "   17:22187133-22287133      centromere\n"
-            "   18:15400898-16764896      centromere\n"
-            "   19:26923622-29923622      centromere\n"
-            "   20:26267569-28033230      centromere\n"
-            "   21:10260000-13260000      centromere\n"
-            "   22:11330000-14330000      centromere\n"
-            "   X:58598737-61598737       centromere\n"
-            "   Y:11253954-12308578       centromere\n"
-            "   X:2709520-154583483       X_nonpar\n"
-            "   X:88343457-92262165       X_xtr\n"
-            "   Y:2709520-57442674        Y_nonpar\n"
-            "   Y:2977958-6676600         Y_xtr\n"
-            "   MT:1-16571                mitochondria\n"
-            "\n"
-            "   chr1:121236957-123476957  centromere\n"
-            "   chr2:91689898-94689898    centromere\n"
-            "   chr3:90587544-93487544    centromere\n"
-            "   chr4:49354874-52354874    centromere\n"
-            "   chr5:46441398-49441398    centromere\n"
-            "   chr6:58938125-61938125    centromere\n"
-            "   chr7:58058273-61058273    centromere\n"
-            "   chr8:43958052-46958052    centromere\n"
-            "   chr9:47107499-50107499    centromere\n"
-            "   chr10:39244941-41624941   centromere\n"
-            "   chr11:51450781-54450781   centromere\n"
-            "   chr12:34747961-36142961   centromere\n"
-            "   chr13:16000000-17868000   centromere\n"
-            "   chr14:15070000-18070000   centromere\n"
-            "   chr15:15260000-18260000   centromere\n"
-            "   chr16:35143302-36943302   centromere\n"
-            "   chr17:22187133-22287133   centromere\n"
-            "   chr18:15400898-16764896   centromere\n"
-            "   chr19:26923622-29923622   centromere\n"
-            "   chr20:26267569-28033230   centromere\n"
-            "   chr21:10260000-13260000   centromere\n"
-            "   chr22:11330000-14330000   centromere\n"
-            "   chrX:58598737-61598737    centromere\n"
-            "   chrY:11253954-12308578    centromere\n"
-            "   chrX:2709520-154583483    X_nonpar\n"
-            "   chrX:88343457-92262165    X_xtr\n"
-            "   chrY:2709520-57442674     Y_nonpar\n"
-            "   chrY:2977958-6676600      Y_xtr\n"
-            "   chrM:1-16571              mitochondria\n"
-    },
-    { .alias = "GRCh37",
-      .about = "Human Genome reference assembly GRCh37 / hg19, both chr naming conventions",
-      .rules =
-            "   1:121535434-124535434     centromere\n"
-            "   2:92326171-95326171       centromere\n"
-            "   3:90504854-93504854       centromere\n"
-            "   4:49660117-52660117       centromere\n"
-            "   5:46405641-49405641       centromere\n"
-            "   6:58830166-61830166       centromere\n"
-            "   7:58054331-61054331       centromere\n"
-            "   8:43838887-46838887       centromere\n"
-            "   9:47367679-50367679       centromere\n"
-            "   10:39254935-42254935      centromere\n"
-            "   11:51644205-54644205      centromere\n"
-            "   12:34856694-37856694      centromere\n"
-            "   13:16000000-19000000      centromere\n"
-            "   14:16000000-19000000      centromere\n"
-            "   15:17000000-20000000      centromere\n"
-            "   16:35335801-38335801      centromere\n"
-            "   17:22263006-25263006      centromere\n"
-            "   18:15460898-18460898      centromere\n"
-            "   19:24681782-27681782      centromere\n"
-            "   20:26369569-29369569      centromere\n"
-            "   21:11288129-14288129      centromere\n"
-            "   22:13000000-16000000      centromere\n"
-            "   X:58632012-61632012       centromere\n"
-            "   Y:10104553-13104553       centromere\n"
-            "   X:2699520-154930289       X_nonpar\n"
-            "   X:88456801-92375509       X_xtr\n"
-            "   Y:2649520-59033286        Y_nonpar\n"
-            "   Y:2917958-6616600         Y_xtr\n"
-            "   MT:1-16569                mitochondria\n"
-            "\n"
-            "   chr1:121535434-124535434  centromere\n"
-            "   chr2:92326171-95326171    centromere\n"
-            "   chr3:90504854-93504854    centromere\n"
-            "   chr4:49660117-52660117    centromere\n"
-            "   chr5:46405641-49405641    centromere\n"
-            "   chr6:58830166-61830166    centromere\n"
-            "   chr7:58054331-61054331    centromere\n"
-            "   chr8:43838887-46838887    centromere\n"
-            "   chr9:47367679-50367679    centromere\n"
-            "   chr10:39254935-42254935   centromere\n"
-            "   chr11:51644205-54644205   centromere\n"
-            "   chr12:34856694-37856694   centromere\n"
-            "   chr13:16000000-19000000   centromere\n"
-            "   chr14:16000000-19000000   centromere\n"
-            "   chr15:17000000-20000000   centromere\n"
-            "   chr16:35335801-38335801   centromere\n"
-            "   chr17:22263006-25263006   centromere\n"
-            "   chr18:15460898-18460898   centromere\n"
-            "   chr19:24681782-27681782   centromere\n"
-            "   chr20:26369569-29369569   centromere\n"
-            "   chr21:11288129-14288129   centromere\n"
-            "   chr22:13000000-16000000   centromere\n"
-            "   chrX:58632012-61632012    centromere\n"
-            "   chrY:10104553-13104553    centromere\n"
-            "   chrX:2699520-154930289    X_nonpar\n"
-            "   chrX:88456801-92375509    X_xtr\n"
-            "   chrY:2649520-59033286     Y_nonpar\n"
-            "   chrY:2917958-6616600      Y_xtr\n"
-            "   chrM:1-16571              mitochondria\n"
-    },
-    { .alias = "GRCh38",
-      .about = "Human Genome reference assembly GRCh38 / hg38, both chr naming conventions",
-      .rules =
-            "   1:122026459-124932724     centromere\n"
-            "   2:92188145-94090557       centromere\n"
-            "   3:90772458-93655574       centromere\n"
-            "   4:49712061-51743951       centromere\n"
-            "   5:46485900-50059807       centromere\n"
-            "   6:58553888-59829934       centromere\n"
-            "   7:58169653-61528020       centromere\n"
-            "   8:44033744-45877265       centromere\n"
-            "   9:43389635-45518558       centromere\n"
-            "   10:39686682-41593521      centromere\n"
-            "   11:51078348-54425074      centromere\n"
-            "   12:34769407-37185252      centromere\n"
-            "   13:16000000-18051248      centromere\n"
-            "   14:16000000-18173523      centromere\n"
-            "   15:17083673-19725254      centromere\n"
-            "   16:36311158-38265669      centromere\n"
-            "   17:22813679-26616164      centromere\n"
-            "   18:15460899-20861206      centromere\n"
-            "   19:24498980-27190874      centromere\n"
-            "   20:26436232-30038348      centromere\n"
-            "   21:10864560-12915808      centromere\n"
-            "   22:12954788-15054318      centromere\n"
-            "   X:58605579-62412542       centromere\n"
-            "   Y:10316944-10544039       centromere\n"
-            "   X:2781479-155700628       X_nonpar\n"
-            "   X:89201802-93120510       X_xtr\n"
-            "   Y:2781479-56887139        Y_nonpar\n"
-            "   Y:3049917-6748559         Y_xtr\n"
-            "   MT:1-16569                mitochondria\n"
-            "\n"
-            "   chr1:122026459-124932724  centromere\n"
-            "   chr2:92188145-94090557    centromere\n"
-            "   chr3:90772458-93655574    centromere\n"
-            "   chr4:49712061-51743951    centromere\n"
-            "   chr5:46485900-50059807    centromere\n"
-            "   chr6:58553888-59829934    centromere\n"
-            "   chr7:58169653-61528020    centromere\n"
-            "   chr8:44033744-45877265    centromere\n"
-            "   chr9:43389635-45518558    centromere\n"
-            "   chr10:39686682-41593521   centromere\n"
-            "   chr11:51078348-54425074   centromere\n"
-            "   chr12:34769407-37185252   centromere\n"
-            "   chr13:16000000-18051248   centromere\n"
-            "   chr14:16000000-18173523   centromere\n"
-            "   chr15:17083673-19725254   centromere\n"
-            "   chr16:36311158-38265669   centromere\n"
-            "   chr17:22813679-26616164   centromere\n"
-            "   chr18:15460899-20861206   centromere\n"
-            "   chr19:24498980-27190874   centromere\n"
-            "   chr20:26436232-30038348   centromere\n"
-            "   chr21:10864560-12915808   centromere\n"
-            "   chr22:12954788-15054318   centromere\n"
-            "   chrX:58605579-62412542    centromere\n"
-            "   chrY:10316944-10544039    centromere\n"
-            "   chrX:2781479-155700628    X_nonpar\n"
-            "   chrX:89201802-93120510    X_xtr\n"
-            "   chrY:2781479-56887139     Y_nonpar\n"
-            "   chrY:3049917-6748559      Y_xtr\n"
-            "   chrM:1-16569              mitochondria\n"
-    },
-    { .alias = NULL,
-      .about = NULL,
-      .rules = NULL,
-    }
-};
-
-// adapted from Petr Danecek's implementation of parse_rules() in bcftools/plugins/mendelian.c
-static void push_rule(genome_t *genome,
-                      char *line,
-                      const bcf_hdr_t *hdr)
-{
-    // eat any leading spaces
-    char *ss = (char *)line;
-    while ( *ss && isspace(*ss) ) ss++;
-    if ( !*ss ) return; // skip empty lines
-
-    // chromosome name, beg, end
-    char *tmp, *se = ss;
-    while ( *se && !isspace(*se) && *se!=':' ) se++;
-    if ( *se != ':' ) error("Could not parse the region: %s\n", line);
-    *se = '\0'; // terminates the chromosome string
-    int rid = bcf_hdr_name2id(hdr, ss);
-    if (rid < 0) return;
-    *se = ':'; // restores the separator
-    ss = ++se;
-    while ( *se && !isspace(*se) && *se!='-' ) se++;
-    if ( *se != '-' ) error("Could not parse the region: %s\n", line);
-    int beg = (int)strtol(ss, &tmp, 10);
-    if ( tmp==ss ) error("Could not parse the region: %s\n", line);
-    ss = ++se;
-    int end = (int)strtol(ss, &tmp, 10);
-    if ( tmp==ss || beg > end ) error("Could not parse the region: %s\n", line);
-
-    // skip region
-    while ( *ss && !isspace(*ss) ) ss++;
-    while ( *ss && isspace(*ss) ) ss++;
-
-    if ( strncmp(ss, "centromere", 10) == 0 )
-    {
-        if ( genome->cen_beg[rid] != 0 || genome->cen_end[rid] != 0 )
-            error("Second centromere rule %s\n", line);
-        genome->cen_beg[rid] = beg;
-        genome->cen_end[rid] = end;
-    }
-    else if ( strncmp(ss, "X_nonpar", 8) == 0 )
-    {
-        if ( ( genome->x_xtr_beg != 0 || genome->x_xtr_end != 0 ) && genome->x_rid != rid )
-            error("Chromosome X XTR and nonPAR regions declared on different contigs: %s\n", line);
-        genome->x_rid = rid;
-        if ( genome->x_nonpar_beg != 0 || genome->x_nonpar_end != 0 )
-            error("Second chromosome X nonPAR rule: %s\n", line);
-        genome->x_nonpar_beg = beg;
-        genome->x_nonpar_end = end;
-    }
-    else if ( strncmp(ss, "X_xtr", 5) == 0 )
-    {
-        if ( ( genome->x_nonpar_beg != 0 || genome->x_nonpar_end != 0 ) && genome->x_rid != rid )
-            error("Chromosome X nonPAR and XTR regions declared on different contigs: %s\n", line);
-        genome->x_rid = rid;
-        if ( genome->x_xtr_beg != 0 || genome->x_xtr_end != 0 )
-            error("Second chromosome X XTR rule: %s\n", line);
-        genome->x_xtr_beg = beg;
-        genome->x_xtr_end = end;
-    }
-    else if ( strncmp(ss, "Y_nonpar", 8) == 0 )
-    {
-        if ( ( genome->y_xtr_beg != 0 || genome->y_xtr_end != 0 ) && genome->y_rid != rid )
-            error("Chromosome Y XTR and nonPAR regions declared on different contigs: %s\n", line);
-        genome->y_rid = rid;
-        if ( genome->y_nonpar_beg != 0 || genome->y_nonpar_end != 0 )
-            error("Second chromosome Y nonPAR rule: %s\n", line);
-        genome->y_nonpar_beg = beg;
-        genome->y_nonpar_end = end;
-    }
-    else if ( strncmp(ss, "Y_xtr", 5) == 0 )
-    {
-        if ( ( genome->y_nonpar_beg != 0 || genome->y_nonpar_end != 0 ) && genome->y_rid != rid )
-            error("Chromosome Y nonPAR and XTR regions declared on different contigs: %s\n", line);
-        genome->y_rid = rid;
-        if ( genome->y_xtr_beg != 0 || genome->y_xtr_end != 0 )
-            error("Second chromosome Y XTR rule: %s\n", line);
-        genome->y_xtr_beg = beg;
-        genome->y_xtr_end = end;
-    }
-    else if ( strncmp(ss, "mitochondria", 12) == 0 )
-    {
-        if ( genome->mt_rid != -1 )
-            error("Second mitochondria rule %s\n", line);
-        genome->mt_rid = rid;
-    }
-}
-
-// split file into lines
-// adapted from Petr Danecek's implementation of regidx_init_string() in bcftools/regidx.c
-static void genome_init_file(genome_t *genome,
-                             const char *fname,
-                             const bcf_hdr_t *hdr)
-{
-    if ( !fname ) return;
-    kstring_t tmp = {0, 0, NULL};
-    htsFile *fp = hts_open(fname, "r");
-    if ( !fp ) error("Failed to open %s: %s\n", fname, strerror(errno));
-    while ( hts_getline(fp, KS_SEP_LINE, &tmp) > 0 )
-        push_rule(genome, tmp.s, hdr);
-    free(tmp.s);
-    hts_close(fp);
-}
-
-// split string into lines
-// adapted from Petr Danecek's implementation of regidx_init_string() in bcftools/regidx.c
-static void genome_init_string(genome_t *genome,
-                               const char *str,
-                               const bcf_hdr_t *hdr)
-{
-    if ( !str ) return;
-    kstring_t tmp = {0, 0, NULL};
-    const char *ss = str;
-    while ( *ss )
-    {
-        while ( *ss && isspace(*ss) ) ss++;
-        const char *se = ss;
-        while ( *se && *se!='\r' && *se!='\n' ) se++; // equivalent to KS_SEP_LINE
-        tmp.l = 0;
-        kputsn(ss, (int)(se-ss), &tmp);
-        push_rule(genome, tmp.s, hdr);
-        while ( *se && isspace(*se) ) se++;
-        ss = se;
-    }
-    free(tmp.s);
-}
-
-// adapted from Petr Danecek's implementation of init_rules() in bcftools/regidx.c
-static void genome_init_alias(genome_t *genome,
-                              char *alias,
-                              const bcf_hdr_t *hdr)
-{
-    const rules_predef_t *rules = rules_predefs;
-
-    int detailed = 0, len = strlen(alias);
-    if ( alias[len-1]=='?' ) { detailed = 1; alias[len-1] = '\0'; }
-
-    while ( rules->alias && strcasecmp(alias, rules->alias) ) rules++;
-
-    if ( !rules->alias )
-    {
-        fprintf(stderr, "\nPRE-DEFINED REFERENCE GENOME RULES\n");
-        fprintf(stderr, "\b * Columns are: CHROM:BEG-END centromere/nonpar\n");
-        fprintf(stderr, " * Coordinates are 1-based inclusive.\n");
-        for ( rules = rules_predefs; rules->alias; rules++ )
-        {
-            fprintf(stderr, "\n%s\n   .. %s\n\n", rules->alias, rules->about);
-            if ( detailed ) fprintf(stderr, "%s\n", rules->rules);
-        }
-        if ( !detailed )
-        {
-            fprintf(stderr, "\nRun as --rules <assembly> (e.g. --rules GRCh37).\n");
-            fprintf(stderr, "To see the detailed rules definition, append a question mark (e.g. --rules GRCh37?).\n");
-            fprintf(stderr, "\n");
-        }
-        exit(1);
-    }
-    else if ( detailed )
-    {
-        fprintf(stderr, "\n%s\n   .. %s\n\n", rules->alias, rules->about);
-        fprintf(stderr, "%s", rules->rules);
-        fprintf(stderr, "\n");
-        exit(1);
-    }
-    return genome_init_string(genome, rules->rules, hdr);
-}
-
-static int readlist_short_arms(genome_t *genome,
-                               const bcf_hdr_t *hdr,
-                               const char *str)
-{
-    int n;
-    char **list = hts_readlist(str, 0, &n);
-    if (!list) return 0;
-    for (int i=0; i<n; i++)
-    {
-        int rid = bcf_hdr_name2id(hdr, list[i]);
-        free(list[i]);
-        if (rid < 0) continue;
-        genome->is_short_arm[rid] = 1;
-    }
-    free(list);
-    return 1;
-}
-
-static int cnp_parse(const char *line,
-                     char **chr_beg,
-                     char **chr_end,
-                     uint32_t *beg,
-                     uint32_t *end,
-                     void *payload,
-                     void *usr)
-{
-    // Use the standard parser for CHROM,FROM,TO
-    int ret = regidx_parse_bed(line, chr_beg, chr_end, beg, end, NULL, NULL);
-    if ( ret!=0 ) return ret;
-
-    // Skip the fields that were parsed above
-    char *ss = (char*) line;
-    while ( *ss && isspace(*ss) ) ss++;
-    for (int i=0; i<3; i++)
-    {
-        while ( *ss && !isspace(*ss) ) ss++;
-        if ( !*ss ) return -2;  // wrong number of fields
-        while ( *ss && isspace(*ss) ) ss++;
-    }
-    if ( !*ss ) return -2;
-
-    // Parse the payload
-    int *dat = (int*)payload;
-    if ( strncmp(ss, "DEL", 3) == 0 ) *dat = MOCHA_CNP_DEL;
-    else if ( strncmp(ss, "DUP", 3) == 0 ) *dat = MOCHA_CNP_DUP;
-    else if ( strncmp(ss, "CNV", 3) == 0 ) *dat = MOCHA_CNP_CNV;
-    else *dat = MOCHA_UNK;
-    return 0;
-}
-
-/*********************************
  * SAMPLE METHODS                *
  *********************************/
 
-static void mocha_print_ucsc(const mocha_t *mocha,
+static void mocha_print_ucsc(FILE *restrict stream,
+                             const mocha_t *mocha,
                              int n,
-                             FILE *restrict stream,
                              const bcf_hdr_t *hdr)
 {
-    if (stream == NULL) return;
+    if ( stream == NULL ) return;
     const char *name[4];
     name[MOCHA_UNK] = "mCA_undetermined";
     name[MOCHA_DEL] = "mCA_loss";
@@ -1992,18 +1472,18 @@ static void mocha_print_ucsc(const mocha_t *mocha,
         }
     }
     free(tmp.s);
-    if (stream != stdout && stream != stderr) fclose(stream);
+    if ( stream != stdout && stream != stderr ) fclose(stream);
 }
 
-static void mocha_print(const mocha_t *mocha,
+static void mocha_print(FILE *restrict stream,
+                        const mocha_t *mocha,
                         int n,
-                        FILE *restrict stream,
                         const bcf_hdr_t *hdr,
                         int flags,
                         char *genome,
                         float lrr_hap2dip)
 {
-    if (stream == NULL) return;
+    if ( stream == NULL ) return;
     char sex[3];
     sex[SEX_UNK] = 'U';
     sex[SEX_MAL] = 'M';
@@ -2032,7 +1512,7 @@ static void mocha_print(const mocha_t *mocha,
             mocha->lod_lrr_baf, mocha->lod_baf_phase, mocha->nflips, mocha->baf_conc, mocha->lod_baf_conc, type[mocha->type], mocha->cf);
         mocha++;
     }
-    if (stream != stdout && stream != stderr) fclose(stream);
+    if ( stream != stdout && stream != stderr ) fclose(stream);
 }
 
 // this function returns two values (a, b) such that:
@@ -2216,14 +1696,16 @@ static void get_mocha_stats(const int *pos,
 }
 
 // return segments called by the HMM or a suggestion of what state should be added to the HMM
-static int get_path_segs(const int8_t *path,
-                         int n,
-                         int middle,
-                         int **beg,
-                         int *m_beg,
-                         int **end,
-                         int *m_end,
-                         int *nseg)
+static float get_path_segs(const int8_t *path,
+                           const float *hs_arr,
+                           int n,
+                           int hmm_model,
+                           int middle,
+                           int **beg,
+                           int *m_beg,
+                           int **end,
+                           int *m_end,
+                           int *nseg)
 {
     int a = 0, b = 0;
     *nseg = 0;
@@ -2232,18 +1714,22 @@ static int get_path_segs(const int8_t *path,
         // check whether it is the end of a segment
         if ( b != n-1 )
         {
-            int curr = abs(path[b]);
-            int next = abs(path[b+1]);
-            if ( curr == next ) continue;
-            if ( middle )
+            int x = abs(path[b]);
+            int y = abs(path[b+1]);
+            if ( x == y ) continue;
+
+            // swap the two elements
+            if ( x > y )
             {
-                curr = curr > middle ? curr - middle : ( curr == 0 ? 0 : curr - middle - 1 );
-                next = next > middle ? next - middle : ( next == 0 ? 0 : next - middle - 1 );
+                x = abs(path[b+1]);
+                y = abs(path[b]);
             }
 
-            // if two consecutive segments have consecutive HMM states or states -1 and 1
-            if ( abs( curr - next ) == 1 ) return abs(next) > abs(curr) ? next : curr;
-            else if ( curr * next == -1 ) return -1;
+            if ( y - x == 1 )
+            {
+                if ( hmm_model == LRR_BAF && x > 0 && x != middle ) return ( hs_arr[x-1] + hs_arr[y-1] ) * 0.5f;
+                else if ( hmm_model == BAF_PHASE ) return x==0 ? hs_arr[0] * 0.5f: ( hs_arr[x-1] + hs_arr[y-1] ) * 0.5f;
+            }
         }
 
         if ( path[b] )
@@ -2259,13 +1745,72 @@ static int get_path_segs(const int8_t *path,
     return 0;
 }
 
+//static float get_path_segs(const int8_t *path,
+//                           const float *hs_arr,
+//                           int n,
+//                           int middle,
+//                           int **beg,
+//                           int *m_beg,
+//                           int **end,
+//                           int *m_end,
+//                           int *nseg)
+//{
+//    int a = 0, b = 0;
+//    *nseg = 0;
+//    for (b=0; b<n; b++)
+//    {
+//        // check whether it is the end of a segment
+//        if ( b != n-1 )
+//        {
+//            int x = abs(path[b]);
+//            int y = abs(path[b+1]);
+//            if ( x == y ) continue;
+//
+//            // swap the two elements
+//            if ( x > y )
+//            {
+//                x = abs(path[b+1]);
+//                y = abs(path[b]);
+//            }
+//
+//            if ( x == 0 )
+//            {
+//                if ( middle )
+//                {
+//                    if ( y == middle )
+//                    {
+//                        return hs_arr[middle - 1] * 0.5f;
+//                    }
+//                    else if ( y == middle + 1 )
+//                    {
+//                        return hs_arr[middle] * 0.5f;
+//                    }
+//                }
+//                else if ( y == 1 ) return hs_arr[0] * 0.5f;
+//            }
+//            else if ( y - x == 1 ) return ( hs_arr[x-1] + hs_arr[y-1] ) * 0.5f;
+//        }
+//
+//        if ( path[b] )
+//        {
+//            (*nseg)++;
+//            hts_expand(int, *nseg, *m_beg, *beg);
+//            (*beg)[(*nseg)-1] = a;
+//            hts_expand(int, *nseg, *m_end, *end);
+//            (*end)[(*nseg)-1] = b;
+//        }
+//        a = b + 1;
+//    }
+//    return 0;
+//}
+
 // process one contig for one sample
 static void sample_run(sample_t *self,
                        mocha_table_t *mocha_table,
                        const model_t *model)
 {
     // do nothing if chromosome Y or MT are being tested
-    if ( model->rid == model->genome.y_rid || model->rid == model->genome.mt_rid )
+    if ( model->rid == model->genome_rules->y_rid || model->rid == model->genome_rules->mt_rid )
     {
         memset(self->data_arr[LDEV], 0, self->n * sizeof(int16_t));
         memset(self->data_arr[BDEV], 0, self->n * sizeof(int16_t));
@@ -2278,9 +1823,9 @@ static void sample_run(sample_t *self,
     mocha.sex = self->sex;
     mocha.rid = model->rid;
 
-    int cen_beg = model->genome.cen_beg[model->rid];
-    int cen_end = model->genome.cen_end[model->rid];
-    int length = model->genome.length[model->rid];
+    int cen_beg = model->genome_rules->cen_beg[model->rid];
+    int cen_end = model->genome_rules->cen_end[model->rid];
+    int length = model->genome_rules->length[model->rid];
 
     // declutter code by copying these values onto the stack
     int n = self->n;
@@ -2316,11 +1861,11 @@ static void sample_run(sample_t *self,
     int16_t *bdev = (int16_t *)calloc(n, sizeof(int16_t));
 
     // TODO do I need special normalization for the X nonPAR region?
-    if ( model->rid == model->genome.x_rid )
+    if ( model->rid == model->genome_rules->x_rid )
     {
         for (int i=0; i<n; i++)
         {
-            if ( pos[i] > model->genome.x_nonpar_beg && pos[i] < model->genome.x_nonpar_end )
+            if ( pos[i] > model->genome_rules->x_nonpar_beg && pos[i] < model->genome_rules->x_nonpar_end )
             {
                 lrr[i] = ( self->sex == SEX_MAL ) ? NAN : lrr[i] - model->lrr_auto2sex;
                 baf[i] = ( self->sex == SEX_MAL ) ? NAN : baf[i];
@@ -2440,51 +1985,37 @@ static void sample_run(sample_t *self,
                 hs_arr[i] = model->bdev_baf_phase[i];
         }
         int8_t *path;
-        int ret, *beg = NULL, m_beg = 0, *end = NULL, m_end = 0, nseg;
+        float ret;
+        int *beg = NULL, m_beg = 0, *end = NULL, m_end = 0, nseg;
         do
         {
+            if ( n_hs + ( hmm_model == LRR_BAF ? n_hs : 0 ) > 127 )
+                error("Too many states being tested for the HMM\n");
+
             float *emis_log_lkl;
             if ( model->flags & WGS_DATA )
             {
-                emis_log_lkl = hmm_model==LRR_BAF ? lrr_ad_emis_log_lkl( lrr, ad0, ad1, n_imap, imap_arr, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, hs_arr, n_hs, model->noise_bdev_lrr_baf, model->noise_bdev_lrr_baf_n )
+                emis_log_lkl = hmm_model==LRR_BAF ? lrr_ad_emis_log_lkl( lrr, ad0, ad1, n_imap, imap_arr, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, hs_arr, n_hs )
                                                   : ad_phase_emis_log_lkl( ad0, ad1, gt_phase, n_imap, imap_arr, model->err_log_prb, self->stats.dispersion, hs_arr, n_hs );
             }
             else
             {
-                emis_log_lkl = hmm_model==LRR_BAF ? lrr_baf_emis_log_lkl( lrr, baf, n_imap, imap_arr, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, hs_arr, n_hs, model->noise_bdev_lrr_baf, model->noise_bdev_lrr_baf_n )
+                emis_log_lkl = hmm_model==LRR_BAF ? lrr_baf_emis_log_lkl( lrr, baf, n_imap, imap_arr, model->err_log_prb, model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, hs_arr, n_hs )
                                                   : baf_phase_emis_log_lkl( baf, gt_phase, n_imap, imap_arr, model->err_log_prb, self->stats.dispersion, hs_arr, n_hs );
             }
-            path = log_viterbi_run(emis_log_lkl, n_imap, n_hs + ( hmm_model==LRR_BAF ? model->noise_bdev_lrr_baf_n : 0 ), model->xy_log_prb, hmm_model==LRR_BAF ? NAN : model->flip_log_prb, model->tel_log_prb, model->cen_log_prb, last_p, first_q);
+            path = log_viterbi_run(emis_log_lkl, n_imap, n_hs + ( hmm_model==LRR_BAF ? n_hs : 0 ), model->xy_log_prb, hmm_model==LRR_BAF ? NAN : model->flip_log_prb, model->tel_log_prb, model->cen_log_prb, last_p, first_q);
             free(emis_log_lkl);
 
             if ( hmm_model==LRR_BAF ) for (int i=0; i<n_imap; i++) if ( path[i] > n_hs ) path[i] = 0;
-            ret = get_path_segs(path, n_imap, middle, &beg, &m_beg, &end, &m_end, &nseg);
+            ret = get_path_segs(path, hs_arr, n_imap, hmm_model, middle, &beg, &m_beg, &end, &m_end, &nseg);
 
             if ( ret ) // two consecutive hidden states were used, hinting that testing of a middle state might be necessary
             {
                 free(path);
                 n_hs++;
+                if ( middle && ret < 0.0f ) middle++;
                 hts_expand(float, n_hs, m_hs, hs_arr);
-
-                if ( middle )
-                {
-                    if ( ret > 0 )
-                    {
-                        if ( ret == 1 ) hs_arr[n_hs-1] = hs_arr[middle + ret - 1] * 0.5f;
-                        else hs_arr[n_hs-1] = ( hs_arr[middle + ret - 2] + hs_arr[middle + ret -1] ) * 0.5f;
-                    }
-                    else
-                    {
-                        if ( ret == -1 ) hs_arr[n_hs-1] = hs_arr[middle + ret - 1] * 0.5f;
-                        else hs_arr[n_hs-1] = ( hs_arr[middle + ret + 1] + hs_arr[middle + ret] ) * 0.5f;
-                        middle++;
-                    }
-                }
-                else
-                {
-                    if ( ret == 1 ) hs_arr[n_hs-1] = hs_arr[0] * 0.5f;
-                    else hs_arr[n_hs-1] = (hs_arr[ret-2] + hs_arr[ret-1]) * 0.5f;
-                }
+                hs_arr[n_hs-1] = ret;
                 ks_introsort_float(n_hs, hs_arr);
             }
         }
@@ -2710,7 +2241,6 @@ static void sample_summary(sample_t *self,
     if ( model->flags & WGS_DATA )
     {
         if ( isnan(model->lrr_cutoff) ) model->lrr_cutoff = -0.3f; // arbitrary cutoff between -M_LN2 and 0
-        if ( isnan(model->lrr_hap2dip) ) model->lrr_hap2dip = (float)M_LN2;
         if ( isnan(model->lrr_auto2sex) ) model->lrr_auto2sex = 0.0f;
     }
 
@@ -2768,15 +2298,15 @@ static void sample_stats(sample_t *self, const model_t *model)
     }
     int *imap_arr = (int *)malloc(n * sizeof(int));
 
-    if ( model->rid == model->genome.x_rid )
+    if ( model->rid == model->genome_rules->x_rid )
     {
         int n_imap = 0;
         for (int i=0; i<n; i++)
         {
             if ( !isnan( baf[i] ) ) self->nhets++;
             int pos = model->pos_arr[ self->vcf_imap_arr[i] ];
-            if ( pos > model->genome.x_nonpar_beg && pos < model->genome.x_nonpar_end &&
-                  ( pos < model->genome.x_xtr_beg || pos > model->genome.x_xtr_end ) )
+            if ( pos > model->genome_rules->x_nonpar_beg && pos < model->genome_rules->x_nonpar_end &&
+                  ( pos < model->genome_rules->x_xtr_beg || pos > model->genome_rules->x_xtr_end ) )
             {
                 if ( !isnan( baf[i] ) ) self->x_nonpar_nhets++;
                 n_imap++;
@@ -2796,15 +2326,15 @@ static void sample_stats(sample_t *self, const model_t *model)
             self->x_nonpar_dispersion = get_sample_sd( baf, n_imap, imap_arr );
         }
     }
-    else if ( model->rid == model->genome.y_rid )
+    else if ( model->rid == model->genome_rules->y_rid )
     {
         int n_imap = 0;
         for (int i=0; i<n; i++)
         {
             if ( !isnan( baf[i] ) ) self->nhets++;
             int pos = model->pos_arr[ self->vcf_imap_arr[i] ];
-            if ( pos > model->genome.y_nonpar_beg && pos < model->genome.y_nonpar_end &&
-                  ( pos < model->genome.y_xtr_beg || pos > model->genome.y_xtr_end ) )
+            if ( pos > model->genome_rules->y_nonpar_beg && pos < model->genome_rules->y_nonpar_end &&
+                  ( pos < model->genome_rules->y_xtr_beg || pos > model->genome_rules->y_xtr_end ) )
             {
                 n_imap++;
                 imap_arr[n_imap - 1] = i;
@@ -2812,7 +2342,7 @@ static void sample_stats(sample_t *self, const model_t *model)
         }
         self->y_nonpar_lrr_median = get_median( lrr, n_imap, imap_arr );
     }
-    else if ( model->rid == model->genome.mt_rid )
+    else if ( model->rid == model->genome_rules->mt_rid )
     {
         self->mt_lrr_median = get_median( lrr, n, NULL );
     }
@@ -2863,13 +2393,13 @@ static void sample_stats(sample_t *self, const model_t *model)
     free(imap_arr);
 }
 
-static void sample_print(const sample_t *self,
+static void sample_print(FILE *restrict stream,
+                         const sample_t *self,
                          int n,
-                         FILE *restrict stream,
                          const bcf_hdr_t *hdr,
                          int flags)
 {
-    if (stream == NULL) return;
+    if ( stream == NULL ) return;
     char sex[3];
     sex[SEX_UNK] = 'U';
     sex[SEX_MAL] = 'M';
@@ -3246,8 +2776,8 @@ static int get_contig(bcf_srs_t *sr,
         if ( ( model->flags & FLT_INCLUDE ) && !bcf_sr_get_line(sr, 1) ) continue;
 
         // if site falls in short arm or centromere regions skip line
-        if ( !( model->flags & USE_SHORT_ARMS ) && model->genome.is_short_arm[rid] && pos < model->genome.cen_beg[rid] ) continue;
-        if ( !( model->flags & USE_CENTROMERES ) && pos > model->genome.cen_beg[rid] && pos < model->genome.cen_end[rid] ) continue;
+        if ( !( model->flags & USE_SHORT_ARMS ) && model->genome_rules->is_short_arm[rid] && pos < model->genome_rules->cen_beg[rid] ) continue;
+        if ( !( model->flags & USE_CENTROMERES ) && pos > model->genome_rules->cen_beg[rid] && pos < model->genome_rules->cen_end[rid] ) continue;
 
         // if there are no genotypes, skip line
         bcf_fmt_t *gt_fmt = bcf_get_fmt_id(line, gt_id);
@@ -3267,8 +2797,10 @@ static int get_contig(bcf_srs_t *sr,
             if ( !(model->flags & NO_BAF_FLIP) && line->n_allele == 2 )
             {
                 int ret = bcf_check_baf_flipped(gt_fmt, baf_fmt, nsmpl);
-                if ( ret < 0 ) error("Error: site contains a mix of okay and flipped BAF values at position %s:%d\n",
-                    bcf_hdr_id2name(hdr, line->rid), pos);
+                if ( ret < 0 ) error("Error: site contains a mix of flipped and unflipped BAF values at position %s:%d\n"
+                                     "Use bcftools query -f \"[%%CHROM\\t%%POS\\t%%SAMPLE\\t%%GT\\t%%AD\\n]\" -r %s:%d-%d to investigate the issue\n"
+                                     "Use --no-BAF-flip to suppress BAF flipping\n",
+                    bcf_hdr_id2name(hdr, line->rid), line->pos+1, bcf_hdr_id2name(hdr, line->rid), line->pos, line->pos+1);
                 else model->n_flipped += ret;
             }
 
@@ -3351,74 +2883,74 @@ static int get_contig(bcf_srs_t *sr,
  * MAIN PART OF THE COMMAND      *
  *********************************/
 
-static void usage()
+static void usage(FILE *restrict stream)
 {
-    fprintf(stderr, "\n");
-    fprintf(stderr, "About:   MOsaic CHromosomal Alterations caller, requires phased genotypes (GT)\n");
-    fprintf(stderr, "         and either B-allele frequency (BAF) and Log R Ratio intensity (LRR)\n");
-    fprintf(stderr, "         or allelic depth coverage (AD). (version %s)\n", MOCHA_VERSION);
-    fprintf(stderr, "Usage:   bcftools mocha [OPTIONS] <in.vcf>\n");
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Required options:\n");
-    fprintf(stderr, "    -r, --rules <assembly>[?]         predefined genome reference rules, 'list' to print available settings, append '?' for details\n");
-    fprintf(stderr, "    -R, --rules-file <file>           genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE\n");
-    fprintf(stderr, "\n");
-    fprintf(stderr, "General Options:\n");
-    fprintf(stderr, "    -s, --samples [^]<list>           comma separated list of samples to include (or exclude with \"^\" prefix)\n");
-    fprintf(stderr, "    -S, --samples-file [^]<file>      file of samples to include (or exclude with \"^\" prefix)\n");
-    fprintf(stderr, "        --force-samples               only warn about unknown subset samples\n");
-    fprintf(stderr, "    -t, --targets [^]<region>         restrict to comma-separated list of regions. Exclude regions with \"^\" prefix\n");
-    fprintf(stderr, "    -T, --targets-file [^]<file>      restrict to regions listed in a file. Exclude regions with \"^\" prefix\n");
-    fprintf(stderr, "    -f, --apply-filters <list>        require at least one of the listed FILTER strings (e.g. \"PASS,.\")\n");
-    fprintf(stderr, "    -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants\n");
-    fprintf(stderr, "                                      to include (or exclude with \"^\" prefix) in the analysis\n");
-    fprintf(stderr, "        --threads <int>               number of extra output compression threads [0]\n");
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Output Options:\n");
-    fprintf(stderr, "    -o, --output <file>               write output to a file [no output]\n");
-    fprintf(stderr, "    -O, --output-type <b|u|z|v>       b: compressed BCF, u: uncompressed BCF, z: compressed VCF, v: uncompressed VCF [v]\n");
-    fprintf(stderr, "        --no-version                  do not append version and command line to the header\n");
-    fprintf(stderr, "    -a  --no-annotations              omit Ldev and Bdev FORMAT from output VCF (requires --output)\n");
-    fprintf(stderr, "    -m, --mosaic-calls <file>         write mosaic chromosomal alterations to a file [standard output]\n");
-    fprintf(stderr, "    -g, --genome-stats <file>         write sample genome-wide statistics to a file [no output]\n");
-    fprintf(stderr, "    -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]\n");
-    fprintf(stderr, "    -l  --no-log                      suppress progress report on standard error\n");
-    fprintf(stderr, "\n");
-    fprintf(stderr, "HMM Options:\n");
-    fprintf(stderr, "    -p  --cnp <file>                  list of regions to genotype in BED format\n");
-    fprintf(stderr, "        --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model [%s]\n", bdev_lrr_baf_dflt);
-    fprintf(stderr, "        --bdev-LRR-BAF-noise <list>   comma separated list of inverse BAF deviations for LRR+BAF noise model [%s]\n", noise_bdev_lrr_baf_dflt);
-    fprintf(stderr, "        --bdev-BAF-phase <list>       comma separated list of inverse BAF deviations for BAF+phase model\n");
-    fprintf(stderr, "                                      [%s]\n", bdev_baf_phase_dflt);
-    fprintf(stderr, "    -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [%d]\n", min_dst_dflt);
-    fprintf(stderr, "        --no-BAF-flip                 do not correct BAF at flipped sites\n");
-    fprintf(stderr, "        --median-BAF-adjust <int>     minimum number of heterozygous genotypes required to perform\n");
-    fprintf(stderr, "                                      median BAF adjustment (-1 for no BAF adjustment) [%d]\n", median_baf_adj_dflt);
-    fprintf(stderr, "        --order-LRR-GC <int>          order of polynomial in local GC content to be used for polynomial\n");
-    fprintf(stderr, "                                      regression of LRR (-1 for no LRR adjustment, %d maximum) [%d]\n", MAX_ORDER, order_lrr_gc_dflt);
-    fprintf(stderr, "        --xy-prob <float>             transition probability [%.0e]\n", xy_prb_dflt);
-    fprintf(stderr, "        --err-prob <float>            uniform error probability [%.0e]\n", err_prb_dflt);
-    fprintf(stderr, "        --flip-prob <float>           phase flip probability [%.0e]\n", flip_prb_dflt);
-    fprintf(stderr, "        --telomere-advantage <float>  telomere advantage [%.0e]\n", tel_prb_dflt);
-    fprintf(stderr, "        --centromere-penalty <float>  centromere penalty [%.0e]\n", cen_prb_dflt);
-    fprintf(stderr, "        --short_arm_chrs <list>       list of chromosomes with short arms [%s]\n", short_arm_chrs_dflt);
-    fprintf(stderr, "        --use_short_arms              use variants in short arms\n");
-    fprintf(stderr, "        --use_centromeres             use variants in centromeres\n");
-    fprintf(stderr, "        --LRR-cutoff <float>          LRR cutoff between haploid and diploid [estimated from X nonPAR]\n");
-    fprintf(stderr, "        --LRR-hap2dip <float>         LRR difference between haploid and diploid [%.2f]\n", lrr_hap2dip_dflt);
-    fprintf(stderr, "        --LRR-auto2sex <float>        LRR difference between autosomes and diploid sex chromosomes [estimated from X nonPAR]\n");
-    fprintf(stderr, "        --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [%g]\n", lrr_bias_dflt);
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Examples:\n");
-    fprintf(stderr, "    bcftools mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed\n");
-    fprintf(stderr, "    bcftools mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -c 1.0 --LRR-weight 0.5\n");
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Publications:\n");
-    fprintf(stderr, "    Loh P., Genovese G., McCarroll S., Price A. et al. Insights about clonal expansions\n");
-    fprintf(stderr, "    from 8,342 mosaic chromosomal alterations. Nature 559, 350–355 (2018)\n");
-    fprintf(stderr, "    [PubMed: http://www.ncbi.nlm.nih.gov/pubmed/29995854]\n");
-    fprintf(stderr, "    [DOI: http://doi.org/10.1038/s41586-018-0321-x]\n");
-    fprintf(stderr, "\n");
+    fprintf(stream, "\n");
+    fprintf(stream, "About:   MOsaic CHromosomal Alterations caller, requires phased genotypes (GT)\n");
+    fprintf(stream, "         and either B-allele frequency (BAF) and Log R Ratio intensity (LRR)\n");
+    fprintf(stream, "         or allelic depth coverage (AD). (version %s)\n", MOCHA_VERSION);
+    fprintf(stream, "Usage:   bcftools mocha [OPTIONS] <in.vcf>\n");
+    fprintf(stream, "\n");
+    fprintf(stream, "Required options:\n");
+    fprintf(stream, "    -r, --rules <assembly>[?]         predefined genome reference rules, 'list' to print available settings, append '?' for details\n");
+    fprintf(stream, "    -R, --rules-file <file>           genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE\n");
+    fprintf(stream, "\n");
+    fprintf(stream, "General Options:\n");
+    fprintf(stream, "    -s, --samples [^]<list>           comma separated list of samples to include (or exclude with \"^\" prefix)\n");
+    fprintf(stream, "    -S, --samples-file [^]<file>      file of samples to include (or exclude with \"^\" prefix)\n");
+    fprintf(stream, "        --force-samples               only warn about unknown subset samples\n");
+    fprintf(stream, "    -t, --targets [^]<region>         restrict to comma-separated list of regions. Exclude regions with \"^\" prefix\n");
+    fprintf(stream, "    -T, --targets-file [^]<file>      restrict to regions listed in a file. Exclude regions with \"^\" prefix\n");
+    fprintf(stream, "    -f, --apply-filters <list>        require at least one of the listed FILTER strings (e.g. \"PASS,.\")\n");
+    fprintf(stream, "    -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants\n");
+    fprintf(stream, "                                      to include (or exclude with \"^\" prefix) in the analysis\n");
+    fprintf(stream, "        --threads <int>               number of extra output compression threads [0]\n");
+    fprintf(stream, "\n");
+    fprintf(stream, "Output Options:\n");
+    fprintf(stream, "    -o, --output <file>               write output to a file [no output]\n");
+    fprintf(stream, "    -O, --output-type <b|u|z|v>       b: compressed BCF, u: uncompressed BCF, z: compressed VCF, v: uncompressed VCF [v]\n");
+    fprintf(stream, "        --no-version                  do not append version and command line to the header\n");
+    fprintf(stream, "    -a  --no-annotations              omit Ldev and Bdev FORMAT from output VCF (requires --output)\n");
+    fprintf(stream, "        --no-log                      suppress progress report on standard error\n");
+    fprintf(stream, "    -l  --log <file>                  write log to file [standard error]\n");
+    fprintf(stream, "    -m, --mosaic-calls <file>         write mosaic chromosomal alterations to a file [standard output]\n");
+    fprintf(stream, "    -g, --genome-stats <file>         write sample genome-wide statistics to a file [no output]\n");
+    fprintf(stream, "    -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]\n");
+    fprintf(stream, "\n");
+    fprintf(stream, "HMM Options:\n");
+    fprintf(stream, "    -p  --cnp <file>                  list of regions to genotype in BED format\n");
+    fprintf(stream, "        --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model [%s]\n", bdev_lrr_baf_dflt);
+    fprintf(stream, "        --bdev-BAF-phase <list>       comma separated list of inverse BAF deviations for BAF+phase model\n");
+    fprintf(stream, "                                      [%s]\n", bdev_baf_phase_dflt);
+    fprintf(stream, "    -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [%d]\n", min_dst_dflt);
+    fprintf(stream, "        --no-BAF-flip                 do not correct BAF at flipped sites\n");
+    fprintf(stream, "        --median-BAF-adjust <int>     minimum number of heterozygous genotypes required to perform\n");
+    fprintf(stream, "                                      median BAF adjustment (-1 for no BAF adjustment) [%d]\n", median_baf_adj_dflt);
+    fprintf(stream, "        --order-LRR-GC <int>          order of polynomial in local GC content to be used for polynomial\n");
+    fprintf(stream, "                                      regression of LRR (-1 for no LRR adjustment, %d maximum) [%d]\n", MAX_ORDER, order_lrr_gc_dflt);
+    fprintf(stream, "        --xy-prob <float>             transition probability [%.0e]\n", xy_prb_dflt);
+    fprintf(stream, "        --err-prob <float>            uniform error probability [%.0e]\n", err_prb_dflt);
+    fprintf(stream, "        --flip-prob <float>           phase flip probability [%.0e]\n", flip_prb_dflt);
+    fprintf(stream, "        --telomere-advantage <float>  telomere advantage [%.0e]\n", tel_prb_dflt);
+    fprintf(stream, "        --centromere-penalty <float>  centromere penalty [%.0e]\n", cen_prb_dflt);
+    fprintf(stream, "        --short_arm_chrs <list>       list of chromosomes with short arms [%s]\n", short_arm_chrs_dflt);
+    fprintf(stream, "        --use_short_arms              use variants in short arms\n");
+    fprintf(stream, "        --use_centromeres             use variants in centromeres\n");
+    fprintf(stream, "        --LRR-cutoff <float>          LRR cutoff between haploid and diploid [estimated from X nonPAR]\n");
+    fprintf(stream, "        --LRR-hap2dip <float>         LRR difference between haploid and diploid [%.2f]\n", lrr_hap2dip_dflt);
+    fprintf(stream, "        --LRR-auto2sex <float>        LRR difference between autosomes and diploid sex chromosomes [estimated from X nonPAR]\n");
+    fprintf(stream, "        --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [%g]\n", lrr_bias_dflt);
+    fprintf(stream, "\n");
+    fprintf(stream, "Examples:\n");
+    fprintf(stream, "    bcftools mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed\n");
+    fprintf(stream, "    bcftools mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -c 1.0 --LRR-weight 0.5\n");
+    fprintf(stream, "\n");
+    fprintf(stream, "Publications:\n");
+    fprintf(stream, "    Loh P., Genovese G., McCarroll S., Price A. et al. Insights about clonal expansions\n");
+    fprintf(stream, "    from 8,342 mosaic chromosomal alterations. Nature 559, 350–355 (2018)\n");
+    fprintf(stream, "    [PubMed: http://www.ncbi.nlm.nih.gov/pubmed/29995854]\n");
+    fprintf(stream, "    [DOI: http://doi.org/10.1038/s41586-018-0321-x]\n");
+    fprintf(stream, "\n");
     exit(1);
 }
 
@@ -3443,6 +2975,38 @@ static float *read_list_invf(const char *str,
     return ret;
 }
 
+static int cnp_parse(const char *line,
+                     char **chr_beg,
+                     char **chr_end,
+                     uint32_t *beg,
+                     uint32_t *end,
+                     void *payload,
+                     void *usr)
+{
+    // Use the standard parser for CHROM,FROM,TO
+    int ret = regidx_parse_bed(line, chr_beg, chr_end, beg, end, NULL, NULL);
+    if ( ret!=0 ) return ret;
+
+    // Skip the fields that were parsed above
+    char *ss = (char*) line;
+    while ( *ss && isspace(*ss) ) ss++;
+    for (int i=0; i<3; i++)
+    {
+        while ( *ss && !isspace(*ss) ) ss++;
+        if ( !*ss ) return -2;  // wrong number of fields
+        while ( *ss && isspace(*ss) ) ss++;
+    }
+    if ( !*ss ) return -2;
+
+    // Parse the payload
+    int *dat = (int*)payload;
+    if ( strncmp(ss, "DEL", 3) == 0 ) *dat = MOCHA_CNP_DEL;
+    else if ( strncmp(ss, "DUP", 3) == 0 ) *dat = MOCHA_CNP_DUP;
+    else if ( strncmp(ss, "CNV", 3) == 0 ) *dat = MOCHA_CNP_CNV;
+    else *dat = MOCHA_UNK;
+    return 0;
+}
+
 static FILE *get_file_handle(const char *str)
 {
     FILE *ret;
@@ -3458,6 +3022,9 @@ static FILE *get_file_handle(const char *str)
 
 int main_vcfmocha(int argc, char *argv[])
 {
+    beta_binom_null = beta_binom_init();
+    beta_binom_alt = beta_binom_init();
+
     // program options
     int rules_is_file = 0;
     int sample_is_file = 0;
@@ -3469,13 +3036,11 @@ int main_vcfmocha(int argc, char *argv[])
     char *sample_names = NULL;
     char *targets_list = NULL;
     char *output_fname = NULL;
-    char *mocha_fname = NULL;
-    char *stats_fname = NULL;
-    char *ucsc_fname = NULL;
     char *cnp_fname = NULL;
     char *filter_fname = NULL;
     char *rules = NULL;
     sample_t *sample = NULL;
+    FILE *log_file = stderr;
     FILE *out_fm = stdout;
     FILE *out_fg = NULL;
     FILE *out_fu = NULL;
@@ -3485,7 +3050,6 @@ int main_vcfmocha(int argc, char *argv[])
     mocha_table_t mocha_table = {0, 0, NULL};
     const char *short_arm_chrs = short_arm_chrs_dflt;
     const char *bdev_lrr_baf = bdev_lrr_baf_dflt;
-    const char *noise_bdev_lrr_baf = noise_bdev_lrr_baf_dflt;
     const char *bdev_baf_phase = bdev_baf_phase_dflt;
 
     // model parameters
@@ -3503,9 +3067,6 @@ int main_vcfmocha(int argc, char *argv[])
     model.lrr_auto2sex = NAN;
     model.median_baf_adj = median_baf_adj_dflt;
     model.order_lrr_gc = order_lrr_gc_dflt;
-    model.genome.x_rid = -1;
-    model.genome.y_rid = -1;
-    model.genome.mt_rid = -1;
 
     // create synced reader object
     bcf_srs_t *sr = bcf_sr_init();
@@ -3533,10 +3094,10 @@ int main_vcfmocha(int argc, char *argv[])
         {"mosaic-calls", required_argument, NULL, 'm'},
         {"genome-stats", required_argument, NULL, 'g'},
         {"ucsc-bed", required_argument, NULL, 'u'},
-        {"no-log", no_argument, NULL, 'l'},
+        {"log", required_argument, NULL, 'l'},
+        {"no-log", no_argument, NULL, 10},
         {"cnp", required_argument, NULL, 'p'},
-        {"bdev-LRR-BAF", required_argument, NULL, 10},
-        {"bdev-LRR-BAF-noise", required_argument, NULL, 11},
+        {"bdev-LRR-BAF", required_argument, NULL, 11},
         {"bdev-BAF-phase", required_argument, NULL, 12},
         {"min-dist", required_argument, NULL, 'd'},
         {"no-BAF-flip", no_argument, NULL, 13},
@@ -3556,7 +3117,7 @@ int main_vcfmocha(int argc, char *argv[])
         {"LRR-weight", required_argument, NULL, 27},
         {NULL, 0, NULL, 0}
     };
-    while ((c = getopt_long(argc, argv, "h?r:R:s:S:t:T:f:v:o:O:am:g:u:lp:c:b:d:", loptions, NULL)) >= 0)
+    while ((c = getopt_long(argc, argv, "h?r:R:s:S:t:T:f:v:o:O:am:g:u:l:p:c:b:d:", loptions, NULL)) >= 0)
     {
         switch (c)
         {
@@ -3596,13 +3157,13 @@ int main_vcfmocha(int argc, char *argv[])
                 break;
             case  8 : record_cmd_line = 0; break;
             case 'a': model.flags |= NO_ANNOT; break;
-            case 'm': mocha_fname = optarg; break;
-            case 'g': stats_fname = optarg; break;
-            case 'u': ucsc_fname = optarg; break;
-            case 'l': model.flags |= NO_LOG; break;
+            case 'l': log_file = get_file_handle( optarg ); break;
+            case 10 : model.flags |= NO_LOG; break;
+            case 'm': out_fm = get_file_handle( optarg ); break;
+            case 'g': out_fg = get_file_handle( optarg ); break;
+            case 'u': out_fu = get_file_handle( optarg ); break;
             case 'p': cnp_fname = optarg; break;
-            case 10 : bdev_lrr_baf = optarg; break;
-            case 11 : noise_bdev_lrr_baf = optarg; break;
+            case 11 : bdev_lrr_baf = optarg; break;
             case 12 : bdev_baf_phase = optarg; break;
             case 'd':
                 model.min_dst = (int)strtol(optarg, &tmp, 0);
@@ -3657,40 +3218,35 @@ int main_vcfmocha(int argc, char *argv[])
                 if ( *tmp ) error("Could not parse: --LRR-weight %s\n", optarg);
                 break;
             case 'h':
-            case '?': usage(); break;
+            case '?': usage(log_file); break;
             default: error("Unknown argument: %s\n", optarg);
         }
     }
 
     if ( !rules )
     {
-        fprintf(stderr, "Genome reference assembly was not specified with --rules or --rules-file\n");
-        usage();
+        fprintf(log_file, "Genome reference assembly was not specified with --rules or --rules-file\n");
+        usage(log_file);
     }
     int len = strlen(rules);
-    if ( !rules_is_file && ( strncmp(rules, "list", 4) == 0 || rules[len-1]=='?' ) ) genome_init_alias(NULL, rules, NULL);
+    if ( !rules_is_file && ( strncmp(rules, "list", 4) == 0 || rules[len-1]=='?' ) ) genome_init_alias(log_file, rules, NULL);
 
     if ( output_fname == NULL && ( model.flags & NO_ANNOT ) )
     {
-        fprintf(stderr, "Option --no-annotations requires option --output\n");
-        usage();
+        fprintf(log_file, "Option --no-annotations requires option --output\n");
+        usage(log_file);
     }
 
     if ( model.order_lrr_gc > MAX_ORDER )
     {
-        fprintf(stderr, "Polynomial order must not be greater than %d: --order-LRR-GC %d\n", MAX_ORDER, model.order_lrr_gc);
-        usage();
+        fprintf(log_file, "Polynomial order must not be greater than %d: --order-LRR-GC %d\n", MAX_ORDER, model.order_lrr_gc);
+        usage(log_file);
     }
 
     // parse parameters defining hidden states
     model.bdev_lrr_baf = read_list_invf(bdev_lrr_baf, &model.bdev_lrr_baf_n, -0.5f, 0.25f);
-    model.noise_bdev_lrr_baf = read_list_invf(noise_bdev_lrr_baf, &model.noise_bdev_lrr_baf_n, -0.5f, 0.25f);
+//    model.noise_bdev_lrr_baf = read_list_invf(noise_bdev_lrr_baf, &model.noise_bdev_lrr_baf_n, -0.5f, 0.25f);
     model.bdev_baf_phase = read_list_invf(bdev_baf_phase, &model.bdev_baf_phase_n, 0.0f, 0.5f);
-
-    // output tables with mosaic chromosomal alteration calls
-    if ( mocha_fname ) out_fm = get_file_handle( mocha_fname );
-    if ( stats_fname ) out_fg = get_file_handle( stats_fname );
-    if ( ucsc_fname ) out_fu = get_file_handle( ucsc_fname );
 
     // read list of regions to genotype
     if ( cnp_fname )
@@ -3707,7 +3263,7 @@ int main_vcfmocha(int argc, char *argv[])
         if ( !isatty(fileno((FILE *)stdin)) ) input_fname = "-";
     }
     else input_fname = argv[optind];
-    if ( !input_fname ) usage();
+    if ( !input_fname ) usage(log_file);
 
     // read in the regions from the command line
     if ( targets_list )
@@ -3728,7 +3284,10 @@ int main_vcfmocha(int argc, char *argv[])
     if ( bcf_hdr_id2int( hdr, BCF_DT_ID, "GT" ) < 0 )
         error("Error: input VCF file has no GT format field\n");
     if ( !( bcf_hdr_id2int( hdr, BCF_DT_ID, "AD" ) < 0 ) )
+    {
         model.flags |= WGS_DATA;
+        model.lrr_hap2dip = (float)M_LN2;
+    }
     else if ( (bcf_hdr_id2int( hdr, BCF_DT_ID, "LRR" ) < 0 || bcf_hdr_id2int( hdr, BCF_DT_ID, "BAF" ) < 0) )
         error("Error: input VCF file must contain either the AD format field or the LRR and BAF format fields\n");
     if ( model.order_lrr_gc > 0 && ( bcf_hdr_id2int( hdr, BCF_DT_ID, "GC" ) < 0 ) )
@@ -3737,22 +3296,14 @@ int main_vcfmocha(int argc, char *argv[])
     // median adjustment is necessary with sequencing counts data
     if ( ( model.order_lrr_gc < 0 ) && ( model.flags & WGS_DATA ) ) model.order_lrr_gc = 0;
 
-    fprintf(stderr, "Running MoChA version %s\n", MOCHA_VERSION);
-    fprintf(stderr, "For updates: https://github.com/freeseek/mocha\n");
+    fprintf(log_file, "Running MoChA version %s\n", MOCHA_VERSION);
+    fprintf(log_file, "For updates: https://github.com/freeseek/mocha\n");
 
     // initialize genome parameters
-    model.genome.length = (int *)calloc(hdr->n[BCF_DT_CTG], sizeof(int));
-    for (int rid=0; rid<hdr->n[BCF_DT_CTG]; rid++)
-        model.genome.length[rid] = hdr->id[BCF_DT_CTG][rid].val->info[0];
-    model.genome.cen_beg = (int *)calloc(hdr->n[BCF_DT_CTG], sizeof(int));
-    model.genome.cen_end = (int *)calloc(hdr->n[BCF_DT_CTG], sizeof(int));
-    model.genome.is_short_arm = (int *)calloc(hdr->n[BCF_DT_CTG], sizeof(int));
-    if ( rules_is_file )
-        genome_init_file(&model.genome, rules, hdr);
-    else
-        genome_init_alias(&model.genome, rules, hdr);
-    if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Using genome assembly from %s\n", rules);
-    readlist_short_arms(&model.genome, hdr, short_arm_chrs);
+    if ( rules_is_file ) model.genome_rules = genome_init_file(rules, hdr);
+    else model.genome_rules = genome_init_alias(log_file, rules, hdr);
+    if ( !(model.flags & NO_LOG) ) fprintf(log_file, "Using genome assembly from %s\n", rules);
+    readlist_short_arms(model.genome_rules, short_arm_chrs, hdr);
 
     // subset VCF file
     if ( sample_names )
@@ -3762,7 +3313,7 @@ int main_vcfmocha(int argc, char *argv[])
         else if ( ret>0 )
         {
             if ( force_samples )
-                fprintf(stderr, "Warn: sample #%d not found in the header... skipping\n", ret);
+                fprintf(log_file, "Warn: sample #%d not found in the header... skipping\n", ret);
             else
                 error("Error: sample #%d not found in the header. Use \"--force-samples\" to ignore this error\n", ret);
         }
@@ -3781,7 +3332,7 @@ int main_vcfmocha(int argc, char *argv[])
 
     int nsmpl = bcf_hdr_nsamples(hdr);
     if ( nsmpl == 0 ) error("Subsetting has removed all samples\n");
-    if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Loading %d sample(s) from the VCF file\n", nsmpl);
+    if ( !(model.flags & NO_LOG) ) fprintf(log_file, "Loading %d sample(s) from the VCF file\n", nsmpl);
     if ( nsmpl < model.median_baf_adj && !(model.flags & WGS_DATA) )
         error("Error: cannot perform median BAF adjustment with only %d sample(s): use \"--median-BAF-adjust -1\" to disable BAF adjustment\n", nsmpl);
 
@@ -3801,30 +3352,27 @@ int main_vcfmocha(int argc, char *argv[])
         if ( nret<=0 ) continue;
         if ( !(model.flags & NO_LOG) )
         {
-            if ( model.flags & NO_BAF_FLIP || model.n_flipped == 0 ) fprintf(stderr, "Read %d variants from contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
-            else fprintf(stderr, "Read %d variants (%d BAF flipped) from contig %s\n", nret, model.n_flipped, bcf_hdr_id2name( hdr, rid ));
+            if ( model.flags & NO_BAF_FLIP || model.n_flipped == 0 ) fprintf(log_file, "Read %d variants from contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
+            else fprintf(log_file, "Read %d variants (%d BAF flipped) from contig %s\n", nret, model.n_flipped, bcf_hdr_id2name( hdr, rid ));
         }
-        if( model.genome.length[rid] < model.pos_arr[model.n-1] )
-            model.genome.length[rid] = model.pos_arr[model.n-1];
+        if( model.genome_rules->length[rid] < model.pos_arr[model.n-1] )
+            model.genome_rules->length[rid] = model.pos_arr[model.n-1];
         for (int j=0; j<nsmpl; j++) sample_stats(sample + j, &model);
     }
 
     sample_summary(sample, nsmpl, &model);
     int cnt[3] = {0, 0, 0}; for (int i=0; i<nsmpl; i++) cnt[sample[i].sex]++;
-    if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Estimated %d sample(s) of unknown sex, %d male(s) and %d female(s)\n", cnt[SEX_UNK], cnt[SEX_MAL], cnt[SEX_FEM]);
-    sample_print(sample, nsmpl, out_fg, hdr, model.flags);
+    if ( !(model.flags & NO_LOG) ) fprintf(log_file, "Estimated %d sample(s) of unknown sex, %d male(s) and %d female(s)\n", cnt[SEX_UNK], cnt[SEX_MAL], cnt[SEX_FEM]);
+    sample_print(out_fg, sample, nsmpl, hdr, model.flags);
 
     if ( isnan( model.lrr_cutoff ) )
         error("Error: Unable to estimate LRR-cutoff. Make sure "
               "the X nonPAR region and both male and female samples are present in the VCF or specify the parameter\n");
-    if ( isnan( model.lrr_hap2dip ) )
-        error("Error: Unable to estimate LRR-hap2dip. Make sure "
-              "the X nonPAR region is present in the VCF or specify the parameter\n");
     if ( isnan( model.lrr_auto2sex ) )
         error("Error: Unable to estimate LRR-auto2sex. Make sure "
               "the both autosomes and the X nonPAR region are present in the VCF or specify the parameter\n");
 
-    if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Model LRR parameters: LRR-cutoff=%.4f LRR-hap2dip=%.4f LRR-auto2sex=%.4f\n",
+    if ( !(model.flags & NO_LOG) ) fprintf(log_file, "Model LRR parameters: LRR-cutoff=%.4f LRR-hap2dip=%.4f LRR-auto2sex=%.4f\n",
         model.lrr_cutoff, model.lrr_hap2dip, model.lrr_auto2sex);
 
     for (int rid=0; rid < hdr->n[BCF_DT_CTG]; rid++)
@@ -3834,19 +3382,19 @@ int main_vcfmocha(int argc, char *argv[])
         if ( nret<=0 ) continue;
         if ( !(model.flags & NO_LOG) )
         {
-            if ( model.flags & NO_BAF_FLIP || model.n_flipped == 0 ) fprintf(stderr, "Read %d variants from contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
-            else fprintf(stderr, "Read %d variants (%d BAF flipped) from contig %s\n", nret, model.n_flipped, bcf_hdr_id2name( hdr, rid ));
+            if ( model.flags & NO_BAF_FLIP || model.n_flipped == 0 ) fprintf(log_file, "Read %d variants from contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
+            else fprintf(log_file, "Read %d variants (%d BAF flipped) from contig %s\n", nret, model.n_flipped, bcf_hdr_id2name( hdr, rid ));
         }
         for (int j=0; j<nsmpl; j++)
         {
-            if ( model.cnp_idx ) regidx_overlap(model.cnp_idx, bcf_hdr_id2name( hdr, rid ), 0, model.genome.length[rid], model.cnp_itr);
+            if ( model.cnp_idx ) regidx_overlap(model.cnp_idx, bcf_hdr_id2name( hdr, rid ), 0, model.genome_rules->length[rid], model.cnp_itr);
             sample_run(sample + j, &mocha_table, &model);
         }
 
         if (output_fname)
         {
             nret = put_contig(sr, sample, &model, out_fh, out_hdr);
-            if ( !(model.flags & NO_LOG) ) fprintf(stderr, "Written %d variants for contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
+            if ( !(model.flags & NO_LOG) ) fprintf(log_file, "Written %d variants for contig %s\n", nret, bcf_hdr_id2name( hdr, rid ));
         }
     }
 
@@ -3858,7 +3406,7 @@ int main_vcfmocha(int argc, char *argv[])
         float *rare_ldev = (float *)malloc(mocha_table.n * sizeof(float));
         for (int i=0; i<mocha_table.n; i++)
         {
-            if ( mocha_table.a[i].rid == model.genome.x_rid ) continue;
+            if ( mocha_table.a[i].rid == model.genome_rules->x_rid ) continue;
             if ( mocha_table.a[i].type == MOCHA_CNP_DEL && mocha_table.a[i].nhets == 0 )
                 cnp_ldev[n_cnp_del++] = mocha_table.a[i].ldev;
             else if ( mocha_table.a[i].type == MOCHA_CNP_DUP && mocha_table.a[i].nhets >= 5 && mocha_table.a[i].bdev >= 0.1f )
@@ -3872,10 +3420,10 @@ int main_vcfmocha(int argc, char *argv[])
         float cnp_dup_ldev = get_median(&cnp_ldev[mocha_table.n - n_cnp_dup], n_cnp_dup, NULL);
         float rare_del_ldev = get_median(rare_ldev, n_rare_del, NULL);
         float rare_dup_ldev = get_median(&rare_ldev[mocha_table.n - n_rare_dup], n_rare_dup, NULL);
-        fprintf(stderr, "Adjusted LRR at CNP deletions=%.4f\n", cnp_del_ldev);
-        fprintf(stderr, "Adjusted LRR at CNP duplications=%.4f\n", cnp_dup_ldev);
-        fprintf(stderr, "Adjusted LRR at rare deletions=%.4f\n", rare_del_ldev);
-        fprintf(stderr, "Adjusted LRR at rare duplications=%.4f\n", rare_dup_ldev);
+        fprintf(log_file, "Adjusted LRR at CNP deletions=%.4f\n", cnp_del_ldev);
+        fprintf(log_file, "Adjusted LRR at CNP duplications=%.4f\n", cnp_dup_ldev);
+        fprintf(log_file, "Adjusted LRR at rare deletions=%.4f\n", rare_del_ldev);
+        fprintf(log_file, "Adjusted LRR at rare duplications=%.4f\n", rare_dup_ldev);
         free(cnp_ldev);
         free(rare_ldev);
     }
@@ -3893,21 +3441,16 @@ int main_vcfmocha(int argc, char *argv[])
     free(model.pos_arr);
     free(model.gc_arr);
     free(model.bdev_lrr_baf);
-    free(model.noise_bdev_lrr_baf);
+//    free(model.noise_bdev_lrr_baf);
     free(model.bdev_baf_phase);
-    free(model.genome.length);
-    free(model.genome.cen_beg);
-    free(model.genome.cen_end);
-    free(model.genome.is_short_arm);
+    genome_destroy(model.genome_rules);
 
     // free precomputed tables
     ad_to_lrr_baf(NULL, NULL, NULL, NULL, 0);
-    beta_binom_destroy(&beta_binom_null);
-    beta_binom_destroy(&beta_binom_alt);
 
     // write table with mosaic chromosomal alterations (and UCSC bed track)
-    mocha_print(mocha_table.a, mocha_table.n, out_fm, hdr, model.flags, rules, model.lrr_hap2dip);
-    mocha_print_ucsc(mocha_table.a, mocha_table.n, out_fu, hdr);
+    mocha_print(out_fm, mocha_table.a, mocha_table.n, hdr, model.flags, rules, model.lrr_hap2dip);
+    mocha_print_ucsc(out_fu, mocha_table.a, mocha_table.n, hdr);
     free(mocha_table.a);
 
     // close output VCF
@@ -3917,10 +3460,15 @@ int main_vcfmocha(int argc, char *argv[])
         hts_close(out_fh);
     }
 
+    if ( log_file != stdout && log_file != stderr ) fclose(log_file);
+
     // clean up
     if ( model.cnp_idx ) regidx_destroy(model.cnp_idx);
     if ( model.cnp_itr ) regitr_destroy(model.cnp_itr);
     bcf_sr_destroy(sr);
     free(sample);
+
+    beta_binom_destroy(beta_binom_null);
+    beta_binom_destroy(beta_binom_alt);
     return 0;
 }
