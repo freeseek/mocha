@@ -47,7 +47,7 @@
 // TODO replace SIGN with copysignf()
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2019-03-26"
+#define MOCHA_VERSION "2019-04-01"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -940,7 +940,7 @@ static float *lrr_ad_emis_log_lkl(const float *lrr,
     float *emis_log_lkl = (float *)malloc(N * T * sizeof(float));
     for (int i=0; i<1+m; i++)
     {
-        float ldev = i==0 ? 0.0f : -logf( 1.0f - 2.0f * bdev_lrr_baf_arr[i] ) / (float)M_LN2 * lrr_hap2dip;
+        float ldev = i==0 ? 0.0f : -logf( 1.0f - 2.0f * bdev_lrr_baf_arr[i-1] ) / (float)M_LN2 * lrr_hap2dip;
         float bdev = i==0 ? 0.0f : fabsf( bdev_lrr_baf_arr[i-1] );
         beta_binom_t *beta_binom = i==0 ? beta_binom_null : beta_binom_alt;
         beta_binom_update(beta_binom, 0.5f + bdev, ad_rho, n1, n2);
@@ -956,7 +956,7 @@ static float *lrr_ad_emis_log_lkl(const float *lrr,
     // generate states that should attract LRR waves with no BAF signal
     for (int i=0; i<m; i++)
     {
-        // do not make exterme states compete with LRR waves
+        // do not make extreme states compete with LRR waves
         if ( bdev_lrr_baf_arr[i] < -1.0f / 6.0f || bdev_lrr_baf_arr[i] >= 1.0f / 6.0f )
         {
             for (int t=0; t<T; t++) emis_log_lkl[t*N + 1+m+i] = emis_log_lkl[t*N] + err_log_prb;
@@ -1745,65 +1745,6 @@ static float get_path_segs(const int8_t *path,
     return 0;
 }
 
-//static float get_path_segs(const int8_t *path,
-//                           const float *hs_arr,
-//                           int n,
-//                           int middle,
-//                           int **beg,
-//                           int *m_beg,
-//                           int **end,
-//                           int *m_end,
-//                           int *nseg)
-//{
-//    int a = 0, b = 0;
-//    *nseg = 0;
-//    for (b=0; b<n; b++)
-//    {
-//        // check whether it is the end of a segment
-//        if ( b != n-1 )
-//        {
-//            int x = abs(path[b]);
-//            int y = abs(path[b+1]);
-//            if ( x == y ) continue;
-//
-//            // swap the two elements
-//            if ( x > y )
-//            {
-//                x = abs(path[b+1]);
-//                y = abs(path[b]);
-//            }
-//
-//            if ( x == 0 )
-//            {
-//                if ( middle )
-//                {
-//                    if ( y == middle )
-//                    {
-//                        return hs_arr[middle - 1] * 0.5f;
-//                    }
-//                    else if ( y == middle + 1 )
-//                    {
-//                        return hs_arr[middle] * 0.5f;
-//                    }
-//                }
-//                else if ( y == 1 ) return hs_arr[0] * 0.5f;
-//            }
-//            else if ( y - x == 1 ) return ( hs_arr[x-1] + hs_arr[y-1] ) * 0.5f;
-//        }
-//
-//        if ( path[b] )
-//        {
-//            (*nseg)++;
-//            hts_expand(int, *nseg, *m_beg, *beg);
-//            (*beg)[(*nseg)-1] = a;
-//            hts_expand(int, *nseg, *m_end, *end);
-//            (*end)[(*nseg)-1] = b;
-//        }
-//        a = b + 1;
-//    }
-//    return 0;
-//}
-
 // process one contig for one sample
 static void sample_run(sample_t *self,
                        mocha_table_t *mocha_table,
@@ -1989,7 +1930,7 @@ static void sample_run(sample_t *self,
         int *beg = NULL, m_beg = 0, *end = NULL, m_end = 0, nseg;
         do
         {
-            if ( n_hs + ( hmm_model == LRR_BAF ? n_hs : 0 ) > 127 )
+            if ( n_hs + ( hmm_model == LRR_BAF ? n_hs : 0 ) > 50 )
                 error("Too many states being tested for the HMM\n");
 
             float *emis_log_lkl;
