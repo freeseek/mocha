@@ -545,6 +545,14 @@ Bdev_Phase - for heterozygous calls: 1/-1 if the alternate allele is over/under 
 
 For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to 9NM bytes. For example, if you are running 4,000 samples and chromosome 1 has ~80K variants, you will need approximately 2-3GB to run MoChA. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the --min-dist parameter (D, 400 by default) and the length of the longest contig (L) and will amount to no more than 9NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter --min-dist 400 and chromosome 1 is ~250Mbp long, you might need up to 5-6GB to run MoChA. Notice that for whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use option --median-BAF-adjust -1).
 
+Notice that, depending on your application, you might want to filter the calls from MoChA. For example, the following code:
+```
+awk 'NR==FNR && FNR>1 && $6>.51 {x[$1]++}
+  NR>FNR && (FNR==1 || !($1 in x) && $6>1e5 && $17>10 && $21!~"CNP" && $22<.5) {print}' \
+  $pfx.stats.tsv $pfx.mocha.tsv > $pfx.mocha.filter.tsv
+```
+will generate a new table after removing samples with BAF_CONC greater than 0.51, removing calls smaller than 100kbp, removing calls with less than a LOD score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls with an estimated cell fraction larger than 50%.
+
 Allelic imbalance pipeline
 ==========================
 
