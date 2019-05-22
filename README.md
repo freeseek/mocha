@@ -622,9 +622,9 @@ sudo apt install r-cran-ggplot2 r-cran-data.table r-cran-gridextra
 
 Download R scripts
 ```
-/bin/rm -f $HOME/bin/plot_{summary,array}.R
+/bin/rm -f $HOME/bin/{plot_summary,mocha_plot}.R
 wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,array}.R
-chmod a+x $HOME/bin/plot_{summary,array}.R
+chmod a+x $HOME/bin/{plot_summary,mocha_plot}.R
 ```
 
 Generate summary plot
