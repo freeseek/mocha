@@ -47,7 +47,7 @@
 // TODO replace SIGN with copysignf()
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2019-04-01"
+#define MOCHA_VERSION "2019-05-20"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -2829,7 +2829,7 @@ static void usage(FILE *restrict stream)
     fprintf(stream, "\n");
     fprintf(stream, "About:   MOsaic CHromosomal Alterations caller, requires phased genotypes (GT)\n");
     fprintf(stream, "         and either B-allele frequency (BAF) and Log R Ratio intensity (LRR)\n");
-    fprintf(stream, "         or allelic depth coverage (AD). (version %s)\n", MOCHA_VERSION);
+    fprintf(stream, "         or allelic depth coverage (AD). (version %s https://github.com/freeseek/mocha)\n", MOCHA_VERSION);
     fprintf(stream, "Usage:   bcftools mocha [OPTIONS] <in.vcf>\n");
     fprintf(stream, "\n");
     fprintf(stream, "Required options:\n");
