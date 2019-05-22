@@ -129,15 +129,21 @@ if (!args$wgs) {
 } else {
   df$DP <- df$AD0 + df$AD1
   # subset to variants that are heterozygous
-  df <- df[df$GT == '0|1' | df$GT == '1|0' & df$DP > args$min_depth,]
+  df <- df[df$UNPHASED_GT == '0/1' & df$DP > args$min_depth,]
   df$BAF <- NaN
-  df$BAF[df$UNPHASED_GT == '0/1'] <- df$AD1[df$UNPHASED_GT == '0/1'] / df$DP[df$UNPHASED_GT == '0/1']
+  df$BAF <- df$AD1/ df$DP
   df$HD0 <- NaN
   df$HD1 <- NaN
   df$HD0[df$GT == '0|1'] <- df$AD0[df$GT == '0|1']
   df$HD1[df$GT == '0|1'] <- df$AD1[df$GT == '0|1']
   df$HD0[df$GT == '1|0'] <- df$AD1[df$GT == '1|0']
   df$HD1[df$GT == '1|0'] <- df$AD0[df$GT == '1|0']
+  if (args$clump == 1)
+  {
+    df$pBAF <- NaN
+    df$pBAF[df$GT == '0|1'] <- df$BAF[df$GT == '0|1']
+    df$pBAF[df$GT == '1|0'] <- 1 - df$BAF[df$GT == '1|0']
+  }
   cov_var <- 'DP'
   plot_vars <- c('DP', 'pBAF')
   df_horiz <- data.frame(variable = factor('pBAF', levels = plot_vars), value = 0.5)
@@ -204,28 +210,35 @@ if (length(regions)>0) {
       df_melt <- melt(df[idx, c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE', 'eLRR', 'BAF', 'pBAF')], id.vars = c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE'))
       df_melt$value[df_melt$variable == 'eLRR' & df_melt$value > 2 | df_melt$variable == 'pBAF' & abs(df_melt$value - 0.5) > 0.25] <- NA
     } else {
-      l <- list()
-      for (sm in unique(df$SAMPLE)) {
-        sm_idx <- idx & df$SAMPLE == sm
-        index <- round(.5 + (1:sum(sm_idx)) / sum(sm_idx) * ceiling(sum(sm_idx) / args$clump))
-        l[[sm]] <- data.frame(POS = unname(tapply(df$POS[sm_idx], index, median, na.rm = TRUE)),
-                              COLOR = unname(tapply(as.numeric(df$COLOR[sm_idx]), index, max, -1, na.rm = TRUE)),
-                              SAMPLE = sm,
-                              DP = unname(tapply(df$DP[sm_idx], index, mean, na.rm = TRUE)),
-                              HD0 = unname(tapply(df$HD0[sm_idx], index, sum, na.rm = TRUE)),
-                              HD1 = unname(tapply(df$HD1[sm_idx], index, sum, na.rm = TRUE)))
+      if (args$clump == 1) {
+        df_melt <- melt(df[idx, c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE', 'DP', 'BAF', 'pBAF')], id.vars = c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE'))
+      } else {
+        l <- list()
+        for (sm in unique(df$SAMPLE)) {
+          sm_idx <- idx & df$SAMPLE == sm
+          index <- round(.5 + (1:sum(sm_idx)) / sum(sm_idx) * ceiling(sum(sm_idx) / args$clump))
+          l[[sm]] <- data.frame(POS = unname(tapply(df$POS[sm_idx], index, median, na.rm = TRUE)),
+                                COLOR = unname(tapply(as.numeric(df$COLOR[sm_idx]), index, max, -1, na.rm = TRUE)),
+                                SAMPLE = sm,
+                                DP = unname(tapply(df$DP[sm_idx], index, mean, na.rm = TRUE)),
+                                HD0 = unname(tapply(df$HD0[sm_idx], index, sum, na.rm = TRUE)),
+                                HD1 = unname(tapply(df$HD1[sm_idx], index, sum, na.rm = TRUE)))
+        }
+        tmp <- rbindlist(l)
+        tmp$COLOR <- as.factor(tmp$COLOR)
+        tmp$COLOR[tmp$COLOR == -1] <- NaN
+        tmp$pBAF = tmp$HD1 / (tmp$HD0 + tmp$HD1)
+        df_melt <- melt(tmp[, c('POS', 'COLOR', 'SAMPLE', 'DP', 'pBAF')], id.vars = c('POS', 'COLOR', 'SAMPLE'))
       }
-      tmp <- rbindlist(l)
-      tmp$COLOR <- as.factor(tmp$COLOR)
-      tmp$COLOR[tmp$COLOR == -1] <- NaN
-      tmp$pBAF = tmp$HD1 / (tmp$HD0 + tmp$HD1)
-      df_melt <- melt(tmp[, c('POS', 'COLOR', 'SAMPLE', 'DP', 'pBAF')], id.vars = c('POS', 'COLOR', 'SAMPLE'))
     }
-    df_melt$smooth[df_melt$variable == cov_var & !is.na(df_melt$value)] <- filter(df_melt$value[df_melt$variable == cov_var & !is.na(df_melt$value)], rep(1 / args$roll, args$roll))
-    df_melt$smooth[df_melt$variable == 'pBAF' & !is.na(df_melt$value)] <- filter(df_melt$value[df_melt$variable == 'pBAF' & !is.na(df_melt$value)], rep(1 / args$roll, args$roll))
+
+    idx <- df_melt$variable == cov_var & !is.na(df_melt$value)
+    if (sum(idx) > 0) df_melt$smooth[idx] <- filter(df_melt$value[idx], rep(1 / args$roll, args$roll))
+    idx <- df_melt$variable == 'pBAF' & !is.na(df_melt$value)
+    if (sum(idx) > 0) df_melt$smooth[idx] <- filter(df_melt$value[idx], rep(1 / args$roll, args$roll))
 
     write(paste('Plotting region:', regions[i]), stderr())
-    if (!args$wgs) {
+    if ('UNPHASED_GT' %in% df_melt) {
       p <- ggplot(df_melt[!is.na(df_melt$value),], aes(x = POS/1e6, y = value, color = COLOR, shape = UNPHASED_GT)) +
         scale_shape_manual(guide = FALSE, values = c('0/0' = 3, '0/1' = 8, '1/1' = 4, './.' = 1))
     } else {
@@ -240,14 +253,14 @@ if (length(regions)>0) {
       facet_grid(variable ~ SAMPLE, scales = 'free_y') +
       coord_cartesian(xlim = c(lefts[i], rights[i])/1e6, expand = FALSE)
     if (all(is.na(df_melt$COLOR))) {
-      p <- p + geom_point(size = 1, color = 'gray50')
+      p <- p + geom_point(size = 1/2, color = 'gray50')
     } else {
-      p <- p + geom_point(size = 1)
+      p <- p + geom_point(size = 1/2)
     }
     p <- p + geom_hline(data = df_horiz, aes(yintercept = value), linetype = 'dashed', color = 'black', size = 1/4) +
       geom_line(data = df_melt[!is.na(df_melt$smooth),], aes(y = smooth, shape = NULL), color = 'blue', size = 1/4)
     if (!is.null(args$cytoband)) {
-      bottom <- floor(min(df_melt$value[df_melt$variable == 'pBAF'], na.rm = TRUE) * 20) / 20
+      bottom <- floor(min(0.25, df_melt$value[df_melt$variable == 'pBAF'], na.rm = TRUE) * 20) / 20
       p <- p  +
         geom_rect(data = df_cyto[df_cyto$chrom == chroms[i] & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = bottom -0.05, ymax = bottom, color = 'black', size = 1/4, show.legend = FALSE) +
         geom_polygon(data = df_cen[df_cen$chrom == chroms[i],], aes(x = value/1e6, y = bottom + 0.05 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8) +
