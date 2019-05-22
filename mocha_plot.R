@@ -29,7 +29,7 @@ suppressPackageStartupMessages(library(argparse))
 suppressPackageStartupMessages(library(data.table))
 suppressPackageStartupMessages(library(ggplot2))
 
-parser <- ArgumentParser(description = 'Plot MoChA calls from VCF file (version 2019-05-21)')
+parser <- ArgumentParser(description = 'Plot MoChA calls from VCF file (version 2019-05-22)')
 parser$add_argument('--rules', metavar = '<assembly>', type = 'character', required = TRUE, help = 'genome assembly (e.g. GRCh38)')
 parser$add_argument('--wgs', action = 'store_true', help = 'whether the input VCF file contains WGS data')
 parser$add_argument('--mocha', action = 'store_true', help = 'whether the input VCF file contains Ldev/Bdev data')
@@ -84,12 +84,13 @@ if (args$mocha) {
 fmt <- paste0(fmt, '\\n]"')
 cmd <- paste('bcftools query --format', fmt, args$vcf, '--samples', args$samples)
 
-chroms <- gsub('^chr', '', gsub('^chrM', 'MT', unlist(lapply(regions[regions!='all'], function(x) unlist(strsplit(x, ':'))[1]))))
+contigs <- unlist(lapply(regions[regions!='all'], function(x) unlist(strsplit(x, ':'))[1]))
+chroms <- gsub('^chr', '',gsub('^chrM', 'MT', contigs))
 begs <- as.numeric(unlist(lapply(regions[regions != 'all'], function(x) unlist(strsplit(unlist(strsplit(x, ':'))[2], '-'))[1])))
 ends <- as.numeric(unlist(lapply(regions[regions != 'all'], function(x) unlist(strsplit(unlist(strsplit(x, ':'))[2], '-'))[2])))
 lefts <- round(pmax(1.5 * begs - .5 * ends, 0))
 rights <- round(pmin(1.5 * ends - .5 * begs, chrlen[chroms]))
-if (!('all' %in% regions)) cmd <- paste(cmd, '--regions', paste0(chroms, ':', lefts, '-', rights, collapse = ','))
+if (!('all' %in% regions)) cmd <- paste(cmd, '--regions', paste0(contigs, ':', lefts, '-', rights, collapse = ','))
 
 if (!is.null(args$exclude)) cmd <- paste0(cmd, ' --targets-file ^', args$exclude)
 
@@ -233,9 +234,9 @@ if (length(regions)>0) {
     }
 
     idx <- df_melt$variable == cov_var & !is.na(df_melt$value)
-    if (sum(idx) > 0) df_melt$smooth[idx] <- filter(df_melt$value[idx], rep(1 / args$roll, args$roll))
+    if (sum(idx) >= args$roll) df_melt$smooth[idx] <- filter(df_melt$value[idx], rep(1 / args$roll, args$roll))
     idx <- df_melt$variable == 'pBAF' & !is.na(df_melt$value)
-    if (sum(idx) > 0) df_melt$smooth[idx] <- filter(df_melt$value[idx], rep(1 / args$roll, args$roll))
+    if (sum(idx) >= args$roll) df_melt$smooth[idx] <- filter(df_melt$value[idx], rep(1 / args$roll, args$roll))
 
     write(paste('Plotting region:', regions[i]), stderr())
     if ('UNPHASED_GT' %in% df_melt) {
