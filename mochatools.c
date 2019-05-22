@@ -185,8 +185,8 @@ int init(int argc,
         else ksprintf(&tmp, "%s", smpl[0]);
         for (int i=1; i<nsmpl; i++) ksprintf(&tmp, ",%s", smpl[i]);
         int ret = bcf_hdr_set_samples(args->in_hdr, tmp.s, 0);
-        if ( ret<0 ) error("Error parsing the sample list\n");
-        else if ( ret>0 )
+        if ( ret < 0 ) error("Error parsing the sample list\n");
+        else if ( ret > 0 )
         {
             if ( force_samples )
                 fprintf(stderr, "Warn: subset called for sample that does not exist in header: \"%s\"... skipping\n", smpl[ret-1]);
@@ -195,7 +195,7 @@ int init(int argc,
         }
         if ( bcf_hdr_nsamples(args->in_hdr) == 0 )
             error("Error: subsetting has removed all samples\n");
-        bcf_hdr_set_samples(args->out_hdr, tmp.s, 0);
+        if ( bcf_hdr_set_samples(args->out_hdr, tmp.s, 0) < 0 ) error("Error parsing the sample list\n");
         free(tmp.s);
         for (int i=0; i<nsmpl; i++) free(smpl[i]);
         free(smpl);
@@ -257,7 +257,7 @@ int init(int argc,
             bcf_hdr_append(args->out_hdr, "##INFO=<ID=BAF_Phase_Test,Number=4,Type=Float,Description=\"Welch's t-test and Mann-Whitney U test for allelic transmission ratios across heterozygous genotypes\">");
     }
 
-    if ( sites_only ) bcf_hdr_set_samples(args->out_hdr, NULL, 0);
+    if ( sites_only ) if ( bcf_hdr_set_samples(args->out_hdr, NULL, 0)  < 0 ) error("Error parsing the sample list\n");
 
     args->gt_phase_arr = (int8_t *)malloc(args->nsmpl * sizeof(int8_t));
     args->fmt_sign_arr = (int8_t *)malloc(args->nsmpl * sizeof(int8_t));
