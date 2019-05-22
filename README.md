@@ -195,6 +195,11 @@ for chr in {1..22} X; do
 done
 ```
 
+Download cytoband file
+```
+wget -O $HOME/res/cytoBand.hg19.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/cytoBand.txt.gz
+```
+
 Setup variables
 ```
 ref="$HOME/res/human_g1k_v37.fasta"
@@ -204,6 +209,7 @@ kgp_sfx=".phase3_integrated.20130502.genotypes"
 rule="GRCh37"
 cnp="$HOME/res/cnp.grch37.bed"
 dup="$HOME/res/dup.grch37.bed.gz"
+cyto="$HOME/res/cytoBand.hg19.txt.gz"
 ```
 
 Download resources for GRCh38
@@ -291,6 +297,11 @@ for chr in {1..22} X; do
 done
 ```
 
+Download cytoband file
+```
+wget -O $HOME/res/cytoBand.hg38.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/cytoBand.txt.gz
+```
+
 Setup variables
 ```
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
@@ -300,6 +311,7 @@ kgp_sfx="_GRCh38.genotypes.20170504"
 rule="GRCh38"
 cnp="$HOME/res/cnp.grch38.bed"
 dup="$HOME/res/dup.grch38.bed.gz"
+cyto="$HOME/res/cytoBand.hg38.txt.gz"
 ```
 
 Data preparation
@@ -622,9 +634,32 @@ $HOME/bin/plot_summary.R --pdf $dir/$pfx.pdf --stats $dir/$pfx.stats.tsv --calls
 
 Plot mosaic chromosomal alterations (for array data)
 ```
-sm="..."
-$HOME/bin/plot_array.R --rules $rule --pdf $dir/$sm.pdf --vcf $dir/$pfx.mocha.bcf --samples $sm --regions 8:2792875-4852328
+$HOME/bin/mocha_plot.R \
+  --mocha \
+  --rules GRCh37 \
+  --png MH0145622.png \
+  --vcf $dir/$pfx.mocha.bcf \
+  --samples MH0145622 \
+  --regions 11:81098129-115077367 \
+  --cytoband $HOME/res/cytoBand.hg19.txt.gz
 ```
+
+![](MH0145622.png)
+
+Plot mosaic chromosomal alterations (for WGS data)
+```
+$HOME/bin/mocha_plot.R \
+  --wgs \
+  --mocha \
+  --rules GRCh37 \
+  --png CSES15_P26_140611.png \
+  --vcf $dir/$pfx.mocha.bcf \
+  --samples xxx \
+  --regions 1:202236354-211793505 \
+  --cytoband $HOME/res/cytoBand.hg19.txt.gz
+```
+
+![](CSES15_P26_140611.png)
 
 Acknowledgements
 ================
