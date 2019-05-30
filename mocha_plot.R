@@ -213,6 +213,8 @@ if (length(regions)>0) {
     } else {
       if (args$clump == 1) {
         df_melt <- melt(df[idx, c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE', 'DP', 'BAF', 'pBAF')], id.vars = c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE'))
+        medianDP <- median(df_melt$value[df_melt$variable == 'DP'], na.rm = TRUE)
+        df_melt$value[df_melt$variable == 'DP' & df_melt$value > 2 * medianDP] <- NA
       } else {
         l <- list()
         for (sm in unique(df$SAMPLE)) {
@@ -239,7 +241,7 @@ if (length(regions)>0) {
     if (sum(idx) >= args$roll) df_melt$smooth[idx] <- filter(df_melt$value[idx], rep(1 / args$roll, args$roll))
 
     write(paste('Plotting region:', regions[i]), stderr())
-    if ('UNPHASED_GT' %in% df_melt) {
+    if ('UNPHASED_GT' %in% names(df_melt)) {
       p <- ggplot(df_melt[!is.na(df_melt$value),], aes(x = POS/1e6, y = value, color = COLOR, shape = UNPHASED_GT)) +
         scale_shape_manual(guide = FALSE, values = c('0/0' = 3, '0/1' = 8, '1/1' = 4, './.' = 1))
     } else {
