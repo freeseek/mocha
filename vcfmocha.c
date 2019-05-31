@@ -2891,6 +2891,9 @@ static void usage(FILE *restrict stream)
     fprintf(stream, "    from 8,342 mosaic chromosomal alterations. Nature 559, 350–355 (2018)\n");
     fprintf(stream, "    [PubMed: http://www.ncbi.nlm.nih.gov/pubmed/29995854]\n");
     fprintf(stream, "    [DOI: http://doi.org/10.1038/s41586-018-0321-x]\n");
+    fprintf(stream, "    Loh P., Genovese G., McCarroll S., Monogenic and polygenic inheritance become\n");
+    fprintf(stream, "    instruments for clonal selection. bioRxiv 653691 (2019)\n");
+    fprintf(stream, "    [DOI: http://doi.org/10.1101/653691]\n");
     fprintf(stream, "\n");
     exit(1);
 }
