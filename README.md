@@ -1,9 +1,12 @@
 ![](mocha_logo.png)
 
-A bcftools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following <a href="http://doi.org/10.1038/s41586-018-0321-x">paper</a>:
+A bcftools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following <a href="http://doi.org/10.1038/s41586-018-0321-x">paper</a> and <a href="http://doi.org/10.1101/653691">preprint</a>:
 ```
 Loh P., Genovese G., McCarroll S., Price A. et al. Insights about clonal expansions from 8,342 mosaic
 chromosomal alterations. Nature 559, 350–355 (2018). [PMID: 29995854] [DOI: 10.1038/s41586-018-0321-x]
+
+Loh P., Genovese G., McCarroll S., Monogenic and polygenic inheritance become
+instruments for clonal selection (2019). [DOI: 10.1101/653691]
 ```
 and this website. For any feedback, send an email to giulio.genovese@gmail.com
 
@@ -617,7 +620,7 @@ Plot results
 
 Install basic tools (Debian/Ubuntu specific):
 ```
-sudo apt install r-cran-ggplot2 r-cran-data.table r-cran-gridextra
+sudo apt install r-cran-ggplot2 r-cran-data.table
 ```
 
 Download R scripts
@@ -645,6 +648,7 @@ $HOME/bin/mocha_plot.R \
 ```
 
 ![](MH0145622.png)
+Mosaic deletion from array data overlapping the ATM gene (GRCh37 coordinates). The deletion signal can be observed across LRR, BAF and phased BAF, although it is the most clear with the latter. Furthermore, evidence of three phase switch errors can be observed in the shifted phased BAF signal.
 
 Plot mosaic chromosomal alterations (for WGS data)
 ```
@@ -660,6 +664,7 @@ $HOME/bin/mocha_plot.R \
 ```
 
 ![](CSES15_P26_140611.png)
+Complex duplication overlapping the MDM4 gene (GRCh37 coordinates). Signal over heterozygous sites colored in blue shows evidence of a triplication event and signal over heterozygous sites colored in red shows evidence of a duplication event. Multiple phase switch errors can be observed in the shifted phased BAF signal.
 
 Acknowledgements
 ================
