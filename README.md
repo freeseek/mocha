@@ -639,7 +639,6 @@ Plot mosaic chromosomal alterations (for array data)
 ```
 $HOME/bin/mocha_plot.R \
   --mocha \
-  --rules GRCh37 \
   --png MH0145622.png \
   --vcf $dir/$pfx.mocha.bcf \
   --samples MH0145622 \
@@ -655,7 +654,6 @@ Plot mosaic chromosomal alterations (for WGS data)
 $HOME/bin/mocha_plot.R \
   --wgs \
   --mocha \
-  --rules GRCh37 \
   --png CSES15_P26_140611.png \
   --vcf $dir/$pfx.mocha.bcf \
   --samples xxx \
