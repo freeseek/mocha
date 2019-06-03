@@ -30,7 +30,8 @@ suppressPackageStartupMessages(library(data.table))
 suppressPackageStartupMessages(library(ggplot2))
 
 parser <- ArgumentParser(description = 'Plot MoChA calls from VCF file (version 2019-05-22)')
-parser$add_argument('--rules', metavar = '<assembly>', type = 'character', required = TRUE, help = 'genome assembly (e.g. GRCh38)')
+parser$add_argument('--rules', metavar = '<assembly>', type = 'character', help = 'genome assembly (e.g. GRCh38)')
+parser$add_argument('--cytoband', metavar = '<cytoband.txt.gz>', type = 'character', help = 'cytoband file')
 parser$add_argument('--wgs', action = 'store_true', help = 'whether the input VCF file contains WGS data')
 parser$add_argument('--mocha', action = 'store_true', help = 'whether the input VCF file contains Ldev/Bdev data')
 parser$add_argument('--vcf', metavar = '<file.vcf>', type = 'character', required = TRUE, help = 'input VCF file')
@@ -45,27 +46,47 @@ parser$add_argument('--fontsize', metavar = '<integer>', type = 'integer', defau
 parser$add_argument('--roll', metavar = '<integer>', type = 'integer', default = 20, help = 'width of the rolling window [20]')
 parser$add_argument('--min-depth', metavar = '<integer>', type = 'integer', default = 10, help = 'minimum depth coverage (WGS data only) [10]')
 parser$add_argument('--clump', metavar = '<integer>', type = 'integer', default = 10, help = 'width of the clumping window (WGS data only) [10]')
-parser$add_argument('--cytoband', metavar = '<cytoband.txt.gz>', type = 'character', help = 'cytoband file to plot chromosome ideograms')
 args <- parser$parse_args(commandArgs(trailingOnly = TRUE))
+
+if (is.null(args$rules) && is.null(args$cytoband)) stop('either --rules or --cytoband is required')
+if (!is.null(args$rules) && !is.null(args$cytoband)) stop('cannot use --rules and --cytoband at the same time')
+
 if (is.null(args$pdf) && is.null(args$png)) stop('either --pdf or --png is required')
 if (!is.null(args$pdf) && !is.null(args$png)) stop('cannot use --pdf and --png at the same time')
+
 regions <- unlist(strsplit(args$regions, ','))
 if (!is.null(args$png) && length(regions) > 1) { stop('cannot print a png file with more than one image') }
 
 chrs <- c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y')
-if ( args$rules == 'GRCh37' ) {
-  chrlen <- c(249251621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248, 59128983, 63026520, 48129895, 51305566, 155270560, 59373566)
-  cen_beg <- c(121535434, 92326171, 90504854, 49660117, 46405641, 58830166, 58054331, 43838887, 47367679, 39254935, 51644205, 34856694, 0, 0, 0, 35335801, 22263006, 15460898, 24681782, 26369569, 0, 0, 58632012, 10104553)
-  cen_end <- c(142535434, 95326171, 93504854, 52660117, 49405641, 61830166, 61054331, 46838887, 65367679, 42254935, 54644205, 37856694, 19000000, 19000000, 20000000, 46335801, 25263006, 18460898, 27681782, 29369569, 14288129, 16000000, 61632012, 13104553)
-} else if ( args$rules == 'GRCh38' ) {
-  chrlen <- c(248956422, 242193529, 198295559, 190214555, 181538259, 170805979, 159345973, 145138636, 138394717, 133797422, 135086622, 133275309, 114364328, 107043718, 101991189, 90338345, 83257441, 80373285, 58617616, 64444167, 46709983, 50818468, 156040895, 57227415)
-  cen_beg <- c(122026459, 92188145, 90772458, 49712061, 46485900, 58553888, 58169653, 44033744, 43389635, 39686682, 51078348, 34769407, 0, 0, 0, 36311158, 22813679, 15460899, 24498980, 26436232, 0, 0, 58605579, 10316944)
-  cen_end <- c(143184587, 94090557, 93655574, 51743951, 50059807, 59829934, 61528020, 45877265, 60518558, 41593521, 54425074, 37185252, 18051248, 18173523, 19725254, 46280682, 26616164, 20861206, 27190874, 30038348, 12915808, 15054318, 62412542, 10544039)
+if (!is.null(args$cytoband)) {
+  df_cyto <- setNames(read.table(args$cytoband, sep = '\t', header = FALSE), c('chrom', 'chromStart', 'chromEnd', 'name', 'gieStain'))
+  df_cyto$chrom <- gsub('chr', '', df_cyto$chrom)
+  chrlen <- tapply(df_cyto$chromEnd, df_cyto$chrom, max)
+  idx <- df_cyto$gieStain %in% c('acen', 'gvar', 'stalk')
+  cen_beg <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], min)
+  cen_end <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], max)
+
+  df_cen <- rbind(melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart', 'chromEnd', 'chromStart')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')),
+                  melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd', 'chromStart', 'chromEnd')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')))
+  df_cen$y <- as.numeric(levels(df_cen$variable)[df_cen$variable])
 } else {
-  stop("Rules parameter needs to be \"GRCh37\" or \"GRCh38\"")
+  if ( args$rules == 'GRCh37' ) {
+    chrlen <- c(249251621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248, 59128983, 63026520, 48129895, 51305566, 155270560, 59373566)
+    cen_beg <- c(121535434, 92326171, 90504854, 49660117, 46405641, 58830166, 58054331, 43838887, 47367679, 39254935, 51644205, 34856694, 0, 0, 0, 35335801, 22263006, 15460898, 24681782, 26369569, 0, 0, 58632012, 10104553)
+    cen_end <- c(142535434, 95326171, 93504854, 52660117, 49405641, 61830166, 61054331, 46838887, 65367679, 42254935, 54644205, 37856694, 19000000, 19000000, 20000000, 46335801, 25263006, 18460898, 27681782, 29369569, 14288129, 16000000, 61632012, 13104553)
+  } else if ( args$rules == 'GRCh38' ) {
+    chrlen <- c(248956422, 242193529, 198295559, 190214555, 181538259, 170805979, 159345973, 145138636, 138394717, 133797422, 135086622, 133275309, 114364328, 107043718, 101991189, 90338345, 83257441, 80373285, 58617616, 64444167, 46709983, 50818468, 156040895, 57227415)
+    cen_beg <- c(122026459, 92188145, 90772458, 49712061, 46485900, 58553888, 58169653, 44033744, 43389635, 39686682, 51078348, 34769407, 0, 0, 0, 36311158, 22813679, 15460899, 24498980, 26436232, 0, 0, 58605579, 10316944)
+    cen_end <- c(143184587, 94090557, 93655574, 51743951, 50059807, 59829934, 61528020, 45877265, 60518558, 41593521, 54425074, 37185252, 18051248, 18173523, 19725254, 46280682, 26616164, 20861206, 27190874, 30038348, 12915808, 15054318, 62412542, 10544039)
+  } else {
+    stop("Rules parameter needs to be \"GRCh37\" or \"GRCh38\"")
+  }
+  names(chrlen) <- chrs
+  names(cen_beg) <- chrs
+  names(cen_end) <- chrs
 }
-names(chrlen) <- chrs
-df_chrs <- data.frame(chrlen = chrlen, cen_beg = cen_beg, cen_end = cen_end, CHROM = chrs)
+
+df_chrs <- data.frame(chrlen = chrlen[chrs], cen_beg = cen_beg[chrs], cen_end = cen_end[chrs], CHROM = chrs)
 
 # load main table from VCF file
 fmt <- '"[%CHROM\\t%POS\\t%REF\\t%ALT\\t%SAMPLE\\t%GT\\t'
@@ -149,22 +170,15 @@ if (!args$wgs) {
   plot_vars <- c('DP', 'pBAF')
   df_horiz <- data.frame(variable = factor('pBAF', levels = plot_vars), value = 0.5)
 }
+if (!is.null(args$cytoband)) {
+  df_cyto$variable <- factor('pBAF', levels = plot_vars)
+  df_cen$variable <- factor('pBAF', levels = plot_vars)
+}
 if (args$mocha) {
   df$COLOR <- as.factor(1e3 * df$LDEV + df$BDEV)
   df$COLOR[df$LDEV == 0 & df$BDEV == 0 | is.na(df$COLOR)] <- NA
 } else {
   df$COLOR <- NA
-}
-
-if (!is.null(args$cytoband)) {
-  df_cyto <- setNames(read.table(args$cytoband, sep = '\t', header = FALSE), c('chrom', 'chromStart', 'chromEnd', 'name', 'gieStain'))
-  df_cyto$chrom <- gsub('chr', '', df_cyto$chrom)
-  df_cyto$variable <- factor('pBAF', levels = plot_vars)
-
-  df_cen <- rbind(melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart', 'chromEnd', 'chromStart')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')),
-                  melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd', 'chromStart', 'chromEnd')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')))
-  df_cen$y <- as.numeric(levels(df_cen$variable)[df_cen$variable])
-  df_cen$variable <- factor('pBAF', levels = plot_vars)
 }
 
 if (!is.null(args$pdf)) {
