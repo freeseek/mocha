@@ -1,5 +1,5 @@
---- main.c	2018-02-28 12:00:00.000000000 -0500
-+++ main.c	2018-02-28 12:00:00.000000000 -0500
+--- main.c	2019-06-27 12:00:00.000000000 -0500
++++ main.c	2019-06-27 12:00:00.000000000 -0500
 @@ -50,6 +50,7 @@
  int main_reheader(int argc, char *argv[]);
  int main_vcfconvert(int argc, char *argv[]);
@@ -8,7 +8,7 @@
  #if USE_GPL
  int main_polysomy(int argc, char *argv[]);
  #endif
-@@ -153,6 +154,10 @@
+@@ -152,6 +153,10 @@
        .alias = "cnv",
        .help  = "HMM CNV calling"
      },
