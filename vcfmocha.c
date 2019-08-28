@@ -2739,7 +2739,7 @@ static int get_contig(bcf_srs_t *sr,
             {
                 int ret = bcf_check_baf_flipped(gt_fmt, baf_fmt, nsmpl);
                 if ( ret < 0 ) error("Error: site contains a mix of flipped and unflipped BAF values at position %s:%d\n"
-                                     "Use bcftools query -f \"[%%CHROM\\t%%POS\\t%%SAMPLE\\t%%GT\\t%%AD\\n]\" -r %s:%d-%d to investigate the issue\n"
+                                     "Use bcftools query -f \"[%%CHROM\\t%%POS\\t%%SAMPLE\\t%%GT\\t%%BAF\\n]\" -r %s:%d-%d to investigate the issue\n"
                                      "Use --no-BAF-flip to suppress BAF flipping\n",
                     bcf_hdr_id2name(hdr, line->rid), line->pos+1, bcf_hdr_id2name(hdr, line->rid), line->pos, line->pos+1);
                 else model->n_flipped += ret;
