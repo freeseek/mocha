@@ -74,7 +74,7 @@ Examples:
 Installation
 ============
 
-Install basic tools (Debian/Ubuntu specific):
+Install basic tools (Debian/Ubuntu specific if you have admin privileges):
 ```
 sudo apt install wget gzip unzip samtools bedtools
 ```
@@ -439,7 +439,7 @@ $HOME/bin/bcftools +$HOME/bin/mochatools.so --no-version -Ob -o $dir/$pfx.bcf --
 $HOME/bin/bcftools index -f $dir/$pfx.bcf
 ```
 
-If pedigree information with trios is available, you can improve the phasing with `eagle` by running the following command instead:
+If pedigree information with duos or trios is available, you can improve the phased haplotypes from `eagle` by running the following command instead of the previous one:
 ```
 $HOME/bin/bcftools concat --no-version -Ou --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf | \
 $HOME/bin/bcftools +$HOME/bin/mochatools.so --no-version -Ou -- -f $ref | \
@@ -618,7 +618,7 @@ $HOME/bin/bcftools annotate --no-version -Ou -x INFO $dir/$pfx.mocha.bcf | \
 Plot results
 ============
 
-Install basic tools (Debian/Ubuntu specific):
+Install basic tools (Debian/Ubuntu specific if you have admin privileges):
 ```
 sudo apt install r-cran-ggplot2 r-cran-data.table
 ```
@@ -626,8 +626,15 @@ sudo apt install r-cran-ggplot2 r-cran-data.table
 Download R scripts
 ```
 /bin/rm -f $HOME/bin/{plot_summary,mocha_plot}.R
-wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/plot_{summary,array}.R
+wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/{plot_summary,mocha_plot}.R
 chmod a+x $HOME/bin/{plot_summary,mocha_plot}.R
+```
+
+Install R libraries necessary to run the R scripts
+```
+Rscript -e 'install.packages("argparse", repos="https://cran.rstudio.com")'
+Rscript	-e 'install.packages("data.table", repos="https://cran.rstudio.com")'
+Rscript	-e 'install.packages("ggplot2", repos="https://cran.rstudio.com")'
 ```
 
 Generate summary plot
