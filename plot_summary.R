@@ -25,10 +25,18 @@
 #  THE SOFTWARE.
 ###
 
-suppressPackageStartupMessages(library(argparse))
-suppressPackageStartupMessages(library(ggplot2))
+for (x in c('argparse', 'ggplot2')) {
+  if ( x %in% .packages(all.available = TRUE) ) {
+    suppressPackageStartupMessages(library(x, character.only = TRUE))
+  } else {
+    cat(paste0('package ', x, ' is not available. To install ', x, ' run:\n'))
+    cat('Rscript -e \'dir.create(path = Sys.getenv("R_LIBS_USER"), showWarnings = FALSE, recursive = TRUE)\' \\\n')
+    cat(paste0('        -e \'install.packages(pkgs = "', x, '", lib = Sys.getenv("R_LIBS_USER"), repos = "https://cran.rstudio.com")\'\n'))
+    q()
+  }
+}
 
-parser <- ArgumentParser(description='Plot MoChA summary statistics (version 2019-02-15)')
+parser <- ArgumentParser(description='Plot MoChA summary statistics (version 2019-08-28)')
 parser$add_argument('--stats', metavar = '<file.tsv>', type = 'character', required = TRUE, help = 'input MoChA stats file')
 parser$add_argument('--calls', metavar = '<file.tsv>', type = 'character', required = TRUE, help = 'input MoChA calls file')
 parser$add_argument('--pdf', metavar = '<file.pdf>', type = 'character', help = 'output PDF file')
