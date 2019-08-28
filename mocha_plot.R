@@ -25,11 +25,20 @@
 #  THE SOFTWARE.
 ###
 
-suppressPackageStartupMessages(library(argparse))
-suppressPackageStartupMessages(library(data.table))
-suppressPackageStartupMessages(library(ggplot2))
+# TODO: consider changing argparse to r-cran-optparse to remove the python dependency
 
-parser <- ArgumentParser(description = 'Plot MoChA calls from VCF file (version 2019-05-22)')
+for (x in c('argparse', 'data.table', 'ggplot2')) {
+  if ( x %in% .packages(all.available = TRUE) ) {
+    suppressPackageStartupMessages(library(x, character.only = TRUE))
+  } else {
+    cat(paste0('package ', x, ' is not available. To install ', x, ' run:\n'))
+    cat('Rscript -e \'dir.create(path = Sys.getenv("R_LIBS_USER"), showWarnings = FALSE, recursive = TRUE)\' \\\n')
+    cat(paste0('        -e \'install.packages(pkgs = "', x, '", lib = Sys.getenv("R_LIBS_USER"), repos = "https://cran.rstudio.com")\'\n'))
+    q()
+  }
+}
+
+parser <- ArgumentParser(description = 'Plot MoChA calls from VCF file (version 2019-08-28)')
 parser$add_argument('--rules', metavar = '<assembly>', type = 'character', help = 'genome assembly (e.g. GRCh38)')
 parser$add_argument('--cytoband', metavar = '<cytoband.txt.gz>', type = 'character', help = 'cytoband file')
 parser$add_argument('--wgs', action = 'store_true', help = 'whether the input VCF file contains WGS data')
@@ -48,16 +57,38 @@ parser$add_argument('--min-depth', metavar = '<integer>', type = 'integer', defa
 parser$add_argument('--clump', metavar = '<integer>', type = 'integer', default = 10, help = 'width of the clumping window (WGS data only) [10]')
 args <- parser$parse_args(commandArgs(trailingOnly = TRUE))
 
-if (is.null(args$rules) && is.null(args$cytoband)) stop('either --rules or --cytoband is required')
-if (!is.null(args$rules) && !is.null(args$cytoband)) stop('cannot use --rules and --cytoband at the same time')
+if (!is.null(args$rules) && !is.null(args$cytoband))
+{
+  cat('cannot use --rules and --cytoband at the same time\n')
+  q()
+}
 
-if (is.null(args$pdf) && is.null(args$png)) stop('either --pdf or --png is required')
-if (!is.null(args$pdf) && !is.null(args$png)) stop('cannot use --pdf and --png at the same time')
+if (is.null(args$pdf) && is.null(args$png))
+{
+  cat('either --pdf or --png is required\n')
+  q()
+}
+
+if (!is.null(args$pdf) && !is.null(args$png))
+{
+  cat('cannot use --pdf and --png at the same time\n')
+  q()
+}
 
 regions <- unlist(strsplit(args$regions, ','))
-if (!is.null(args$png) && length(regions) > 1) { stop('cannot print a png file with more than one image') }
+if (!is.null(args$png) && length(regions) > 1)
+{
+  cat('cannot print a png file with more than one image\n')
+  q()
+}
 
-chrs <- c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y')
+if (!is.null(args$png) && !capabilities('png'))
+{
+  cat('unable to start device PNG: no png support in this version of R\n')
+  cat('you need to reinstall R with support for PNG to use the --png option\n')
+  q()
+}
+
 if (!is.null(args$cytoband)) {
   df_cyto <- setNames(read.table(args$cytoband, sep = '\t', header = FALSE), c('chrom', 'chromStart', 'chromEnd', 'name', 'gieStain'))
   df_cyto$chrom <- gsub('chr', '', df_cyto$chrom)
@@ -65,11 +96,14 @@ if (!is.null(args$cytoband)) {
   idx <- df_cyto$gieStain %in% c('acen', 'gvar', 'stalk')
   cen_beg <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], min)
   cen_end <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], max)
-
+  chrs <- unique(df_cyto$chrom)
+  chrs <- chrs[order(as.numeric(gsub('MT', '26', gsub('Y', '24', gsub('X', '23', chrs)))))]
+  
   df_cen <- rbind(melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart', 'chromEnd', 'chromStart')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')),
                   melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd', 'chromStart', 'chromEnd')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')))
   df_cen$y <- as.numeric(levels(df_cen$variable)[df_cen$variable])
-} else {
+  df_chrs <- data.frame(chrlen = chrlen[chrs], cen_beg = cen_beg[chrs], cen_end = cen_end[chrs], CHROM = chrs)
+} else if (!is.null(args$rules)) {
   if ( args$rules == 'GRCh37' ) {
     chrlen <- c(249251621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248, 59128983, 63026520, 48129895, 51305566, 155270560, 59373566)
     cen_beg <- c(121535434, 92326171, 90504854, 49660117, 46405641, 58830166, 58054331, 43838887, 47367679, 39254935, 51644205, 34856694, 0, 0, 0, 35335801, 22263006, 15460898, 24681782, 26369569, 0, 0, 58632012, 10104553)
@@ -79,14 +113,15 @@ if (!is.null(args$cytoband)) {
     cen_beg <- c(122026459, 92188145, 90772458, 49712061, 46485900, 58553888, 58169653, 44033744, 43389635, 39686682, 51078348, 34769407, 0, 0, 0, 36311158, 22813679, 15460899, 24498980, 26436232, 0, 0, 58605579, 10316944)
     cen_end <- c(143184587, 94090557, 93655574, 51743951, 50059807, 59829934, 61528020, 45877265, 60518558, 41593521, 54425074, 37185252, 18051248, 18173523, 19725254, 46280682, 26616164, 20861206, 27190874, 30038348, 12915808, 15054318, 62412542, 10544039)
   } else {
-    stop("Rules parameter needs to be \"GRCh37\" or \"GRCh38\"")
+    cat("Rules parameter needs to be \"GRCh37\" or \"GRCh38\"\n")
+    q()
   }
+  chrs <- c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y')
   names(chrlen) <- chrs
   names(cen_beg) <- chrs
   names(cen_end) <- chrs
+  df_chrs <- data.frame(chrlen = chrlen[chrs], cen_beg = cen_beg[chrs], cen_end = cen_end[chrs], CHROM = chrs)
 }
-
-df_chrs <- data.frame(chrlen = chrlen[chrs], cen_beg = cen_beg[chrs], cen_end = cen_end[chrs], CHROM = chrs)
 
 # load main table from VCF file
 fmt <- '"[%CHROM\\t%POS\\t%REF\\t%ALT\\t%SAMPLE\\t%GT\\t'
@@ -110,7 +145,11 @@ chroms <- gsub('^chr', '',gsub('^chrM', 'MT', contigs))
 begs <- as.numeric(unlist(lapply(regions[regions != 'all'], function(x) unlist(strsplit(unlist(strsplit(x, ':'))[2], '-'))[1])))
 ends <- as.numeric(unlist(lapply(regions[regions != 'all'], function(x) unlist(strsplit(unlist(strsplit(x, ':'))[2], '-'))[2])))
 lefts <- round(pmax(1.5 * begs - .5 * ends, 0))
-rights <- round(pmin(1.5 * ends - .5 * begs, chrlen[chroms]))
+if (!is.null(args$cytoband) | !is.null(args$rules)) {
+  rights <- round(pmin(1.5 * ends - .5 * begs, chrlen[chroms]))
+} else {
+  rights <- round(1.5 * ends - .5 * begs)
+}
 if (!('all' %in% regions)) cmd <- paste(cmd, '--regions', paste0(contigs, ':', lefts, '-', rights, collapse = ','))
 
 if (!is.null(args$exclude)) cmd <- paste0(cmd, ' --targets-file ^', args$exclude)
@@ -189,9 +228,11 @@ if (!is.null(args$pdf)) {
 
 if ('all' %in% regions) {
   write(paste0('Plotting region: all (', sum(!is.na(df$BAF) & df$CHROM %in% chrs), ' heterozygous sites)'), stderr())
-  p <- ggplot(df[!is.na(df$BAF) & df$CHROM %in% chrs,], aes(x = POS/1e6, y = BAF, color = COLOR)) +
-    geom_vline(data = df_chrs, aes(xintercept = chrlen/1e6), color = 'black', size = 1, alpha = 1/2) +
-    geom_rect(data = df_chrs, mapping = aes(x = NULL, y = NULL, xmin = cen_beg/1e6, xmax = cen_end/1e6), color = 'transparent', fill = 'gray', ymin = 0, ymax = 1, alpha = 1/2) +
+  p <- ggplot(df[!is.na(df$BAF) & df$CHROM %in% chrs,], aes(x = POS/1e6, y = BAF, color = COLOR))
+  if (!is.null(args$cytoband) | !is.null(args$rules)) {
+    p <- p + geom_vline(data = df_chrs, aes(xintercept = chrlen/1e6), color = 'black', size = 1, alpha = 1/2)
+  }
+  p <- p + geom_rect(data = df_chrs, mapping = aes(x = NULL, y = NULL, xmin = cen_beg/1e6, xmax = cen_end/1e6), color = 'transparent', fill = 'gray', ymin = 0, ymax = 1, alpha = 1/2) +
     scale_x_continuous('Mbp position') +
     scale_y_continuous('B Allele Frequency (BAF)', breaks = NULL) +
     coord_cartesian(ylim = c(0, 1), expand = FALSE) +
