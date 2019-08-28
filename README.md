@@ -630,13 +630,6 @@ wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/{plot_
 chmod a+x $HOME/bin/{plot_summary,mocha_plot}.R
 ```
 
-Install R libraries necessary to run the R scripts
-```
-Rscript -e 'install.packages("argparse", repos="https://cran.rstudio.com")'
-Rscript	-e 'install.packages("data.table", repos="https://cran.rstudio.com")'
-Rscript	-e 'install.packages("ggplot2", repos="https://cran.rstudio.com")'
-```
-
 Generate summary plot
 ```
 $HOME/bin/plot_summary.R --pdf $dir/$pfx.pdf --stats $dir/$pfx.stats.tsv --calls $dir/$pfx.mocha.tsv
