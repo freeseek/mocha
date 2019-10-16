@@ -114,7 +114,8 @@ Notice that you will need some functionalities missing from the base version of 
 
 Make sure the directory with the plugins is available to bcftools
 ```
-export BCFTOOLS_PLUGINS=$HOME/bin
+export PATH="$HOME/bin:$PATH"
+export BCFTOOLS_PLUGINS="$HOME/bin"
 ```
 
 Install latest version of <a href="https://data.broadinstitute.org/alkesgroup/Eagle/">Eagle</a>
