@@ -79,9 +79,9 @@ Install basic tools (Debian/Ubuntu specific if you have admin privileges):
 sudo apt install wget gzip unzip samtools bedtools
 ```
 
-Optionally, you can install these libraries to activate further bcftools features:
+Optionally, you can install these libraries to activate further HTSlib features:
 ```
-sudo apt install liblzma-dev libbz2-dev libgsl0-dev
+sudo apt install libbz2-dev libssl-dev liblzma-dev libgsl0-dev
 ```
 
 Preparation steps
@@ -104,13 +104,18 @@ cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.p
 ```
 If for any reason the patches fail with an error message, contact the <a href="mailto:giulio.genovese@gmail.com">author</a> for a fix.
 
-Compile latest version of HTSlib (optionally disable bz2 and lzma) and BCFtools (make sure you are using gcc version 5 or newer or else include the -std=gnu99 compilation flag)
+Compile latest version of HTSlib (optionally disable bz2, gcs, and lzma) and BCFtools (make sure you are using gcc version 5 or newer)
 ```
-cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-lzma && make && cd ..
+cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-gcs --disable-lzma && make && cd ..
 cd bcftools && make && cd ..
 /bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,split,trio-phase,mochatools,importFMT,extendFMT}.so} $HOME/bin/
 ```
 Notice that you will need some functionalities missing from the base version of bcftools to run the pipeline
+
+Make sure the directory with the plugins is available to bcftools
+```
+export BCFTOOLS_PLUGINS=$HOME/bin
+```
 
 Install latest version of <a href="https://data.broadinstitute.org/alkesgroup/Eagle/">Eagle</a>
 ```
@@ -147,17 +152,17 @@ wget -P $HOME/res https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tab
 cd $HOME/res/kgp
 wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr{{1..22}.phase3_shapeit2_mvncall_integrated_v5a,X.phase3_shapeit2_mvncall_integrated_v1b,Y.phase3_integrated_v2a}.20130502.genotypes.vcf.gz{,.tbi}
 for chr in {1..22} X Y; do
-  $HOME/bin/bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][ab].20130502.genotypes.vcf.gz | \
-  $HOME/bin/bcftools norm --no-version -Ou -m -any | \
-  $HOME/bin/bcftools norm --no-version -Ob -o ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf -d none -f $HOME/res/human_g1k_v37.fasta && \
-  $HOME/bin/bcftools index -f ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf
+  bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][ab].20130502.genotypes.vcf.gz | \
+  bcftools norm --no-version -Ou -m -any | \
+  bcftools norm --no-version -Ob -o ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf -d none -f $HOME/res/human_g1k_v37.fasta && \
+  bcftools index -f ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf
 done
 ```
 
 List of common germline duplications and deletions
 ```
 wget -P $HOME/res ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz{,.tbi}
-$HOME/bin/bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
+bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "%CHROM\t%POS\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/res/cnp.grch37.bed
 ```
 
@@ -183,10 +188,10 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
 cd $HOME/res/kgp
 for chr in {1..22} X; do
   if [ $chr == "X" ]; then
-    $HOME/bin/bcftools +$HOME/bin/fixploidy.so --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -- -f 2 | \
+    bcftools +fixploidy --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -- -f 2 | \
       sed -e 's/\t0\/0/\t0|0/' -e 's/\t1\/1/\t1|1/' > tmp.chr$chr.GRCh37.vcf
   else
-    $HOME/bin/bcftools view --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -o tmp.chr$chr.GRCh37.vcf
+    bcftools view --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -o tmp.chr$chr.GRCh37.vcf
   fi
   $HOME/bin/Minimac3-omp \
     --refHaps tmp.chr$chr.GRCh37.vcf \
@@ -236,13 +241,13 @@ cd $HOME/res/kgp
 wget http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/ALL.chr{{1..22},X,Y}_GRCh38.genotypes.20170504.vcf.gz{,.tbi}
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 for chr in {1..22} X Y; do
-  ($HOME/bin/bcftools view --no-version -h ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
+  (bcftools view --no-version -h ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
     grep -v "^##contig=<ID=[GNh]" | sed 's/^##contig=<ID=MT/##contig=<ID=chrM/;s/^##contig=<ID=\([0-9XY]\)/##contig=<ID=chr\1/'; \
-  $HOME/bin/bcftools view --no-version -H -c 2 ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
+  bcftools view --no-version -H -c 2 ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
   grep -v "[0-9]|\.\|\.|[0-9]" | sed 's/^/chr/') | \
-  $HOME/bin/bcftools norm --no-version -Ou -m -any | \
-  $HOME/bin/bcftools norm --no-version -Ob -o ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -d none -f $ref && \
-  $HOME/bin/bcftools index -f ALL.chr${chr}_GRCh38.genotypes.20170504.bcf
+  bcftools norm --no-version -Ou -m -any | \
+  bcftools norm --no-version -Ob -o ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -d none -f $ref && \
+  bcftools index -f ALL.chr${chr}_GRCh38.genotypes.20170504.bcf
 done
 ```
 Do notice though that the 1000 Genomes project team incorrectly lifted over chromosome X genotypes over PAR1 and PAR2 regions, despite this issue not being reported in the <a href="http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/README_GRCh38_liftover_20170504.txt">README</a>. This will directly affect the ability to detect chromosome Y loss events.
@@ -253,7 +258,7 @@ wget -P $HOME/res ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_
 wget http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver
 chmod a+x liftOver
 wget http://hgdownload.cse.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz
-$HOME/bin/bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
+bcftools query -i 'AC>1 && END-POS>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "chr%CHROM\t%POS\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz | \
     ./liftOver \
     -minMatch=0.3 \
@@ -285,10 +290,10 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
 cd $HOME/res/kgp
 for chr in {1..22} X; do
   if [ $chr == "X" ]; then
-    $HOME/bin/bcftools +$HOME/bin/fixploidy.so --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -- -f 2 | \
+    bcftools +fixploidy --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -- -f 2 | \
       sed -e 's/\t0\/0/\t0|0/' -e 's/\t1\/1/\t1|1/' > tmp.chr$chr.GRCh38.vcf
   else
-    $HOME/bin/bcftools view --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -o tmp.chr$chr.GRCh38.vcf
+    bcftools view --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -o tmp.chr$chr.GRCh38.vcf
   fi
   $HOME/bin/Minimac3-omp \
     --refHaps tmp.chr$chr.GRCh38.vcf \
@@ -350,8 +355,8 @@ If you do not already have a VCF file but you have Illumina or Affymetrix genoty
 
 Create a minimal binary VCF
 ```
-$HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf -x ID,QUAL,INFO,^FMT/GT,^FMT/BAF,^FMT/LRR $vcf && \
-  $HOME/bin/bcftools index -f $dir/$pfx.unphased.bcf
+bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf -x ID,QUAL,INFO,^FMT/GT,^FMT/BAF,^FMT/LRR $vcf && \
+  bcftools index -f $dir/$pfx.unphased.bcf
 ```
 
 If you want to process <b>whole-genome sequence</b> data you need a VCF file with GT and AD information:
@@ -369,28 +374,28 @@ Make sure that AD is a "Number=R" format field (this was introduced in version <
 
 Create a minimal binary VCF
 ```
-$HOME/bin/bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/' | \
-  $HOME/bin/bcftools reheader -h /dev/stdin $vcf | \
-  $HOME/bin/bcftools filter --no-version -Ou -e "FMT/DP<10 | FMT/GQ<20" --set-GT . | \
-  $HOME/bin/bcftools annotate --no-version -Ou -x ID,QUAL,INFO,^FMT/GT,^FMT/AD | \
-  $HOME/bin/bcftools norm --no-version -Ou -m -any -k | \
-  $HOME/bin/bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
-  $HOME/bin/bcftools index $dir/$pfx.unphased.bcf
+bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/' | \
+  bcftools reheader -h /dev/stdin $vcf | \
+  bcftools filter --no-version -Ou -e "FMT/DP<10 | FMT/GQ<20" --set-GT . | \
+  bcftools annotate --no-version -Ou -x ID,QUAL,INFO,^FMT/GT,^FMT/AD | \
+  bcftools norm --no-version -Ou -m -any -k | \
+  bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
+  bcftools index $dir/$pfx.unphased.bcf
 ```
 This will set to missing all genotypes that have low coverage or low genotyping quality, as these can cause issues.
 
 Perform basic quality control (the generated list of variants will be excluded from modeling by both eagle and mocha)
 ```
-n=$($HOME/bin/bcftools query -l $dir/$pfx.unphased.bcf|wc -l); \
+n=$(bcftools query -l $dir/$pfx.unphased.bcf|wc -l); \
 ns=$((n*98/100)); \
 echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
-  $HOME/bin/bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
-  $HOME/bin/bcftools +$HOME/bin/fill-tags.so --no-version -Ou -- -t NS,ExcHet | \
-  $HOME/bin/bcftools +$HOME/bin/mochatools.so --no-version -Ou -- -x $sex -G | \
-  $HOME/bin/bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
+  bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
+  bcftools +fill-tags --no-version -Ou -- -t NS,ExcHet | \
+  bcftools +mochatools --no-version -Ou -- -x $sex -G | \
+  bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
     -i 'FILTER!="." && FILTER!="PASS" || JK<.02 || NS<'$ns' || ExcHet<1e-6 || AC_Sex_Test>6' \
     -x FILTER,^INFO/JK,^INFO/NS,^INFO/ExcHet,^INFO/AC_Sex_Test && \
-  $HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
+  bcftools index -f $dir/$pfx.xcl.bcf
 ```
 This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6). If you are using WGS data and you don't have a file with sex information, you can skip the quality control line using this information. When later running MoChA, sex will be imputed and a sex file can be computed from MoChA's output.
 
@@ -398,8 +403,8 @@ If a file with additional variants to be excluded is available, further merge it
 ```
 /bin/mv $dir/$pfx.xcl.bcf $dir/$pfx.xcl.tmp.bcf && \
 /bin/mv $dir/$pfx.xcl.bcf.csi $dir/$pfx.xcl.tmp.bcf.csi && \
-$HOME/bin/bcftools merge --no-version -Ob -o $dir/$pfx.xcl.bcf -m none $dir/$pfx.xcl.tmp.bcf $xcl && \
-$HOME/bin/bcftools index -f $dir/$pfx.xcl.bcf
+bcftools merge --no-version -Ob -o $dir/$pfx.xcl.bcf -m none $dir/$pfx.xcl.tmp.bcf $xcl && \
+bcftools index -f $dir/$pfx.xcl.bcf
 ```
 
 Phasing pipeline
@@ -420,39 +425,39 @@ for chr in {1..22} X; do
     --vcfExclude $dir/$pfx.xcl.bcf \
     --chrom $chr \
     --pbwtIters 3 && \
-  $HOME/bin/bcftools index -f $dir/$pfx.chr$chr.bcf
+  bcftools index -f $dir/$pfx.chr$chr.bcf
 done
 ```
 Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions.
 
 Extract chromosomes that do not require phasing
 ```
-$HOME/bin/bcftools view --no-version -Ob -o $dir/$pfx.other.bcf $dir/$pfx.unphased.bcf \
+bcftools view --no-version -Ob -o $dir/$pfx.other.bcf $dir/$pfx.unphased.bcf \
   -t ^$(seq -s, 1 22),X,$(seq -f chr%.0f -s, 1 22),chrX && \
-$HOME/bin/bcftools index -f $dir/$pfx.other.bcf
+bcftools index -f $dir/$pfx.other.bcf
 ```
 
 Concatenate eagle output into a single VCF file and add GC/CpG content information
 ```
-$HOME/bin/bcftools concat --no-version -Ou --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf | \
-$HOME/bin/bcftools +$HOME/bin/mochatools.so --no-version -Ob -o $dir/$pfx.bcf -- -f $ref && \
-$HOME/bin/bcftools index -f $dir/$pfx.bcf
+bcftools concat --no-version -Ou --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf | \
+bcftools +mochatools --no-version -Ob -o $dir/$pfx.bcf -- -f $ref && \
+bcftools index -f $dir/$pfx.bcf
 ```
 
 If pedigree information with duos or trios is available, you can improve the phased haplotypes from `eagle` by running the following command instead of the previous one:
 ```
-$HOME/bin/bcftools concat --no-version -Ou --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf | \
-$HOME/bin/bcftools +$HOME/bin/mochatools.so --no-version -Ou -- -f $ref | \
-$HOME/bin/bcftools +$HOME/bin/trio-phase.so --no-version -Ob -o $dir/$pfx.bcf --threads $thr -- -p $ped && \
-$HOME/bin/bcftools index -f $dir/$pfx.bcf
+bcftools concat --no-version -Ou --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf | \
+bcftools +mochatools --no-version -Ou -- -f $ref | \
+bcftools +trio-phase --no-version -Ob -o $dir/$pfx.bcf --threads $thr -- -p $ped && \
+bcftools index -f $dir/$pfx.bcf
 ```
 (it requires a ped file)
 
 Impute variants using Minimac3 (optional for array data)
 ```
 for chr in {1..22} X; do
-  $HOME/bin/bcftools annotate --no-version -Ou $dir/$pfx.bcf -a $dir/$pfx.xcl.bcf -m +XCL -r $chr,chr$chr | \
-    $HOME/bin/bcftools view --no-version -Ov -o $dir/$pfx.chr$chr.vcf -e "XCL==1"
+  bcftools annotate --no-version -Ou $dir/$pfx.bcf -a $dir/$pfx.xcl.bcf -m +XCL -r $chr,chr$chr | \
+    bcftools view --no-version -Ov -o $dir/$pfx.chr$chr.vcf -e "XCL==1"
   $HOME/bin/Minimac3-omp \
     --cpus $thr \
     --refHaps $kgp_pfx${chr}$kgp_sfx.m3vcf.gz \
@@ -461,16 +466,16 @@ for chr in {1..22} X; do
     --prefix $dir/$pfx.chr$chr \
     --lowMemory \
     --noPhoneHome
-  $HOME/bin/bcftools query -l $dir/$pfx.chr$chr.bcf | \
-    $HOME/bin/bcftools view --no-version -Ob -o $dir/$pfx.chr$chr.dose.bcf -S /dev/stdin $dir/$pfx.chr$chr.dose.vcf.gz
+  bcftools query -l $dir/$pfx.chr$chr.bcf | \
+    bcftools view --no-version -Ob -o $dir/$pfx.chr$chr.dose.bcf -S /dev/stdin $dir/$pfx.chr$chr.dose.vcf.gz
   /bin/rm $dir/$pfx.chr$chr.vcf $dir/$pfx.chr$chr.dose.vcf.gz
 done
 ```
 
 Concatenate imputed genotypes into a single VCF file (optional for array data)
 ```
-$HOME/bin/bcftools concat --no-version -Ob -o $dir/$pfx.dose.bcf --threads $thr $dir/$pfx.chr{{1..22},X}.dose.vcf.gz && \
-$HOME/bin/bcftools index -f $dir/$pfx.dose.bcf
+bcftools concat --no-version -Ob -o $dir/$pfx.dose.bcf --threads $thr $dir/$pfx.chr{{1..22},X}.dose.vcf.gz && \
+bcftools index -f $dir/$pfx.dose.bcf
 ```
 
 Remove unphased VCF and single chromosome files (optional)
@@ -490,7 +495,7 @@ lst="..." # file with list of samples to analyze for asymmetries (e.g. samples w
 
 Call mosaic chromosomal alterations with MoChA
 ```
-$HOME/bin/bcftools mocha \
+bcftools mocha \
   --rules $rule \
   --no-version \
   --output-type b \
@@ -502,7 +507,7 @@ $HOME/bin/bcftools mocha \
   --ucsc-bed $dir/$pfx.ucsc.bed \
   --cnp $cnp \
   $dir/$pfx.bcf && \
-$HOME/bin/bcftools index -f $dir/$pfx.mocha.bcf
+bcftools index -f $dir/$pfx.mocha.bcf
 ```
 
 The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns:
@@ -573,18 +578,18 @@ Allelic imbalance pipeline
 
 import results from MoChA into VCF file with imputed genotypes (optional for array data)
 ```
-$HOME/bin/bcftools +$HOME/bin/importFMT.so \
+bcftools +importFMT \
   --no-version -Ob \
   --formats Ldev,Bdev,Bdev_Phase \
   $dir/$pfx.dose.bcf \
   $dir/$pfx.mocha.bcf \
   -o $dir/$pfx.dose.mocha.bcf && \
-$HOME/bin/bcftools index $dir/$pfx.dose.mocha.bcf
+bcftools index $dir/$pfx.dose.mocha.bcf
 ```
 
 Run asymmetry analyses (subset cohort, run binomial test, discard genotypes)
 ```
-$HOME/bin/bcftools +$HOME/bin/extendFMT.so \
+bcftools +extendFMT \
   --no-version -Ou \
   --format Bdev_Phase \
   --phase \
@@ -592,17 +597,17 @@ $HOME/bin/bcftools +$HOME/bin/extendFMT.so \
   -r $reg \
   -s $lst \
   $dir/$pfx.dose.mocha.bcf | \
-$HOME/bin/bcftools +$HOME/bin/mochatools.so \
+bcftools +mochatools \
   --no-version -Ob \
   -o $dir/$pfx.bal.bcf \
   -- -b Bdev_Phase -G && \
-$HOME/bin/bcftools index -f $dir/$pfx.bal.bcf
+bcftools index -f $dir/$pfx.bal.bcf
 ```
 
 Observe results for asymmetry analyses in table format
 ```
 fmt="%CHROM\t%POS\t%ID\t%Bal{0}\t%Bal{1}\t%Bal_Test\n"
-$HOME/bin/bcftools query \
+bcftools query \
   -i "Bal_Test>6" \
   -f "$fmt" \
   $dir/$pfx.bal.bcf | \
@@ -611,8 +616,8 @@ $HOME/bin/bcftools query \
 
 Split output VCF file by samples (optional)
 ```
-$HOME/bin/bcftools annotate --no-version -Ou -x INFO $dir/$pfx.mocha.bcf | \
-  $HOME/bin/bcftools +$HOME/bin/split.so -Ob -o $dir/
+bcftools annotate --no-version -Ou -x INFO $dir/$pfx.mocha.bcf | \
+  bcftools +split -Ob -o $dir/
 ```
 
 Plot results
@@ -632,7 +637,10 @@ chmod a+x $HOME/bin/{plot_summary,mocha_plot}.R
 
 Generate summary plot
 ```
-$HOME/bin/plot_summary.R --pdf $dir/$pfx.pdf --stats $dir/$pfx.stats.tsv --calls $dir/$pfx.mocha.tsv
+$HOME/bin/plot_summary.R \
+  --pdf $dir/$pfx.pdf \
+  --stats $dir/$pfx.stats.tsv \
+  --calls $dir/$pfx.mocha.tsv
 ```
 
 Plot mosaic chromosomal alterations (for array data)

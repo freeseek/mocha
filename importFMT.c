@@ -127,13 +127,13 @@ int run(int argc, char *argv[])
                       break;
             case  9 : n_threads = strtol(optarg, 0, 0); break;
             case  8 : record_cmd_line = 0; break;
-            case 'h':
 
             case 't': targets_list = optarg; break;
             case 'T': targets_list = optarg; targets_is_file = 1; break;
             case 'r': regions_list = optarg; break;
             case 'R': regions_list = optarg; regions_is_file = 1; break;
 
+            case 'h':
             case '?':
             default: error("%s", usage_text());
         }

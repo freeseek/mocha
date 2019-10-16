@@ -33,6 +33,8 @@
 #include <htslib/kfunc.h>
 #include "bcftools.h"
 
+#define VERSION "2018-10-18"
+
 static inline double sq(double x) { return x*x; }
 
 typedef struct
@@ -55,14 +57,14 @@ args_t *args;
 
 const char *about(void)
 {
-    return "MOsaic CHromosomal Alterations tools\n";
+    return "MOsaic CHromosomal Alterations tools.\n";
 }
 
 const char *usage(void)
 {
     return
 "\n"
-"About: tools for the MOsaic CHromosomal Alterations pipeline. (version 2018-10-18)\n"
+"About: tools for the MOsaic CHromosomal Alterations pipeline. ("VERSION")\n"
 "\n"
 "Usage: bcftools +mochatools [General Options] -- [Plugin Options]\n"
 "Options:\n"

@@ -47,7 +47,7 @@
 // TODO replace SIGN with copysignf()
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2019-05-20"
+#define MOCHA_VERSION "2019-10-16"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -2208,8 +2208,15 @@ static void sample_summary(sample_t *self,
     {
         int j = 0;
         for (int i=0; i<n; i++) if ( self[i].sex == SEX_FEM ) tmp_arr[j++] = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
-        float lrr_females = get_median( tmp_arr, j, NULL );
-        model->lrr_auto2sex = lrr_females;
+        if ( j == 0 ) // if no females are present it doesn't matter
+        {
+            model->lrr_auto2sex = 0.0f;
+        }
+        else
+        {
+            float lrr_females = get_median( tmp_arr, j, NULL );
+            model->lrr_auto2sex = lrr_females;
+        }
     }
     free(tmp_arr);
 }
@@ -2571,7 +2578,7 @@ int bcf_check_baf_flipped(bcf_fmt_t *gt_fmt,
     return 0;
 }
 
-// retrive genotype alleles information from BCF record
+// retrieve genotype alleles information from BCF record
 // assumes little endian architecture
 int bcf_get_genotype_alleles(const bcf_fmt_t *fmt,
                              int16_t *gt0_arr,
