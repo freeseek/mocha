@@ -47,7 +47,7 @@
 // TODO replace SIGN with copysignf()
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2019-10-16"
+#define MOCHA_VERSION "2019-11-24"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -116,6 +116,10 @@ typedef struct
     int n;
     int *pos_arr;
     int m_pos;
+    int *allele_a_arr;
+    int m_allele_a;
+    int *allele_b_arr;
+    int m_allele_b;
     float *gc_arr;
     int m_gc;
     int n_flipped;
@@ -2684,11 +2688,25 @@ static int get_contig(bcf_srs_t *sr,
     int nsmpl = bcf_hdr_nsamples(hdr);
 
     int i;
+    int allele_a_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ALLELE_A");
+    if ( allele_a_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, allele_a_id) != BCF_HT_INT )
+        error("Error: input VCF file ALLELE_A info field is not of integer type\n");
+    int allele_b_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ALLELE_B");
+    if ( allele_b_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, allele_b_id) != BCF_HT_INT )
+        error("Error: input VCF file ALLELE_B info field is not of integer type\n");
+    int gc_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GC");
+    if ( gc_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, gc_id) != BCF_HT_REAL )
+        error("Error: input VCF file GC info field is not of float type\n");
     int gt_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GT");
     int baf_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "BAF");
+    if ( baf_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_FMT, baf_id) != BCF_HT_REAL )
+        error("Error: input VCF file BAF format field is not of float type\n");
     int lrr_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "LRR");
+    if ( lrr_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_FMT, lrr_id) != BCF_HT_REAL )
+        error("Error: input VCF file LRR format field is not of float type\n");
     int ad_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "AD");
-    int gc_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GC");
+    if ( ad_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_FMT, ad_id) != BCF_HT_INT )
+        error("Error: input VCF file AD format field is not of integer type\n");
 
     // maybe this should be assert instead
     if ( gt_id < 0 ) error("Error: input VCF file has no GT format field\n");
@@ -2715,6 +2733,15 @@ static int get_contig(bcf_srs_t *sr,
 
         hts_expand(int, i+1, model->m_pos, model->pos_arr);
         model->pos_arr[i] = pos;
+        hts_expand(int, i+1, model->m_allele_a, model->allele_a_arr);
+        hts_expand(int, i+1, model->m_allele_b, model->allele_b_arr);
+        model->allele_a_arr[i] = -1;
+        model->allele_b_arr[i] = -1;
+        if ( allele_a_id >= 0 && allele_b_id >= 0 )
+        {
+            if ( ( info = bcf_get_info_id( line, allele_a_id ) ) ) model->allele_a_arr[i] = info->v1.i;
+            if ( ( info = bcf_get_info_id( line, allele_b_id ) ) ) model->allele_b_arr[i] = info->v1.i;
+        }
         hts_expand(float, i+1, model->m_gc, model->gc_arr);
         if ( gc_id>=0 && ( info = bcf_get_info_id( line, gc_id ) ) ) model->gc_arr[i] = info->v1.f;
         else model->gc_arr[i] = NAN;
@@ -2741,12 +2768,19 @@ static int get_contig(bcf_srs_t *sr,
         {
             if ( !(lrr_fmt = bcf_get_fmt_id(line, lrr_id)) || !(baf_fmt = bcf_get_fmt_id(line, baf_id)) ) continue;
 
+            // if allele B index is bigger than allele A index flip the BAF
+            if ( allele_a_id >= 0 && allele_b_id >= 0 && model->allele_a_arr[i] > model->allele_b_arr[i] )
+            {
+                for (int j=0; j<nsmpl; j++)
+                    ((float *)(baf_fmt->p + baf_fmt->size * sample[j].idx))[0] = 1.0f - ((float *)(baf_fmt->p + baf_fmt->size * sample[j].idx))[0];
+            }
+
             // check whether you need to flip the BAF but only for bi-allelic sites
             if ( !(model->flags & NO_BAF_FLIP) && line->n_allele == 2 )
             {
                 int ret = bcf_check_baf_flipped(gt_fmt, baf_fmt, nsmpl);
-                if ( ret < 0 ) error("Error: site contains a mix of flipped and unflipped BAF values at position %s:%d\n"
-                                     "Use bcftools query -f \"[%%CHROM\\t%%POS\\t%%SAMPLE\\t%%GT\\t%%BAF\\n]\" -r %s:%d-%d to investigate the issue\n"
+                if ( ret < 0 ) error("Error: site contains a mix of flipped and unflipped BAF values at position %s:%"PRId64"\n"
+                                     "Use bcftools query -f \"[%%CHROM\\t%%POS\\t%%SAMPLE\\t%%GT\\t%%BAF\\n]\" -r %s:%"PRId64"-%"PRId64" to investigate the issue\n"
                                      "Use --no-BAF-flip to suppress BAF flipping\n",
                     bcf_hdr_id2name(hdr, line->rid), line->pos+1, bcf_hdr_id2name(hdr, line->rid), line->pos, line->pos+1);
                 else model->n_flipped += ret;
@@ -3196,7 +3230,6 @@ int main_vcfmocha(int argc, char *argv[])
 
     // parse parameters defining hidden states
     model.bdev_lrr_baf = read_list_invf(bdev_lrr_baf, &model.bdev_lrr_baf_n, -0.5f, 0.25f);
-//    model.noise_bdev_lrr_baf = read_list_invf(noise_bdev_lrr_baf, &model.noise_bdev_lrr_baf_n, -0.5f, 0.25f);
     model.bdev_baf_phase = read_list_invf(bdev_baf_phase, &model.bdev_baf_phase_n, 0.0f, 0.5f);
 
     // read list of regions to genotype
@@ -3390,9 +3423,10 @@ int main_vcfmocha(int argc, char *argv[])
 
     // clear model data
     free(model.pos_arr);
+    free(model.allele_a_arr);
+    free(model.allele_b_arr);
     free(model.gc_arr);
     free(model.bdev_lrr_baf);
-//    free(model.noise_bdev_lrr_baf);
     free(model.bdev_baf_phase);
     genome_destroy(model.genome_rules);
 
