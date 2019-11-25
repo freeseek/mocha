@@ -1,6 +1,6 @@
---- vcfnorm.c	2018-08-26 12:00:00.000000000 -0400
-+++ vcfnorm.c	2018-08-26 12:00:00.000000000 -0400
-@@ -96,7 +96,7 @@
+--- vcfnorm.c   2019-11-22 12:00:00.000000000 -0400
++++ vcfnorm.c   2019-11-22 12:00:00.000000000 -0400
+@@ -97,7 +97,7 @@
      char **argv, *output_fname, *ref_fname, *vcf_fname, *region, *targets;
      int argc, rmdup, output_type, n_threads, check_ref, strict_filter, do_indels;
      int nchanged, nskipped, nsplit, ntotal, mrows_op, mrows_collapse, parsimonious;
@@ -9,7 +9,7 @@
  }
  args_t;
  
-@@ -617,7 +617,7 @@
+@@ -618,7 +618,7 @@
          assert( nvals>0 ); \
          type_t *vals = (type_t *) args->tmp_arr1; \
          int len = bcf_hdr_id2length(args->hdr,BCF_HL_FMT,fmt->id); \
@@ -18,7 +18,7 @@
          if ( nvals==nsmpl ) /* all values are missing */ \
          { \
              bcf_update_format_##type(args->hdr,dst,tag,vals,nsmpl); \
-@@ -648,6 +648,8 @@
+@@ -649,6 +649,8 @@
              for (i=0; i<nsmpl; i++) \
              { \
                  dst_vals[0] = src_vals[0]; \
@@ -27,15 +27,15 @@
                  dst_vals[1] = src_vals[ialt+1]; \
                  dst_vals += 2; \
                  src_vals += nvals; \
-@@ -1850,6 +1852,7 @@
-     fprintf(stderr, "    -d, --rm-dup <type>               remove duplicate snps|indels|both|all|none\n");
+@@ -1851,6 +1853,7 @@
+     fprintf(stderr, "    -d, --rm-dup <type>               remove duplicate snps|indels|both|all|exact\n");
      fprintf(stderr, "    -f, --fasta-ref <file>            reference sequence (MANDATORY)\n");
      fprintf(stderr, "    -m, --multiallelics <-|+>[type]   split multiallelics (-) or join biallelics (+), type: snps|indels|both|any [both]\n");
 +    fprintf(stderr, "    -k, --keep-sum-AD                 keep sum AD vector constant\n");
      fprintf(stderr, "        --no-version                  do not append version and command line to the header\n");
      fprintf(stderr, "    -N, --do-not-normalize            do not normalize indels (with -m or -c s)\n");
      fprintf(stderr, "    -o, --output <file>               write output to a file [standard output]\n");
-@@ -1875,6 +1878,7 @@
+@@ -1876,6 +1879,7 @@
      args->output_type = FT_VCF;
      args->n_threads = 0;
      args->record_cmd_line = 1;
@@ -43,7 +43,7 @@
      args->aln_win = 100;
      args->buf_win = 1000;
      args->mrows_collapse = COLLAPSE_BOTH;
-@@ -1888,6 +1892,7 @@
+@@ -1889,6 +1893,7 @@
          {"fasta-ref",required_argument,NULL,'f'},
          {"do-not-normalize",no_argument,NULL,'N'},
          {"multiallelics",required_argument,NULL,'m'},
@@ -51,7 +51,7 @@
          {"regions",required_argument,NULL,'r'},
          {"regions-file",required_argument,NULL,'R'},
          {"targets",required_argument,NULL,'t'},
-@@ -1904,7 +1909,7 @@
+@@ -1905,7 +1910,7 @@
          {NULL,0,NULL,0}
      };
      char *tmp;
@@ -60,7 +60,7 @@
          switch (c) {
              case 'N': args->do_indels = 0; break;
              case 'd':
-@@ -1929,6 +1934,7 @@
+@@ -1931,6 +1936,7 @@
                      else error("The argument to -m not recognised: %s\n", optarg);
                  }
                  break;
