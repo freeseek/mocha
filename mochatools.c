@@ -471,7 +471,7 @@ bcf1_t *process(bcf1_t *rec)
         int at_cnt = 0, cg_cnt = 0, cpg_cnt = 0;
         const char *ref = rec->d.allele[0];
         char *fa = faidx_fetch_seq(args->fai, bcf_seqname(args->in_hdr,rec), rec->pos-args->ws, rec->pos+(int)strlen(ref)-1+args->ws, &fa_len);
-        if ( !fa ) error("fai_fetch_seq failed at %s:%d\n", bcf_hdr_id2name(args->in_hdr,rec->rid), rec->pos+1);
+        if ( !fa ) error("fai_fetch_seq failed at %s:%"PRId64"\n", bcf_hdr_id2name(args->in_hdr,rec->rid), rec->pos+1);
         for (int i=0; i<fa_len; i++)
         {
             if ( fa[i] > 96 ) fa[i] = (char)(fa[i] - 32);
