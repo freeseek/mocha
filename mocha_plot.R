@@ -127,8 +127,8 @@ if (!is.null(args$cytoband)) {
 fmt <- '"[%CHROM\\t%POS\\t%REF\\t%ALT\\t%SAMPLE\\t%GT\\t'
 names <- c('CHROM', 'POS', 'REF', 'ALT', 'SAMPLE', 'GT')
 if (!args$wgs) {
-  fmt <- paste0(fmt, '%BAF\\t%LRR')
-  names <- c(names, c('BAF', 'LRR'))
+  fmt <- paste0(fmt, '%ALLELE_A\\t%ALLELE_B\\t%BAF\\t%LRR')
+  names <- c(names, c('ALLELE_A', 'ALLELE_B', 'BAF', 'LRR'))
 } else {
   fmt <- paste0(fmt, '%AD{0}\\t%AD{1}')
   names <- c(names, c('AD0', 'AD1'))
@@ -182,8 +182,10 @@ df$UNPHASED_GT[df$GT == '0/1' | df$GT == '1/0' | df$GT == '0|1' | df$GT == '1|0'
 if (!args$wgs) {
   df$eLRR <- exp(df$LRR)
   df$pBAF <- NaN
-  df$pBAF[df$GT == '0|1'] <- df$BAF[df$GT == '0|1']
-  df$pBAF[df$GT == '1|0'] <- 1 - df$BAF[df$GT == '1|0']
+  idx <- df$GT == ('0|1' & df$ALLELE_B == 1) | (df$GT == '1|0' & df$ALLELE_B == 0)
+  df$pBAF[idx] <- df$BAF[idx]
+  idx <- df$GT == ('0|1' & df$ALLELE_B == 0) | (df$GT == '1|0' & df$ALLELE_B == 1)
+  df$pBAF[idx] <- 1 - df$BAF[idx]
   cov_var <- 'eLRR'
   plot_vars <- c('eLRR', 'BAF', 'pBAF')
   df_horiz <- data.frame(variable = factor(c('eLRR', 'pBAF'), levels = plot_vars), value = c(1.0, 0.5))
