@@ -129,6 +129,8 @@ Install Minimac3 (optional for array data)
 git clone git://github.com/statgen/Minimac3.git
 sed -i 's/USER_WARNINGS ?= -Werror/USER_WARNINGS ?= -Wno-format-truncation/' Minimac3/Library/libStatGenForMinimac3/general/Makefile
 sed -i 's/bool legacy_count = 0/int legacy_count = 0/' Minimac3/Library/libStatGenForMinimac3/general/Parameters.cpp
+sed -i 's/"\([0-9][0-9]*\)"/"\1","chr\1"/g;s/,"X"/,"X","chrX"/;s/finChromosome=="X"/(finChromosome=="X" || finChromosome=="chrX")/;s/finChromosome!="X"/(finChromosome!="X" \&\& finChromosome!="chrX")/' Minimac3/src/HaplotypeSet.cpp
+sed -i 's/rHap.finChromosome!="X"/rHap.finChromosome!="X" \&\& rHap.finChromosome!="chrX"/' Minimac3/src/Imputation.cpp
 cd Minimac3 && make && cd ..
 /bin/cp Minimac3/bin/Minimac3{,-omp} $HOME/bin/
 ```
@@ -194,7 +196,7 @@ for chr in {1..22} X; do
   else
     bcftools view --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -o tmp.chr$chr.GRCh37.vcf
   fi
-  $HOME/bin/Minimac3-omp \
+  Minimac3-omp \
     --refHaps tmp.chr$chr.GRCh37.vcf \
     --processReference \
     --myChromosome $chr \
@@ -287,7 +289,7 @@ for chr in {1..22} X; do
   else
     bcftools view --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -o tmp.chr$chr.GRCh38.vcf
   fi
-  $HOME/bin/Minimac3-omp \
+  Minimac3-omp \
     --refHaps tmp.chr$chr.GRCh38.vcf \
     --processReference \
     --myChromosome chr$chr \
@@ -329,25 +331,28 @@ dir="..." # directory where output files will be generated
 mkdir -p $dir
 ```
 
-If you want to process <b>genotype array</b> data you need a VCF file with GT, BAF, and LRR information:
+If you want to process <b>genotype array</b> data you need a VCF file with ALLELE_A, ALLELE_B, GT, BAF, and LRR information:
 ```
 ##fileformat=VCFv4.2
+##INFO=<ID=ALLELE_A,Number=1,Type=Integer,Description="A allele">
+##INFO=<ID=ALLELE_B,Number=1,Type=Integer,Description="B allele">
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
 ##FORMAT=<ID=BAF,Number=1,Type=Float,Description="B Allele Frequency">
 ##FORMAT=<ID=LRR,Number=1,Type=Float,Description="Log R Ratio">
 #CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	NA12878
-1	752566	rs3094315	G	A	.	.	.	GT:BAF:LRR	1|1:0.9889:-0.0798
-1	776546	rs12124819	A	G	.	.	.	GT:BAF:LRR	0|1:0.5441:0.4959
-1	798959	rs11240777	G	A	.	.	.	GT:BAF:LRR	0|0:0.0288:0.2276
-1	932457	rs1891910	G	A	.	.	.	GT:BAF:LRR	1|0:0.4540:-0.1653
+1	752566	rs3094315	G	A	.	.	ALLELE_A=1;ALLELE_B=0	GT:BAF:LRR	1|1:0.0111:-0.0798
+1	776546	rs12124819	A	G	.	.	ALLELE_A=0;ALLELE_B=1	GT:BAF:LRR	0|1:0.5441:0.4959
+1	798959	rs11240777	G	A	.	.	ALLELE_A=1;ALLELE_B=0	GT:BAF:LRR	0|0:0.9712:0.2276
+1	932457	rs1891910	G	A	.	.	ALLELE_A=1;ALLELE_B=0	GT:BAF:LRR	1|0:0.5460:-0.1653
 ```
-Making sure that BAF refers to the allele frequency of what in the VCF is indicated as the alternate allele.
+Making sure that BAF refers to the allele frequency of the reference allele if ALLELE_B=0 and of the alternate allele if ALLELE_A=1.
 
 If you do not already have a VCF file but you have Illumina or Affymetrix genotype array data, you can use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> tools to convert the data to VCF. Alternatively you can use your own scripts.
 
 Create a minimal binary VCF
 ```
-bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf -x ID,QUAL,INFO,^FMT/GT,^FMT/BAF,^FMT/LRR $vcf && \
+bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf $vcf \
+  -x ID,QUAL,INFO,^INFO/ALLELE_A,^INFO/ALLELE_B,^FMT/GT,^FMT/BAF,^FMT/LRR && \
   bcftools index -f $dir/$pfx.unphased.bcf
 ```
 
@@ -362,7 +367,7 @@ If you want to process <b>whole-genome sequence</b> data you need a VCF file wit
 1	798959	rs11240777	G	A	.	.	.	GT:AD	0|0:31,0
 1	932457	rs1891910	G	A	.	.	.	GT:AD	1|0:18,14
 ```
-Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will be not <a href="https://github.com/samtools/bcftools/issues/360">split properly</a>.
+Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will not <a href="https://github.com/samtools/bcftools/issues/360">split properly</a>.
 
 Create a minimal binary VCF
 ```
@@ -405,7 +410,7 @@ Phasing pipeline
 Phase VCF file by chromosome with Eagle
 ```
 for chr in {1..22} X; do
-  $HOME/bin/eagle \
+  eagle \
     --geneticMapFile $map \
     --outPrefix $dir/$pfx.chr$chr \
     --numThreads $thr \
@@ -450,7 +455,7 @@ Impute variants using Minimac3 (optional for array data)
 for chr in {1..22} X; do
   bcftools annotate --no-version -Ou $dir/$pfx.bcf -a $dir/$pfx.xcl.bcf -m +XCL -r $chr,chr$chr | \
     bcftools view --no-version -Ov -o $dir/$pfx.chr$chr.vcf -e "XCL==1"
-  $HOME/bin/Minimac3-omp \
+  Minimac3-omp \
     --cpus $thr \
     --refHaps $kgp_pfx${chr}$kgp_sfx.m3vcf.gz \
     --format GT,GP \
@@ -629,7 +634,7 @@ chmod a+x $HOME/bin/{plot_summary,mocha_plot}.R
 
 Generate summary plot
 ```
-$HOME/bin/plot_summary.R \
+plot_summary.R \
   --pdf $dir/$pfx.pdf \
   --stats $dir/$pfx.stats.tsv \
   --calls $dir/$pfx.mocha.tsv
@@ -637,7 +642,7 @@ $HOME/bin/plot_summary.R \
 
 Plot mosaic chromosomal alterations (for array data)
 ```
-$HOME/bin/mocha_plot.R \
+mocha_plot.R \
   --mocha \
   --png MH0145622.png \
   --vcf $dir/$pfx.mocha.bcf \
@@ -651,12 +656,12 @@ Mosaic deletion from array data overlapping the ATM gene (GRCh37 coordinates). T
 
 Plot mosaic chromosomal alterations (for WGS data)
 ```
-$HOME/bin/mocha_plot.R \
+mocha_plot.R \
   --wgs \
   --mocha \
   --png CSES15_P26_140611.png \
   --vcf $dir/$pfx.mocha.bcf \
-  --samples xxx \
+  --samples CSES15_P26_140611 \
   --regions 1:202236354-211793505 \
   --cytoband $HOME/res/cytoBand.hg19.txt.gz
 ```
