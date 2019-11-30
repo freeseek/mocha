@@ -98,7 +98,7 @@ if (!is.null(args$cytoband)) {
   cen_end <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], max)
   chrs <- unique(df_cyto$chrom)
   chrs <- chrs[order(as.numeric(gsub('MT', '26', gsub('Y', '24', gsub('X', '23', chrs)))))]
-  
+
   df_cen <- rbind(melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart', 'chromEnd', 'chromStart')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')),
                   melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd', 'chromStart', 'chromEnd')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')))
   df_cen$y <- as.numeric(levels(df_cen$variable)[df_cen$variable])
