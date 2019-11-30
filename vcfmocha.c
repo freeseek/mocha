@@ -47,7 +47,7 @@
 // TODO replace SIGN with copysignf()
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2019-11-24"
+#define MOCHA_VERSION "2019-11-29"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -2519,7 +2519,7 @@ int bcf_get_genotype_phase(bcf_fmt_t *fmt,
         case BCF_BT_INT8:  BRANCH(int8_t, bcf_int8_vector_end); break;
         case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end); break;
         case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end); break;
-        default: error("Unexpected type %d", fmt->type);
+        default: error("Unexpected type %d\n", fmt->type);
     }
     #undef BRANCH
 
@@ -2564,7 +2564,7 @@ int bcf_check_baf_flipped(bcf_fmt_t *gt_fmt,
         case BCF_BT_INT8:  BRANCH(int8_t, bcf_int8_vector_end); break;
         case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end); break;
         case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end); break;
-        default: error("Unexpected type %d", gt_fmt->type);
+        default: error("Unexpected type %d\n", gt_fmt->type);
     }
     #undef BRANCH
 
@@ -2613,7 +2613,7 @@ int bcf_get_genotype_alleles(const bcf_fmt_t *fmt,
         case BCF_BT_INT8:  BRANCH(int8_t, bcf_int8_vector_end); break;
         case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end); break;
         case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end); break;
-        default: error("Unexpected type %d", fmt->type);
+        default: error("Unexpected type %d\n", fmt->type);
     }
     #undef BRANCH
 
@@ -2667,7 +2667,7 @@ int bcf_get_allelic_depth(const bcf_fmt_t *fmt,
         case BCF_BT_INT8:  BRANCH(int8_t, bcf_int8_vector_end, bcf_int8_missing); break;
         case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end, bcf_int16_missing); break;
         case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end, bcf_int32_missing); break;
-        default: error("Unexpected type %d", fmt->type);
+        default: error("Unexpected type %d\n", fmt->type);
     }
     #undef BRANCH
 
@@ -3354,7 +3354,7 @@ int main_vcfmocha(int argc, char *argv[])
               "the X nonPAR region and both male and female samples are present in the VCF or specify the parameter\n");
     if ( isnan( model.lrr_auto2sex ) )
         error("Error: Unable to estimate LRR-auto2sex. Make sure "
-              "the both autosomes and the X nonPAR region are present in the VCF or specify the parameter\n");
+              "both autosomes and the X nonPAR region are present in the VCF or specify the parameter\n");
 
     if ( !(model.flags & NO_LOG) ) fprintf(log_file, "Model LRR parameters: LRR-cutoff=%.4f LRR-hap2dip=%.4f LRR-auto2sex=%.4f\n",
         model.lrr_cutoff, model.lrr_hap2dip, model.lrr_auto2sex);
