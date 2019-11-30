@@ -33,7 +33,7 @@
 #include <htslib/kfunc.h>
 #include "bcftools.h"
 
-#define VERSION "2018-10-18"
+#define VERSION "2019-11-29"
 
 static inline double sq(double x) { return x*x; }
 
@@ -64,7 +64,7 @@ const char *usage(void)
 {
     return
 "\n"
-"About: tools for the MOsaic CHromosomal Alterations pipeline. ("VERSION")\n"
+"About: tools for the MOsaic CHromosomal Alterations pipeline. (version "VERSION" https://github.com/freeseek/mocha)\n"
 "\n"
 "Usage: bcftools +mochatools [General Options] -- [Plugin Options]\n"
 "Options:\n"
@@ -455,7 +455,7 @@ static int bcf_get_format_sign(bcf_fmt_t *fmt,
         case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end, bcf_int16_missing); break;
         case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end, bcf_int32_missing); break;
         case BCF_BT_FLOAT: BRANCH(int32_t, bcf_float_vector_end, bcf_float_missing); break;
-        default: error("Unexpected type %d", fmt->type);
+        default: error("Unexpected type %d\n", fmt->type);
     }
     #undef BRANCH
 
