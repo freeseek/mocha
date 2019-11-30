@@ -37,7 +37,7 @@
 #include <htslib/kseq.h>
 #include "bcftools.h"
 
-#define VERSION "2018-11-23"
+#define VERSION "2019-11-29"
 
 #define ABSOLUTE    (1<<24)
 #define TRANSMITTED (1<<16)
@@ -139,7 +139,7 @@ const char *usage(void)
 {
     return
 "\n"
-"About: Phase genotypes in trios. ("VERSION")\n"
+"About: Phase genotypes in trios. (version "VERSION" https://github.com/freeseek/mocha)\n"
 "\n"
 "Usage: bcftools +trio-phase [General Options] -- [Plugin Options]\n"
 "Options:\n"
