@@ -76,7 +76,7 @@ Installation
 
 Install basic tools (Debian/Ubuntu specific if you have admin privileges):
 ```
-sudo apt install wget gzip unzip samtools bedtools
+sudo apt install wget autoconf zlib1g-dev gzip unzip samtools bedtools
 ```
 
 Optionally, you can install these libraries to activate further HTSlib features:
