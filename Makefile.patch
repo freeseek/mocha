@@ -1,5 +1,5 @@
---- Makefile    2019-11-22 12:00:00.000000000 -0500
-+++ Makefile    2019-11-22 12:00:00.000000000 -0500
+--- Makefile    2020-01-06 12:00:00.000000000 -0500
++++ Makefile    2020-01-06 12:00:00.000000000 -0500
 @@ -39,7 +39,7 @@
             vcfnorm.o vcfgtcheck.o vcfview.o vcfannotate.o vcfroh.o vcfconcat.o \
             vcfcall.o mcall.o vcmp.o gvcf.o reheader.o convert.o vcfconvert.o tsv2vcf.o \
@@ -9,7 +9,7 @@
             mpileup.o bam2bcf.o bam2bcf_indel.o bam_sample.o \
             vcfsort.o cols.o \
             ccall.o em.o prob1.o kmin.o # the original samtools calling
-@@ -268,6 +268,9 @@
+@@ -273,6 +273,9 @@
  hclust.o: hclust.c $(htslib_hts_h) $(htslib_kstring_h) $(bcftools_h) hclust.h
  HMM.o: HMM.c $(htslib_hts_h) HMM.h
  vcfbuf.o: vcfbuf.c $(htslib_vcf_h) $(htslib_vcfutils_h) $(bcftools_h) $(vcfbuf_h) rbuf.h

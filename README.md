@@ -102,7 +102,7 @@ wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{{Makef
 wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools,importFMT,extendFMT}.c
 cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.patch && cd ..
 ```
-If for any reason the patches fail with an error message, contact the <a href="mailto:giulio.genovese@gmail.com">author</a> for a fix.
+If for any reason the patches fail with an error message, contact the <a href="mailto:giulio.genovese@gmail.com">author</a> for a fix
 
 Compile latest version of HTSlib (optionally disable bz2, gcs, and lzma) and BCFtools (make sure you are using gcc version 5 or newer)
 ```
@@ -253,7 +253,7 @@ for chr in {1..22} X Y; do
   bcftools index -f ALL.chr${chr}_GRCh38.genotypes.20170504.bcf
 done
 ```
-Do notice though that the 1000 Genomes project team incorrectly lifted over chromosome X genotypes over PAR1 and PAR2 regions, despite this issue not being reported in the <a href="http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/README_GRCh38_liftover_20170504.txt">README</a>. This will directly affect the ability to detect chromosome Y loss events.
+Do notice though that the 1000 Genomes project team incorrectly lifted over chromosome X genotypes over PAR1 and PAR2 regions, despite this issue not being reported in the <a href="http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/README_GRCh38_liftover_20170504.txt">README</a>. This will directly affect the ability to detect chromosome Y loss events
 
 List of common germline duplications and deletions
 ```
@@ -345,9 +345,9 @@ If you want to process <b>genotype array</b> data you need a VCF file with ALLEL
 1	798959	rs11240777	G	A	.	.	ALLELE_A=1;ALLELE_B=0	GT:BAF:LRR	0|0:0.9712:0.2276
 1	932457	rs1891910	G	A	.	.	ALLELE_A=1;ALLELE_B=0	GT:BAF:LRR	1|0:0.5460:-0.1653
 ```
-Making sure that BAF refers to the allele frequency of the reference allele if ALLELE_B=0 and of the alternate allele if ALLELE_A=1.
+Making sure that BAF refers to the allele frequency of the reference allele if ALLELE_B=0 and of the alternate allele if ALLELE_B=1
 
-If you do not already have a VCF file but you have Illumina or Affymetrix genotype array data, you can use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> tools to convert the data to VCF. Alternatively you can use your own scripts.
+If you do not already have a VCF file but you have Illumina or Affymetrix genotype array data, you can use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> tools to convert the data to VCF. Alternatively you can use your own scripts
 
 Create a minimal binary VCF
 ```
@@ -367,7 +367,7 @@ If you want to process <b>whole-genome sequence</b> data you need a VCF file wit
 1	798959	rs11240777	G	A	.	.	.	GT:AD	0|0:31,0
 1	932457	rs1891910	G	A	.	.	.	GT:AD	1|0:18,14
 ```
-Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will not <a href="https://github.com/samtools/bcftools/issues/360">split properly</a>.
+Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will not <a href="https://github.com/samtools/bcftools/issues/360">split properly</a>
 
 Create a minimal binary VCF
 ```
@@ -379,7 +379,7 @@ bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/'
   bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
   bcftools index $dir/$pfx.unphased.bcf
 ```
-This will set to missing all genotypes that have low coverage or low genotyping quality, as these can cause issues.
+This will set to missing all genotypes that have low coverage or low genotyping quality, as these can cause issues
 
 Perform basic quality control (the generated list of variants will be excluded from modeling by both eagle and mocha)
 ```
@@ -394,7 +394,7 @@ echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
     -x FILTER,^INFO/JK,^INFO/NS,^INFO/ExcHet,^INFO/AC_Sex_Test && \
   bcftools index -f $dir/$pfx.xcl.bcf
 ```
-This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6). If you are using WGS data and you don't have a file with sex information, you can skip the quality control line using this information. When later running MoChA, sex will be imputed and a sex file can be computed from MoChA's output.
+This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6). If you are using WGS data and you don't have a file with sex information, you can skip the quality control line using this information. When later running MoChA, sex will be imputed and a sex file can be computed from MoChA's output
 
 If a file with additional variants to be excluded is available, further merge it with the generated list
 ```
@@ -425,7 +425,7 @@ for chr in {1..22} X; do
   bcftools index -f $dir/$pfx.chr$chr.bcf
 done
 ```
-Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions.
+Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions
 
 Extract chromosomes that do not require phasing
 ```
@@ -560,7 +560,7 @@ The output VCF will contain the following extra FORMAT fields:
 Bdev_Phase - for heterozygous calls: 1/-1 if the alternate allele is over/under represented
 ```
 
-For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to 9NM bytes. For example, if you are running 4,000 samples and chromosome 1 has ~80K variants, you will need approximately 2-3GB to run MoChA. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the --min-dist parameter (D, 400 by default) and the length of the longest contig (L) and will amount to no more than 9NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter --min-dist 400 and chromosome 1 is ~250Mbp long, you might need up to 5-6GB to run MoChA. Notice that for whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use option --median-BAF-adjust -1).
+For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to 9NM bytes. For example, if you are running 4,000 samples and chromosome 1 has ~80K variants, you will need approximately 2-3GB to run MoChA. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the --min-dist parameter (D, 400 by default) and the length of the longest contig (L) and will amount to no more than 9NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter --min-dist 400 and chromosome 1 is ~250Mbp long, you might need up to 5-6GB to run MoChA. Notice that for whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use option --median-BAF-adjust -1)
 
 Notice that, depending on your application, you might want to filter the calls from MoChA. For example, the following code:
 ```
@@ -568,7 +568,7 @@ awk 'NR==FNR && FNR>1 && $6>.51 {x[$1]++}
   NR>FNR && (FNR==1 || !($1 in x) && $6>1e5 && $17>10 && $21!~"CNP" && $22<.5) {print}' \
   $pfx.stats.tsv $pfx.mocha.tsv > $pfx.mocha.filter.tsv
 ```
-will generate a new table after removing samples with BAF_CONC greater than 0.51, removing calls smaller than 100kbp, removing calls with less than a LOD score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls with an estimated cell fraction larger than 50%.
+will generate a new table after removing samples with BAF_CONC greater than 0.51, removing calls smaller than 100kbp, removing calls with less than a LOD score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls with an estimated cell fraction larger than 50%
 
 Allelic imbalance pipeline
 ==========================
@@ -650,9 +650,10 @@ mocha_plot.R \
   --regions 11:81098129-115077367 \
   --cytoband $HOME/res/cytoBand.hg19.txt.gz
 ```
+Notice that by default MoChA will perform internal BAF (for array data) and LRR adjustments that will not be performed by the plotter so the visualized data might actually look noisier than what was actually processed
 
 ![](MH0145622.png)
-Mosaic deletion from array data overlapping the ATM gene (GRCh37 coordinates). The deletion signal can be observed across LRR, BAF and phased BAF, although it is the most clear with the latter. Furthermore, evidence of three phase switch errors can be observed in the shifted phased BAF signal.
+Mosaic deletion from array data overlapping the ATM gene (GRCh37 coordinates). The deletion signal can be observed across LRR, BAF and phased BAF, although it is the most clear with the latter. Furthermore, evidence of three phase switch errors can be observed in the shifted phased BAF signal
 
 Plot mosaic chromosomal alterations (for WGS data)
 ```
@@ -667,9 +668,9 @@ mocha_plot.R \
 ```
 
 ![](CSES15_P26_140611.png)
-Complex duplication overlapping the MDM4 gene (GRCh37 coordinates). Signal over heterozygous sites colored in blue shows evidence of a triplication event and signal over heterozygous sites colored in red shows evidence of a duplication event. Multiple phase switch errors can be observed in the shifted phased BAF signal.
+Complex duplication overlapping the MDM4 gene (GRCh37 coordinates). Signal over heterozygous sites colored in blue shows evidence of a triplication event and signal over heterozygous sites colored in red shows evidence of a duplication event. Multiple phase switch errors can be observed in the shifted phased BAF signal
 
 Acknowledgements
 ================
 
-This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244). This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools and Po-Ru Loh <poruloh@broadinstitute.org> in building the Eagle phasing software.
+This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244). This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools and Po-Ru Loh <poruloh@broadinstitute.org> in building the Eagle phasing software

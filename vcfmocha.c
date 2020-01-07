@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2015-2019 Giulio Genovese
+   Copyright (C) 2015-2020 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -47,7 +47,7 @@
 // TODO replace SIGN with copysignf()
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
-#define MOCHA_VERSION "2019-11-29"
+#define MOCHA_VERSION "2020-01-07"
 
 #define FLT_INCLUDE      (1<<0)
 #define FLT_EXCLUDE      (1<<1)
@@ -2537,7 +2537,6 @@ int bcf_check_baf_flipped(bcf_fmt_t *gt_fmt,
 
     int okay = 0, flipped = 0;
 
-    // temporarily store genotype alleles in AD array
     #define BRANCH(type_t, bcf_type_vector_end) { \
         type_t *p = (type_t *)gt_fmt->p; \
         float *q = (float *)baf_fmt->p; \
@@ -2591,7 +2590,6 @@ int bcf_get_genotype_alleles(const bcf_fmt_t *fmt,
 {
     if ( !fmt || fmt->n != 2 ) return 0;
 
-    // temporarily store genotype alleles in AD array
     #define BRANCH(type_t, bcf_type_vector_end) { \
         type_t *p = (type_t *)fmt->p; \
         for (int i=0; i<nsmpl; i++, p+=2) \

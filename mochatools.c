@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2017-2018 Giulio Genovese
+   Copyright (C) 2017-2020 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -33,7 +33,7 @@
 #include <htslib/kfunc.h>
 #include "bcftools.h"
 
-#define VERSION "2019-11-29"
+#define VERSION "2020-01-07"
 
 static inline double sq(double x) { return x*x; }
 
@@ -43,6 +43,7 @@ typedef struct
     int ad; // whether to perform the allelic depth test
     int ws; // length of window to compute GC and CpG content
     char *format; // format field for sign balance test
+    int infer_baf_alleles;
     int nsmpl, gt_id, ad_id, baf_id, fmt_id;
     int *sex;
     int8_t *gt_phase_arr, *fmt_sign_arr;
@@ -76,7 +77,8 @@ const char *usage(void)
 "   -a, --ad-het                  performs binomial test for reference / alternate allelic depth (AD)\n"
 "   -x  --sex <file>              file including information about sex of samples\n"
 "   -f, --fasta-ref <file>        reference sequence to compute GC and CpG content\n"
-"   -w, --window-size <int>       Window size in bp used to compute the GC and CpG content [200]\n"
+"   -w, --window-size <int>       window size in bp used to compute the GC and CpG content [200]\n"
+"       --infer-baf-alleles       infer from genotypes and BAF which ones are the A and B alleles\n"
 "   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with \"^\" prefix)\n"
 "   -S, --samples-file [^]<file>  file of samples to include (or exclude with \"^\" prefix)\n"
 "       --force-samples           only warn about unknown subset samples\n"
@@ -146,9 +148,10 @@ int init(int argc,
         {"phase", no_argument, NULL, 'p'},
         {"fasta-ref", required_argument, NULL, 'f'},
         {"window-size", required_argument, NULL, 'w'},
+        {"infer-baf-alleles", no_argument, NULL, 1},
         {"samples", required_argument, NULL, 's'},
         {"samples-file", required_argument, NULL, 'S'},
-        {"force-samples", no_argument, NULL, 1},
+        {"force-samples", no_argument, NULL, 2},
         {"drop-genotypes", no_argument,NULL, 'G'},
         {NULL,0,NULL,0}
     };
@@ -167,9 +170,10 @@ int init(int argc,
                 if ( *tmp ) error("Could not parse: -w %s\n", optarg);
                 if( args->ws <= 0 ) error("Window size is not positive: -w %s\n", optarg);
                 break;
+            case  1 : args->infer_baf_alleles = 1; break;
             case 's': sample_names = optarg; break;
             case 'S': sample_names = optarg; sample_is_file = 1; break;
-            case  1 : force_samples = 1; break;
+            case  2 : force_samples = 1; break;
             case 'G': sites_only = 1; break;
             case 'h':
             case '?':
@@ -227,6 +231,7 @@ int init(int argc,
     if ( args->format && args->fmt_id < 0 ) error("Error: %s format field is not present, cannot perform --balance analysis\n", args->format);
     if ( args->ad && ( args->gt_id < 0 || args->ad_id < 0 ) ) error("Error: Either GT or AD format fields are not present, cannot perform --ad-het analysis\n");
     if ( args->phase && ( args->gt_id < 0 || (args->ad_id < 0 && args->baf_id < 0 && args->fmt_id < 0 ) ) ) error("Error: Either GT or AD/BAF/%s format fields are not present, cannot perform --phase analysis\n", args->format);
+    if ( args->infer_baf_alleles && ( args->gt_id < 0 || args->baf_id < 0 ) ) error("Error: Either GT or BAF format fields are not present, cannot perform --infer-baf-alleles analysis\n");
 
     if ( args->format )
     {
@@ -257,6 +262,14 @@ int init(int argc,
         bcf_hdr_append(args->out_hdr, "##INFO=<ID=AC_Het_Phase_Test,Number=1,Type=Float,Description=\"Binomial test for allelic transmission bias across heterozygous genotypes -log10(P)\">");
         if ( args->ad_id >= 0 || args->baf_id >= 0 )
             bcf_hdr_append(args->out_hdr, "##INFO=<ID=BAF_Phase_Test,Number=4,Type=Float,Description=\"Welch's t-test and Mann-Whitney U test for allelic transmission ratios across heterozygous genotypes\">");
+    }
+
+    if ( args->infer_baf_alleles )
+    {
+        if ( bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_A") >= 0 ) error("Field ALLELE_A already present in the VCF.\n");
+        bcf_hdr_append(args->out_hdr, "##INFO=<ID=ALLELE_A,Number=1,Type=Integer,Description=\"A allele\">");
+        if ( bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_B") >= 0 ) error("Field ALLELE_B already present in the VCF.\n");
+        bcf_hdr_append(args->out_hdr, "##INFO=<ID=ALLELE_B,Number=1,Type=Integer,Description=\"B allele\">");
     }
 
     if ( sites_only ) if ( bcf_hdr_set_samples(args->out_hdr, NULL, 0)  < 0 ) error("Error parsing the sample list\n");
@@ -462,6 +475,70 @@ static int bcf_get_format_sign(bcf_fmt_t *fmt,
     return 1;
 }
 
+// TODO include this into vcfmocha.c
+static int get_alleles_idx(bcf_fmt_t *gt_fmt,
+                           bcf_fmt_t *baf_fmt,
+                           int nsmpl,
+                           int nals,
+                           int alleles_idx[2])
+{
+    if ( !gt_fmt || gt_fmt->n != 2 || !baf_fmt || baf_fmt->n != 1 || baf_fmt->type != BCF_BT_FLOAT || nals > 31 ) return -1;
+
+    int alleles_cnt[2] = {0, 0};
+    #define BRANCH(type_t, bcf_type_vector_end) { \
+        type_t *p = (type_t *)gt_fmt->p; \
+        float *q = (float *)baf_fmt->p; \
+        for (int i=0; i<nsmpl; i++, p+=2, q++) \
+        { \
+            if ( p[0]==bcf_type_vector_end || bcf_gt_is_missing(p[0]) || \
+                 p[1]==bcf_type_vector_end || bcf_gt_is_missing(p[1]) ) \
+            { \
+                continue; \
+            } \
+            else if ( bcf_gt_allele(p[0]) == bcf_gt_allele(p[1]) ) \
+            { \
+                if ( q[0] < .5f ) alleles_cnt[0] |= 1 << bcf_gt_allele(p[0]); \
+                else if ( q[0] > .5f ) alleles_cnt[1] |= 1 << bcf_gt_allele(p[0]); \
+            } \
+        } \
+    }
+    switch (gt_fmt->type) {
+        case BCF_BT_INT8:  BRANCH(int8_t, bcf_int8_vector_end); break;
+        case BCF_BT_INT16: BRANCH(int16_t, bcf_int16_vector_end); break;
+        case BCF_BT_INT32: BRANCH(int32_t, bcf_int32_vector_end); break;
+        default: error("Unexpected type %d\n", gt_fmt->type);
+    }
+    #undef BRANCH
+
+    int ret = 0;
+    for (int i=0; i<2; i++)
+    {
+        if ( alleles_cnt[i] == 0 ) alleles_idx[i] = -1;
+        else if ( alleles_cnt[i] & (alleles_cnt[i]-1) ) ret = -1; // Brian Kernighan’s algorithm to test whether a number is a power of 2
+        else for (int j=0; j<nals; j++) if ( alleles_cnt[i] == 1 << j ) alleles_idx[i] = j;
+    }
+
+    // in the case of two alternate alleles max, it imputes the non-observed homozygous
+    if ( nals == 2 )
+    {
+        if ( alleles_idx[0] < 0 && alleles_idx[1] >= 0 ) alleles_idx[0] = 1 - alleles_idx[1];
+        if ( alleles_idx[1] < 0 && alleles_idx[0] >= 0 ) alleles_idx[1] = 1 - alleles_idx[0];
+    }
+    else if ( nals == 3 )
+    {
+        if ( alleles_idx[0] < 0 && alleles_idx[1] > 0 ) alleles_idx[0] = 3 - alleles_idx[1];
+        if ( alleles_idx[1] < 0 && alleles_idx[0] > 0 ) alleles_idx[1] = 3 - alleles_idx[0];
+    }
+
+    if ( ret < 0 || alleles_idx[0] < 0 || alleles_idx[1] < 0 )
+    {
+        alleles_idx[0] = -1;
+        alleles_idx[1] = -1;
+    }
+
+    return ret;
+}
+
 bcf1_t *process(bcf1_t *rec)
 {
     // compute GC and CpG content for each site
@@ -581,6 +658,16 @@ bcf1_t *process(bcf1_t *rec)
         ret[2] = 0.0f - (float)log10(welch_t_test( args->baf_arr[0], args->baf_arr[1], ac_het_phase[0], ac_het_phase[1] ));
         ret[3] = 0.0f - (float)log10(mann_whitney_u( args->baf_arr[0], args->baf_arr[1], ac_het_phase[0], ac_het_phase[1] ));
         bcf_update_info_float(args->out_hdr, rec, "BAF_Phase_Test", &ret, 4);
+    }
+
+    if ( args->infer_baf_alleles )
+    {
+        int alleles_idx[2];
+        if ( get_alleles_idx(gt_fmt, baf_fmt, args->nsmpl, rec->n_allele, alleles_idx) < 0 )
+            fprintf(stderr, "Unable to infer the A and B alleles while parsing the site %s:%"PRId64"\n",
+                bcf_hdr_id2name(args->in_hdr, rec->rid), rec->pos+1);
+        bcf_update_info_int32(args->out_hdr, rec, "ALLELE_A", &alleles_idx[0], 1);
+        bcf_update_info_int32(args->out_hdr, rec, "ALLELE_B", &alleles_idx[1], 1);
     }
 
 ret:
