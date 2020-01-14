@@ -97,7 +97,9 @@ if (!is.null(args$cytoband)) {
   cen_beg <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], min)
   cen_end <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], max)
   chrs <- unique(df_cyto$chrom)
-  chrs <- chrs[order(as.numeric(gsub('MT', '26', gsub('Y', '24', gsub('X', '23', chrs)))))]
+  modified_chrs <- gsub('MT', '26', gsub('Y', '24', gsub('X', '23', chrs)))
+  ord <- order(as.numeric(modified_chrs))
+  chrs <- chrs[ord]
 
   df_cen <- rbind(melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart', 'chromEnd', 'chromStart')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')),
                   melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd', 'chromStart', 'chromEnd')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')))
@@ -156,9 +158,9 @@ if (!is.null(args$exclude)) cmd <- paste0(cmd, ' --targets-file ^', args$exclude
 
 write(paste('Command:', cmd), stderr())
 if (packageVersion("data.table") < '1.11.6') {
-  df <- setNames(fread(cmd, sep = '\t', header = FALSE, na.strings = '.', data.table = FALSE), names)
+  df <- setNames(fread(cmd, sep = '\t', header = FALSE, na.strings = '.', colClasses = list(character = c(1,3:6)), data.table = FALSE), names)
 } else {
-  df <- setNames(fread(cmd = cmd, sep = '\t', header = FALSE, na.strings = '.', data.table = FALSE), names)
+  df <- setNames(fread(cmd = cmd, sep = '\t', header = FALSE, na.strings = '.', colClasses = list(character = c(1,3:6)), data.table = FALSE), names)
 }
 
 # fix non-reference SNPs
@@ -182,9 +184,9 @@ df$UNPHASED_GT[df$GT == '0/1' | df$GT == '1/0' | df$GT == '0|1' | df$GT == '1|0'
 if (!args$wgs) {
   df$eLRR <- exp(df$LRR)
   df$pBAF <- NaN
-  idx <- df$GT == ('0|1' & df$ALLELE_B == 1) | (df$GT == '1|0' & df$ALLELE_B == 0)
+  idx <- (df$GT == '0|1' & df$ALLELE_B == 1) | (df$GT == '1|0' & df$ALLELE_B == 0)
   df$pBAF[idx] <- df$BAF[idx]
-  idx <- df$GT == ('0|1' & df$ALLELE_B == 0) | (df$GT == '1|0' & df$ALLELE_B == 1)
+  idx <- (df$GT == '0|1' & df$ALLELE_B == 0) | (df$GT == '1|0' & df$ALLELE_B == 1)
   df$pBAF[idx] <- 1 - df$BAF[idx]
   cov_var <- 'eLRR'
   plot_vars <- c('eLRR', 'BAF', 'pBAF')
