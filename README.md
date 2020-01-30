@@ -97,10 +97,10 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 
 Add patches and code for plugin
 ```
-/bin/rm -f bcftools/{{Makefile,main,vcfnorm}.patch,vcfmocha.c,{beta_binom,genome_rules}.{c,h}} bcftools/plugins/{trio-phase,mochatools,importFMT,extendFMT}.c
-wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{{Makefile,main,vcfnorm}.patch,vcfmocha.c,{beta_binom,genome_rules}.{c,h}}
+/bin/rm -f bcftools/{{Makefile,main}.patch,vcfmocha.c,{beta_binom,genome_rules}.{c,h}} bcftools/plugins/{trio-phase,mochatools,importFMT,extendFMT}.c
+wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{{Makefile,main},vcfmocha.c,{beta_binom,genome_rules}.{c,h}}
 wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools,importFMT,extendFMT}.c
-cd bcftools && patch < Makefile.patch && patch < main.patch && patch < vcfnorm.patch && cd ..
+cd bcftools && patch < Makefile.patch && patch < main.patch && cd ..
 ```
 If for any reason the patches fail with an error message, contact the <a href="mailto:giulio.genovese@gmail.com">author</a> for a fix
 
@@ -369,13 +369,13 @@ If you want to process <b>whole-genome sequence</b> data you need a VCF file wit
 ```
 Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will not <a href="https://github.com/samtools/bcftools/issues/360">split properly</a>
 
-Create a minimal binary VCF
+Create a minimal binary VCF (notice that you will need a version newer than BCFtools 1.10.2 with implemented the <a href="https://github.com/samtools/bcftools/issues/360">--keep-sum</a> option)
 ```
 bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/' | \
   bcftools reheader -h /dev/stdin $vcf | \
   bcftools filter --no-version -Ou -e "FMT/DP<10 | FMT/GQ<20" --set-GT . | \
   bcftools annotate --no-version -Ou -x ID,QUAL,INFO,^FMT/GT,^FMT/AD | \
-  bcftools norm --no-version -Ou -m -any -k | \
+  bcftools norm --no-version -Ou -m -any --keep-sum AD | \
   bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
   bcftools index $dir/$pfx.unphased.bcf
 ```
