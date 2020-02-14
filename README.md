@@ -165,7 +165,7 @@ done
 List of common germline duplications and deletions
 ```
 wget -P $HOME/res ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz{,.tbi}
-bcftools query -i 'AC>1 && END-POS+1>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
+bcftools query -i 'AC>1 && END-POS+1>10000 && SVTYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/res/cnp.grch37.bed
 ```
 
@@ -246,7 +246,8 @@ ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 for chr in {1..22} X Y; do
   (bcftools view --no-version -h ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
     grep -v "^##contig=<ID=[GNh]" | sed 's/^##contig=<ID=MT/##contig=<ID=chrM/;s/^##contig=<ID=\([0-9XY]\)/##contig=<ID=chr\1/'; \
-  bcftools view --no-version -H -c 2 ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
+  bcftools annotate --no-version -x INFO/END ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
+  bcftools view --no-version -H -c 2 | \
   grep -v "[0-9]|\.\|\.|[0-9]" | sed 's/^/chr/') | \
   bcftools norm --no-version -Ou -m -any | \
   bcftools norm --no-version -Ob -o ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -d none -f $ref && \
@@ -258,7 +259,7 @@ Do notice though that the 1000 Genomes project team incorrectly lifted over chro
 List of common germline duplications and deletions
 ```
 wget -P $HOME/res ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/supporting/GRCh38_positions/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.GRCh38.vcf.gz{,.tbi}
-bcftools query -i 'AC>1 && END-POS+1>10000 && TYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
+bcftools query -i 'AC>1 && END-POS+1>10000 && SVTYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "chr%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/res/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.GRCh38.vcf.gz > $HOME/res/cnp.grch38.bed
 ```
 
@@ -352,7 +353,7 @@ If you do not already have a VCF file but you have Illumina or Affymetrix genoty
 Create a minimal binary VCF
 ```
 bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf $vcf \
-  -x ID,QUAL,INFO,^INFO/ALLELE_A,^INFO/ALLELE_B,^FMT/GT,^FMT/BAF,^FMT/LRR && \
+  -x ID,QUAL,^INFO/ALLELE_A,^INFO/ALLELE_B,^FMT/GT,^FMT/BAF,^FMT/LRR && \
   bcftools index -f $dir/$pfx.unphased.bcf
 ```
 
@@ -487,7 +488,7 @@ Preparation steps
 ```
 pfx="..." # output prefix
 thr="..." # number of extra threads to use
-lst="..." # file with list of samples to analyze for asymmetries (e.g. samples with 1p CNN-LOH)
+lst="..." # file with list of samples to analyze for asymmetries (e.g. samples with 1p CN-LOH)
 ```
 
 Call mosaic chromosomal alterations with MoChA
