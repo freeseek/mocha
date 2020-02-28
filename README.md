@@ -98,7 +98,7 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 Add patches and code for plugin
 ```
 /bin/rm -f bcftools/{{Makefile,main}.patch,vcfmocha.c,{beta_binom,genome_rules}.{c,h}} bcftools/plugins/{trio-phase,mochatools,importFMT,extendFMT}.c
-wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{{Makefile,main},vcfmocha.c,{beta_binom,genome_rules}.{c,h}}
+wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{{Makefile,main}.patch,vcfmocha.c,{beta_binom,genome_rules}.{c,h}}
 wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools,importFMT,extendFMT}.c
 cd bcftools && patch < Makefile.patch && patch < main.patch && cd ..
 ```
