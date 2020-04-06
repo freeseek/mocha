@@ -10,6 +10,19 @@ instruments for clonal selection (2019). [DOI: 10.1101/653691]
 ```
 and this website. For any feedback, send an email to giulio.genovese@gmail.com
 
+<!--ts-->
+   * [Usage](#usage)
+   * [Installation](#installation)
+   * [Download resources for GRCh37](#download-resources-for-grch37)
+   * [Download resources for GRCh38](#download-resources-for-grch38)
+   * [Data preparation](#data-preparation)
+   * [Phasing pipeline](#phasing-pipeline)
+   * [Chromosomal alterations pipeline](#chromosomal-alterations-pipeline)
+   * [Allelic imbalance pipeline](#allelic-imbalance-pipeline)
+   * [Plot results](#plot-results)
+   * [Acknowledgements](#acknowledgements)
+<!--te-->
+
 Usage
 =====
 
@@ -464,7 +477,7 @@ for chr in {1..22} X; do
     --prefix $dir/$pfx.chr$chr \
     --lowMemory \
     --noPhoneHome
-  bcftools query -l $dir/$pfx.chr$chr.bcf | \
+  bcftools query -l $dir/$pfx.bcf | \
     bcftools view --no-version -Ob -o $dir/$pfx.chr$chr.dose.bcf -S /dev/stdin $dir/$pfx.chr$chr.dose.vcf.gz
   /bin/rm $dir/$pfx.chr$chr.vcf $dir/$pfx.chr$chr.dose.vcf.gz
 done
