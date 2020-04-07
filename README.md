@@ -26,8 +26,10 @@ and this website. For any feedback, send an email to giulio.genovese@gmail.com
 Usage
 =====
 
+NOTICE: Starting from April 2020 MoChA is distributed as a standalone BCFtools plugin. You have to update `bcftools mocha` to `bcftools +mocha` in your pipelines
+
 ```
-Usage:   bcftools mocha [OPTIONS] <in.vcf>
+Usage:   bcftools +mocha [OPTIONS] <in.vcf>
 
 Required options:
     -r, --rules <assembly>[?]         predefined genome reference rules, 'list' to print available settings, append '?' for details
@@ -80,8 +82,8 @@ HMM Options:
         --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [0.2]
 
 Examples:
-    bcftools mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed
-    bcftools mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -c 1.0 --LRR-weight 0.5
+    bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed
+    bcftools +mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -c 1.0 --LRR-weight 0.5
 ```
 
 Installation
@@ -102,26 +104,25 @@ Preparation steps
 mkdir -p $HOME/bin $HOME/res $HOME/res/kgp && cd /tmp
 ```
 
+We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a>
+
 Download latest version of <a href="https://github.com/samtools/htslib">HTSlib</a> and <a href="https://github.com/samtools/bcftools">BCFtools</a> (if not downloaded already)
 ```
 git clone --branch=develop git://github.com/samtools/htslib.git
 git clone --branch=develop git://github.com/samtools/bcftools.git
 ```
 
-Add patches and code for plugin
+Download plugins code
 ```
-/bin/rm -f bcftools/{{Makefile,main}.patch,vcfmocha.c,{beta_binom,genome_rules}.{c,h}} bcftools/plugins/{trio-phase,mochatools,importFMT,extendFMT}.c
-wget -P bcftools https://raw.githubusercontent.com/freeseek/mocha/master/{{Makefile,main}.patch,vcfmocha.c,{beta_binom,genome_rules}.{c,h}}
-wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{trio-phase,mochatools,importFMT,extendFMT}.c
-cd bcftools && patch < Makefile.patch && patch < main.patch && cd ..
+/bin/rm -f bcftools/plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,importFMT,extendFMT}.c}
+wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,importFMT,extendFMT}.c}
 ```
-If for any reason the patches fail with an error message, contact the <a href="mailto:giulio.genovese@gmail.com">author</a> for a fix
 
 Compile latest version of HTSlib (optionally disable bz2, gcs, and lzma) and BCFtools (make sure you are using gcc version 5 or newer)
 ```
 cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-gcs --disable-lzma && make && cd ..
 cd bcftools && make && cd ..
-/bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,split,trio-phase,mochatools,importFMT,extendFMT}.so} $HOME/bin/
+/bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,importFMT,extendFMT}.so} $HOME/bin/
 ```
 Notice that you will need some functionalities missing from the base version of bcftools to run the pipeline
 
@@ -506,7 +507,7 @@ lst="..." # file with list of samples to analyze for asymmetries (e.g. samples w
 
 Call mosaic chromosomal alterations with MoChA
 ```
-bcftools mocha \
+bcftools +mocha \
   --rules $rule \
   --no-version \
   --output-type b \

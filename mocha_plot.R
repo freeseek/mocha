@@ -38,11 +38,14 @@ for (x in c('argparse', 'data.table', 'ggplot2')) {
   }
 }
 
+# options(bitmapType='cairo')
+
 parser <- ArgumentParser(description = 'Plot MoChA calls from VCF file (version 2019-08-28)')
 parser$add_argument('--rules', metavar = '<assembly>', type = 'character', help = 'genome assembly (e.g. GRCh38)')
 parser$add_argument('--cytoband', metavar = '<cytoband.txt.gz>', type = 'character', help = 'cytoband file')
 parser$add_argument('--wgs', action = 'store_true', help = 'whether the input VCF file contains WGS data')
 parser$add_argument('--mocha', action = 'store_true', help = 'whether the input VCF file contains Ldev/Bdev data')
+parser$add_argument('--no-adjust', action = 'store_true', help = 'for array data whether BAF and LRR should not be adjusted')
 parser$add_argument('--vcf', metavar = '<file.vcf>', type = 'character', required = TRUE, help = 'input VCF file')
 parser$add_argument('--exclude', metavar = '<file.bed>', type = 'character', help = 'regions to exclude listed in a file')
 parser$add_argument('--pdf', metavar = '<file.pdf>', type = 'character', help = 'output PDF file')
@@ -98,7 +101,7 @@ if (!is.null(args$cytoband)) {
   cen_end <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], max)
   chrs <- unique(df_cyto$chrom)
   modified_chrs <- gsub('MT', '26', gsub('Y', '24', gsub('X', '23', chrs)))
-  ord <- order(as.numeric(modified_chrs))
+  ord <- order(suppressWarnings(as.numeric(modified_chrs)))
   chrs <- chrs[ord]
 
   df_cen <- rbind(melt(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart', 'chromEnd', 'chromStart')], c('chrom', 'name', -1, -.5, 0)), id = c('chrom', 'name')),
@@ -126,13 +129,18 @@ if (!is.null(args$cytoband)) {
 }
 
 # load main table from VCF file
-fmt <- '"[%CHROM\\t%POS\\t%REF\\t%ALT\\t%SAMPLE\\t%GT\\t'
+fmt <- '"[%CHROM\\t%POS\\t%REF\\t%ALT\\t%SAMPLE\\t%GT'
 names <- c('CHROM', 'POS', 'REF', 'ALT', 'SAMPLE', 'GT')
 if (!args$wgs) {
-  fmt <- paste0(fmt, '%ALLELE_A\\t%ALLELE_B\\t%BAF\\t%LRR')
+  if (!args$no_adjust)
+  {
+    fmt <- paste0(fmt, '\\t%INFO/ADJUST_BAF_LRR{0}\\t%INFO/ADJUST_BAF_LRR{1}\\t%INFO/ADJUST_BAF_LRR{2}\\t%INFO/ADJUST_BAF_LRR{3}')
+    names <- c(names, c('BAF_AB', 'LRR_AA', 'LRR_AB', 'LRR_BB'))
+  }
+  fmt <- paste0(fmt, '\\t%INFO/ALLELE_A\\t%INFO/ALLELE_B\\t%BAF\\t%LRR')
   names <- c(names, c('ALLELE_A', 'ALLELE_B', 'BAF', 'LRR'))
 } else {
-  fmt <- paste0(fmt, '%AD{0}\\t%AD{1}')
+  fmt <- paste0(fmt, '\\t%AD{0}\\t%AD{1}')
   names <- c(names, c('AD0', 'AD1'))
 }
 if (args$mocha) {
@@ -163,30 +171,48 @@ if (packageVersion("data.table") < '1.11.6') {
   df <- setNames(fread(cmd = cmd, sep = '\t', header = FALSE, na.strings = '.', colClasses = list(character = c(1,3:6)), data.table = FALSE), names)
 }
 
-# fix non-reference SNPs
-nonref <- grepl(',', df$ALT)
-if (!args$wgs) {
-  df$GT[nonref & df$GT == '1/1'] <- '0/0'
-  df$GT[nonref & df$GT == '1/2'] <- '0/1'
-  df$GT[nonref & df$GT == '2/2'] <- '1/1'
-} else {
+allele_0 <- lapply(df$GT, function(x) suppressWarnings(as.numeric(substr(x,1,1))))
+phased <- lapply(df$GT, function(x) substr(x,2,2)) == '|'
+allele_1 <- lapply(df$GT, function(x) suppressWarnings(as.numeric(substr(x,3,3))))
+if (args$wgs) {
+  nonref <- grepl(',', df$ALT)
   if (any(nonref)) df <- df[!nonref,]
+  df$ALLELE_A <- 0
+  df$ALLELE_B <- 1
+}
+df$GTS <- 'NC'
+df$GTS[allele_0 == df$ALLELE_A & allele_1 == df$ALLELE_A] <- 'AA'
+df$GTS[allele_0 == df$ALLELE_A & allele_1 == df$ALLELE_B | 
+       allele_0 == df$ALLELE_B & allele_1 == df$ALLELE_A] <- 'AB'
+df$GTS[allele_0 == df$ALLELE_B & allele_1 == df$ALLELE_B] <- 'BB'
+df$PHASE <- 0
+df$PHASE[phased & allele_0 == df$ALLELE_A & allele_1 == df$ALLELE_B] <- 1
+df$PHASE[phased & allele_0 == df$ALLELE_B & allele_1 == df$ALLELE_A] <- -1
+if ( !args$wgs && !args$no_adjust )
+{
+  idx <- !is.na(df$BAF) & (df$GTS == 'NC' & (df$BAF > df$BAF_AB) & (df$BAF - df$BAF_AB < 1) | df$GTS == 'AB')
+  df$BAF[idx] <- df$BAF[idx] - df$BAF_AB[idx]
+
+  idx <- !is.na(df$LRR) & df$GTS == 'AB'
+  df$LRR[idx] <- df$LRR[idx] - df$LRR_AB[idx]
+  
+  idx <- !is.na(df$LRR) & df$GTS == 'AA'
+  df$LRR[idx] <- df$LRR[idx] - df$LRR_AA[idx]
+
+  idx <- !is.na(df$LRR) & df$GTS == 'BB'
+  df$LRR[idx] <- df$LRR[idx] - df$LRR_BB[idx]
 }
 
 # fills in variables of interest
 df$CHROM <- as.factor(gsub('^chr', '', gsub('^chrM', 'MT', df$CHROM)))
 ord <- order(as.numeric(gsub('MT', '26', gsub('Y', '24', gsub('X', '23', levels(df$CHROM))))))
 df$CHROM <- factor(df$CHROM, levels(df$CHROM)[ord])
-df$UNPHASED_GT <- df$GT
-df$UNPHASED_GT[df$GT == '0/0' | df$GT == '0|0'] <- '0/0'
-df$UNPHASED_GT[df$GT == '1/1' | df$GT == '1|1'] <- '1/1'
-df$UNPHASED_GT[df$GT == '0/1' | df$GT == '1/0' | df$GT == '0|1' | df$GT == '1|0'] <- '0/1'
 if (!args$wgs) {
   df$eLRR <- exp(df$LRR)
   df$pBAF <- NaN
-  idx <- (df$GT == '0|1' & df$ALLELE_B == 1) | (df$GT == '1|0' & df$ALLELE_B == 0)
+  idx <- df$PHASE == 1
   df$pBAF[idx] <- df$BAF[idx]
-  idx <- (df$GT == '0|1' & df$ALLELE_B == 0) | (df$GT == '1|0' & df$ALLELE_B == 1)
+  idx <- df$PHASE == -1
   df$pBAF[idx] <- 1 - df$BAF[idx]
   cov_var <- 'eLRR'
   plot_vars <- c('eLRR', 'BAF', 'pBAF')
@@ -194,20 +220,20 @@ if (!args$wgs) {
 } else {
   df$DP <- df$AD0 + df$AD1
   # subset to variants that are heterozygous
-  df <- df[df$UNPHASED_GT == '0/1' & df$DP > args$min_depth,]
+  df <- df[df$GTS == 'AB' & df$DP > args$min_depth,]
   df$BAF <- NaN
   df$BAF <- df$AD1/ df$DP
   df$HD0 <- NaN
   df$HD1 <- NaN
-  df$HD0[df$GT == '0|1'] <- df$AD0[df$GT == '0|1']
-  df$HD1[df$GT == '0|1'] <- df$AD1[df$GT == '0|1']
-  df$HD0[df$GT == '1|0'] <- df$AD1[df$GT == '1|0']
-  df$HD1[df$GT == '1|0'] <- df$AD0[df$GT == '1|0']
+  df$HD0[df$PHASE == 1] <- df$AD0[df$PHASE == 1]
+  df$HD1[df$PHASE == 1] <- df$AD1[df$PHASE == 1]
+  df$HD0[df$PHASE == -1] <- df$AD1[df$PHASE == -1]
+  df$HD1[df$PHASE == -1] <- df$AD0[df$PHASE == -1]
   if (args$clump == 1)
   {
     df$pBAF <- NaN
-    df$pBAF[df$GT == '0|1'] <- df$BAF[df$GT == '0|1']
-    df$pBAF[df$GT == '1|0'] <- 1 - df$BAF[df$GT == '1|0']
+    df$pBAF[df$PHASE == 1] <- df$BAF[df$PHASE == 1]
+    df$pBAF[df$PHASE == -1] <- 1 - df$BAF[df$PHASE == -1]
   }
   cov_var <- 'DP'
   plot_vars <- c('DP', 'pBAF')
@@ -267,11 +293,11 @@ if (length(regions)>0) {
     write(paste('Subsetting region:', regions[i]), stderr())
     idx <- df$CHROM == chroms[i] & df$POS >= lefts[i] & df$POS <= rights[i]
     if (!args$wgs) {
-      df_melt <- melt(df[idx, c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE', 'eLRR', 'BAF', 'pBAF')], id.vars = c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE'))
-      df_melt$value[df_melt$variable == 'eLRR' & df_melt$value > 2 | df_melt$variable == 'pBAF' & abs(df_melt$value - 0.5) > 0.25] <- NA
+      df_melt <- melt(df[idx, c('POS', 'COLOR', 'GTS', 'SAMPLE', 'eLRR', 'BAF', 'pBAF')], id.vars = c('POS', 'COLOR', 'GTS', 'SAMPLE'))
+      df_melt$value[df_melt$variable == 'eLRR' & df_melt$value > 2 | df_melt$variable == 'pBAF' & abs(df_melt$value - 0.5) > 0.35] <- NA
     } else {
       if (args$clump == 1) {
-        df_melt <- melt(df[idx, c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE', 'DP', 'BAF', 'pBAF')], id.vars = c('POS', 'COLOR', 'UNPHASED_GT', 'SAMPLE'))
+        df_melt <- melt(df[idx, c('POS', 'COLOR', 'GTS', 'SAMPLE', 'DP', 'BAF', 'pBAF')], id.vars = c('POS', 'COLOR', 'GTS', 'SAMPLE'))
         medianDP <- median(df_melt$value[df_melt$variable == 'DP'], na.rm = TRUE)
         df_melt$value[df_melt$variable == 'DP' & df_melt$value > 2 * medianDP] <- NA
       } else {
@@ -300,9 +326,9 @@ if (length(regions)>0) {
     if (sum(idx) >= args$roll) df_melt$smooth[idx] <- filter(df_melt$value[idx], rep(1 / args$roll, args$roll))
 
     write(paste('Plotting region:', regions[i]), stderr())
-    if ('UNPHASED_GT' %in% names(df_melt)) {
-      p <- ggplot(df_melt[!is.na(df_melt$value),], aes(x = POS/1e6, y = value, color = COLOR, shape = UNPHASED_GT)) +
-        scale_shape_manual(guide = FALSE, values = c('0/0' = 3, '0/1' = 8, '1/1' = 4, './.' = 1))
+    if ('GTS' %in% names(df_melt)) {
+      p <- ggplot(df_melt[!is.na(df_melt$value),], aes(x = POS/1e6, y = value, color = COLOR, shape = GTS)) +
+        scale_shape_manual(guide = FALSE, values = c('AA' = 3, 'AB' = 8, 'BB' = 4, 'NC' = 1))
     } else {
       p <- ggplot(df_melt[!is.na(df_melt$value),], aes(x = POS/1e6, y = value, color = COLOR))
     }
@@ -315,14 +341,14 @@ if (length(regions)>0) {
       facet_grid(variable ~ SAMPLE, scales = 'free_y') +
       coord_cartesian(xlim = c(lefts[i], rights[i])/1e6, expand = FALSE)
     if (all(is.na(df_melt$COLOR))) {
-      p <- p + geom_point(size = 1/2, color = 'gray50')
+      p <- p + geom_point(size = 1/4, color = 'gray50')
     } else {
-      p <- p + geom_point(size = 1/2)
+      p <- p + geom_point(size = 1/4)
     }
     p <- p + geom_hline(data = df_horiz, aes(yintercept = value), linetype = 'dashed', color = 'black', size = 1/4) +
       geom_line(data = df_melt[!is.na(df_melt$smooth),], aes(y = smooth, shape = NULL), color = 'blue', size = 1/4)
     if (!is.null(args$cytoband)) {
-      bottom <- floor(min(0.25, df_melt$value[df_melt$variable == 'pBAF'], na.rm = TRUE) * 20) / 20
+      bottom <- floor(min(0.35, df_melt$value[df_melt$variable == 'pBAF'], na.rm = TRUE) * 20) / 20
       p <- p  +
         geom_rect(data = df_cyto[df_cyto$chrom == chroms[i] & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = bottom -0.05, ymax = bottom, color = 'black', size = 1/4, show.legend = FALSE) +
         geom_polygon(data = df_cen[df_cen$chrom == chroms[i],], aes(x = value/1e6, y = bottom + 0.05 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8) +
