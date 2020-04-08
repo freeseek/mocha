@@ -41,7 +41,7 @@
 #include "beta_binom.h"
 #include "bcftools.h"
 
-#define MOCHA_VERSION "2020-04-07"
+#define MOCHA_VERSION "2020-04-08"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -2642,7 +2642,7 @@ static int bcf_check_baf_flipped(const int8_t *gts, const bcf_fmt_t *baf_fmt, in
 }
 
 // read one contig
-static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
+static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 {
 	int rid = model->rid;
 	bcf_hdr_t *hdr = bcf_sr_get_header(sr, 0);
@@ -2932,8 +2932,6 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 	free(ad1);
 	free(last_het_pos);
 	free(last_pos);
-
-	return i;
 }
 
 /*********************************
@@ -3512,17 +3510,17 @@ int run(int argc, char *argv[])
 
 	for (int rid = 0; rid < hdr->n[BCF_DT_CTG]; rid++) {
 		model.rid = rid;
-		int nret = get_contig(sr, sample, &model);
-		if (nret <= 0)
+		get_contig(sr, sample, &model);
+		if (model.n <= 0)
 			continue;
 		if (!(model.flags & NO_LOG)) {
 			if (model.flags & NO_BAF_FLIP || model.n_flipped == 0)
-				fprintf(log_file, "Read %d variants from contig %s\n", nret,
+				fprintf(log_file, "Read %d variants from contig %s\n", model.n,
 					bcf_hdr_id2name(hdr, rid));
 			else
 				fprintf(log_file,
 					"Read %d variants (%d BAF flipped) from contig %s\n",
-					nret, model.n_flipped, bcf_hdr_id2name(hdr, rid));
+					model.n, model.n_flipped, bcf_hdr_id2name(hdr, rid));
 		}
 		if (model.genome_rules->length[rid] < model.locus_arr[model.n - 1].pos)
 			model.genome_rules->length[rid] = model.locus_arr[model.n - 1].pos;
@@ -3554,17 +3552,17 @@ int run(int argc, char *argv[])
 
 	for (int rid = 0; rid < hdr->n[BCF_DT_CTG]; rid++) {
 		model.rid = rid;
-		int nret = get_contig(sr, sample, &model);
-		if (nret <= 0)
+		get_contig(sr, sample, &model);
+		if (model.n <= 0)
 			continue;
 		if (!(model.flags & NO_LOG)) {
 			if (model.flags & NO_BAF_FLIP || model.n_flipped == 0)
-				fprintf(log_file, "Read %d variants from contig %s\n", nret,
+				fprintf(log_file, "Read %d variants from contig %s\n", model.n,
 					bcf_hdr_id2name(hdr, rid));
 			else
 				fprintf(log_file,
 					"Read %d variants (%d BAF flipped) from contig %s\n",
-					nret, model.n_flipped, bcf_hdr_id2name(hdr, rid));
+					model.n, model.n_flipped, bcf_hdr_id2name(hdr, rid));
 		}
 		for (int j = 0; j < nsmpl; j++) {
 			if (model.cnp_idx)
@@ -3574,7 +3572,7 @@ int run(int argc, char *argv[])
 		}
 
 		if (output_fname) {
-			nret = put_contig(sr, sample, &model, out_fh, out_hdr);
+			int nret = put_contig(sr, sample, &model, out_fh, out_hdr);
 			if (!(model.flags & NO_LOG))
 				fprintf(log_file, "Written %d variants for contig %s\n", nret,
 					bcf_hdr_id2name(hdr, rid));

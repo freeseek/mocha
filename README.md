@@ -91,7 +91,7 @@ Installation
 
 Install basic tools (Debian/Ubuntu specific if you have admin privileges):
 ```
-sudo apt install wget autoconf zlib1g-dev gzip unzip samtools bedtools r-cran-optparse r-cran-data.table r-cran-ggplot2
+sudo apt install wget autoconf zlib1g-dev gzip unzip samtools bedtools bcftools r-cran-optparse r-cran-data.table r-cran-ggplot2
 ```
 
 Optionally, you can install these libraries to activate further HTSlib features:
@@ -104,7 +104,7 @@ Preparation steps
 mkdir -p $HOME/bin $HOME/res $HOME/res/kgp && cd /tmp
 ```
 
-We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a>
+We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a>. However, notice that you will require a copy of BCFtools 1.10 or newer (available with Ubuntu 20.04)
 
 Download latest version of <a href="https://github.com/samtools/htslib">HTSlib</a> and <a href="https://github.com/samtools/bcftools">BCFtools</a> (if not downloaded already)
 ```
@@ -402,7 +402,7 @@ n=$(bcftools query -l $dir/$pfx.unphased.bcf|wc -l); \
 ns=$((n*98/100)); \
 echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
   bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
-  bcftools +fill-tags --no-version -Ou -- -t NS,ExcHet | \
+  bcftools +fill-tags --no-version -Ou -t ^Y,MT,chrY,chrM -- -t NS,ExcHet | \
   bcftools +mochatools --no-version -Ou -- -x $sex -G | \
   bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
     -i 'FILTER!="." && FILTER!="PASS" || JK<.02 || NS<'$ns' || ExcHet<1e-6 || AC_Sex_Test>6' \
