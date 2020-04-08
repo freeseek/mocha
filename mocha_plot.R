@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2019 Giulio Genovese
+#  Copyright (C) 2017-2020 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,72 +25,40 @@
 #  THE SOFTWARE.
 ###
 
-# TODO: consider changing argparse to r-cran-optparse to remove the python dependency
+library(optparse)
+library(data.table)
+library(ggplot2)
 
-for (x in c('argparse', 'data.table', 'ggplot2')) {
-  if ( x %in% .packages(all.available = TRUE) ) {
-    suppressPackageStartupMessages(library(x, character.only = TRUE))
-  } else {
-    cat(paste0('package ', x, ' is not available. To install ', x, ' run:\n'))
-    cat('Rscript -e \'dir.create(path = Sys.getenv("R_LIBS_USER"), showWarnings = FALSE, recursive = TRUE)\' \\\n')
-    cat(paste0('        -e \'install.packages(pkgs = "', x, '", lib = Sys.getenv("R_LIBS_USER"), repos = "https://cran.rstudio.com")\'\n'))
-    q()
-  }
-}
+parser <- OptionParser('usage: mocha_plot.R [options] --rules <GRCh37|GRCh38>|--cytoband <cytoband.txt.gz> --vcf <file.vcf> --samples <list>')
+parser <- add_option(parser, c('--rules'), type = 'character', help = 'genome assembly (e.g. GRCh38)', metavar = '<assembly>')
+parser <- add_option(parser, c('--cytoband'), type = 'character', help = 'cytoband file', metavar = '<cytoband.txt.gz>')
+parser <- add_option(parser, c('--wgs'), action = 'store_true', default = FALSE, help = 'whether the input VCF file contains WGS data')
+parser <- add_option(parser, c('--mocha'), action = 'store_true', default = FALSE, help = 'whether the input VCF file contains Ldev/Bdev data')
+parser <- add_option(parser, c('--no-adjust'), action = 'store_true', default = FALSE, help = 'for array data whether BAF and LRR should not be adjusted')
+parser <- add_option(parser, c('--vcf'), type = 'character', help = 'input VCF file', metavar = '<file.vcf>')
+parser <- add_option(parser, c('--exclude'), type = 'character', help = 'regions to exclude listed in a file', metavar = '<file.bed>')
+parser <- add_option(parser, c('--pdf'), type = 'character', help = 'output PDF file', metavar = '<file.pdf>')
+parser <- add_option(parser, c('--png'), type = 'character', help = 'output PNG file', metavar = '<file.png>')
+parser <- add_option(parser, c('--width'), type = 'integer', default = 7, help = 'inches width of the output file [7]', metavar = '<integer>')
+parser <- add_option(parser, c('--height'), type = 'integer', default = 7, help = 'inches height of the output file [7]', metavar = '<integer>')
+parser <- add_option(parser, c('--samples'), type = 'character', help = 'comma-separated list of samples to plot', metavar = '<list>')
+parser <- add_option(parser, c('--regions'), type = 'character', help = 'comma-separated list of regions to plot [all]', metavar = '<list>')
+parser <- add_option(parser, c('--fontsize'), type = 'integer', default = 12, help = 'font size [12]', metavar = '<integer>')
+parser <- add_option(parser, c('--roll'), type = 'integer', default = 20, help = 'width of the rolling window [20]', metavar = '<integer>')
+parser <- add_option(parser, c('--min-depth'), type = 'integer', default = 10, help = 'minimum depth coverage (WGS data only) [10]', metavar = '<integer>')
+parser <- add_option(parser, c('--clump'), type = 'integer', default = 10, help = 'width of the clumping window (WGS data only) [10]', metavar = '<integer>')
+args <- parse_args(parser, commandArgs(trailingOnly = TRUE), convert_hyphens_to_underscores = TRUE)
 
-# options(bitmapType='cairo')
-
-parser <- ArgumentParser(description = 'Plot MoChA calls from VCF file (version 2019-08-28)')
-parser$add_argument('--rules', metavar = '<assembly>', type = 'character', help = 'genome assembly (e.g. GRCh38)')
-parser$add_argument('--cytoband', metavar = '<cytoband.txt.gz>', type = 'character', help = 'cytoband file')
-parser$add_argument('--wgs', action = 'store_true', help = 'whether the input VCF file contains WGS data')
-parser$add_argument('--mocha', action = 'store_true', help = 'whether the input VCF file contains Ldev/Bdev data')
-parser$add_argument('--no-adjust', action = 'store_true', help = 'for array data whether BAF and LRR should not be adjusted')
-parser$add_argument('--vcf', metavar = '<file.vcf>', type = 'character', required = TRUE, help = 'input VCF file')
-parser$add_argument('--exclude', metavar = '<file.bed>', type = 'character', help = 'regions to exclude listed in a file')
-parser$add_argument('--pdf', metavar = '<file.pdf>', type = 'character', help = 'output PDF file')
-parser$add_argument('--png', metavar = '<file.png>', type = 'character', help = 'output PNG file')
-parser$add_argument('--width', metavar = '<integer>', type = 'integer', default = 7, help = 'inches width of the output file [7]')
-parser$add_argument('--height', metavar = '<integer>', type = 'integer', default = 7, help = 'inches height of the output file [7]')
-parser$add_argument('--samples', metavar = '<list>', type = 'character', required = TRUE, help = 'list of samples to plot')
-parser$add_argument('--regions', metavar = '<file.pdf>', type = 'character', default = 'all', help = 'comma-separated list of regions to plot [all]')
-parser$add_argument('--fontsize', metavar = '<integer>', type = 'integer', default = 12, help = 'font size [12]')
-parser$add_argument('--roll', metavar = '<integer>', type = 'integer', default = 20, help = 'width of the rolling window [20]')
-parser$add_argument('--min-depth', metavar = '<integer>', type = 'integer', default = 10, help = 'minimum depth coverage (WGS data only) [10]')
-parser$add_argument('--clump', metavar = '<integer>', type = 'integer', default = 10, help = 'width of the clumping window (WGS data only) [10]')
-args <- parser$parse_args(commandArgs(trailingOnly = TRUE))
-
-if (!is.null(args$rules) && !is.null(args$cytoband))
-{
-  cat('cannot use --rules and --cytoband at the same time\n')
-  q()
-}
-
-if (is.null(args$pdf) && is.null(args$png))
-{
-  cat('either --pdf or --png is required\n')
-  q()
-}
-
-if (!is.null(args$pdf) && !is.null(args$png))
-{
-  cat('cannot use --pdf and --png at the same time\n')
-  q()
-}
-
+if (is.null(args$vcf)) {print_help(parser); stop('option --vcf is required')}
+if (is.null(args$samples)) {print_help(parser); stop('option --samples is required')}
+if (!is.null(args$rules) && !is.null(args$cytoband)) {print_help(parser); stop('either --rules or --cytoband is required')}
+if (!is.null(args$rules) && !is.null(args$cytoband)) {print_help(parser); stop('cannot use --rules and --cytoband at the same time')}
+if (!is.null(args$rules) && args$rules != 'GRCh37' && args$rules != 'GRCh38') {print_help(parser); stop('--rules accepts only GRCh37 or GRCh38')}
+if (is.null(args$pdf) && is.null(args$png)) {print_help(parser); stop('either --pdf or --png is required')}
+if (!is.null(args$pdf) && !is.null(args$png)) {print_help(parser); stop('cannot use --pdf and --png at the same time')}
 regions <- unlist(strsplit(args$regions, ','))
-if (!is.null(args$png) && length(regions) > 1)
-{
-  cat('cannot print a png file with more than one image\n')
-  q()
-}
-
-if (!is.null(args$png) && !capabilities('png'))
-{
-  cat('unable to start device PNG: no png support in this version of R\n')
-  cat('you need to reinstall R with support for PNG to use the --png option\n')
-  q()
-}
+if (!is.null(args$png) && length(regions) > 1) {print_help(parser); stop('cannot print a png file with more than one image')}
+if (!is.null(args$png) && !capabilities('png')) {print_help(parser); stop('unable to start device PNG: no png support in this version of R\nyou need to reinstall R with support for PNG to use the --png option')}
 
 if (!is.null(args$cytoband)) {
   df_cyto <- setNames(read.table(args$cytoband, sep = '\t', header = FALSE), c('chrom', 'chromStart', 'chromEnd', 'name', 'gieStain'))
@@ -117,9 +85,6 @@ if (!is.null(args$cytoband)) {
     chrlen <- c(248956422, 242193529, 198295559, 190214555, 181538259, 170805979, 159345973, 145138636, 138394717, 133797422, 135086622, 133275309, 114364328, 107043718, 101991189, 90338345, 83257441, 80373285, 58617616, 64444167, 46709983, 50818468, 156040895, 57227415)
     cen_beg <- c(122026459, 92188145, 90772458, 49712061, 46485900, 58553888, 58169653, 44033744, 43389635, 39686682, 51078348, 34769407, 0, 0, 0, 36311158, 22813679, 15460899, 24498980, 26436232, 0, 0, 58605579, 10316944)
     cen_end <- c(143184587, 94090557, 93655574, 51743951, 50059807, 59829934, 61528020, 45877265, 60518558, 41593521, 54425074, 37185252, 18051248, 18173523, 19725254, 46280682, 26616164, 20861206, 27190874, 30038348, 12915808, 15054318, 62412542, 10544039)
-  } else {
-    cat("Rules parameter needs to be \"GRCh37\" or \"GRCh38\"\n")
-    q()
   }
   chrs <- c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y')
   names(chrlen) <- chrs

@@ -91,7 +91,7 @@ Installation
 
 Install basic tools (Debian/Ubuntu specific if you have admin privileges):
 ```
-sudo apt install wget autoconf zlib1g-dev gzip unzip samtools bedtools
+sudo apt install wget autoconf zlib1g-dev gzip unzip samtools bedtools r-cran-optparse r-cran-data.table r-cran-ggplot2
 ```
 
 Optionally, you can install these libraries to activate further HTSlib features:
@@ -642,14 +642,14 @@ sudo apt install r-cran-ggplot2 r-cran-data.table
 
 Download R scripts
 ```
-/bin/rm -f $HOME/bin/{plot_summary,mocha_plot}.R
-wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/{plot_summary,mocha_plot}.R
-chmod a+x $HOME/bin/{plot_summary,mocha_plot}.R
+/bin/rm -f $HOME/bin/{summary,mocha}_plot.R
+wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/{summary,mocha}_plot.R
+chmod a+x $HOME/bin/{summary,mocha}_plot.R
 ```
 
 Generate summary plot
 ```
-plot_summary.R \
+summary_plot.R \
   --pdf $dir/$pfx.pdf \
   --stats $dir/$pfx.stats.tsv \
   --calls $dir/$pfx.mocha.tsv
