@@ -27,6 +27,7 @@
 
 library(optparse)
 library(ggplot2)
+options(bitmapType = 'cairo')
 
 parser <- OptionParser('usage: summary_plot.R [options] --stats <file.tsv> --calls <file.tsv> --pdf <file.pdf>')
 parser <- add_option(parser, c('--stats'), type = 'character', help = 'input MoChA stats file', metavar = '<file.tsv>')

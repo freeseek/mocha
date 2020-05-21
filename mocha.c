@@ -41,7 +41,7 @@
 #include "beta_binom.h"
 #include "bcftools.h"
 
-#define MOCHA_VERSION "2020-04-08"
+#define MOCHA_VERSION "2020-05-20"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -53,9 +53,9 @@
 #define BDEV_LRR_BAF_DFLT "-2.0,-4.0,-6.0,10.0,6.0,4.0"
 #define BDEV_BAF_PHASE_DFLT "6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0"
 #define MIN_DST_DFLT "400"
-#define MEDIAN_BAF_ADJ_DFLT "5"
-#define MEDIAN_LRR_ADJ_DFLT "5"
-#define ORDER_LRR_GC_DFLT "2"
+#define ADJ_BAF_LRR_DFLT "5"
+#define REGRESS_BAF_LRR_DFLT "15"
+#define LRR_GC_ORDER_DFLT "2"
 #define MAX_ORDER 5
 #define XY_PRB_DFLT "1e-09"
 #define ERR_PRB_DFLT "1e-04"
@@ -64,8 +64,8 @@
 #define CEN_PRB_DFLT "1e-04"
 #define SHORT_ARM_CHRS_DFLT "13,14,15,21,22,chr13,chr14,chr15,chr21,chr22"
 #define LRR_BIAS_DFLT "0.2"
-#define LRR_HAP2DIP_DFLT                                                                       \
-	"0.45" // https://www.illumina.com/documents/products/technotes/technote_cnv_algorithms.pdf
+// https://www.illumina.com/documents/products/technotes/technote_cnv_algorithms.pdf
+#define LRR_HAP2DIP_DFLT "0.45"
 
 #define FLT_INCLUDE (1 << 0)
 #define FLT_EXCLUDE (1 << 1)
@@ -74,7 +74,7 @@
 #define NO_ANNOT (1 << 4)
 #define USE_SHORT_ARMS (1 << 5)
 #define USE_CENTROMERES (1 << 6)
-#define NO_BAF_FLIP (1 << 7)
+#define USE_NO_RULES_CHRS (1 << 7)
 
 #define LRR 0
 #define BAF 1
@@ -115,7 +115,7 @@ typedef struct {
 	int pos;
 	int allele_a;
 	int allele_b;
-	float adjust[4];
+	float adjust[3][3]; // shift
 } locus_t;
 
 typedef struct {
@@ -124,17 +124,15 @@ typedef struct {
 	float flip_log_prb;
 	float tel_log_prb;
 	float cen_log_prb;
-	// TODO make this an array
 	float *bdev_lrr_baf, *bdev_baf_phase;
 	int bdev_lrr_baf_n, bdev_baf_phase_n;
 	int min_dst;
 	float lrr_cutoff;
 	float lrr_hap2dip;
-	float lrr_auto2sex;
 	float lrr_bias;
-	int median_baf_adj;
-	int median_lrr_adj;
-	int order_lrr_gc;
+	int adj_baf_lrr;
+	int regress_baf_lrr;
+	int lrr_gc_order;
 	int flags;
 	genome_rules_t *genome_rules;
 	regidx_t *cnp_idx;
@@ -266,7 +264,6 @@ static inline float int16_to_float(int16_t in)
  * LRR AND COVERAGE POLYNOMIAL REGRESSION *
  ******************************************/
 
-// the following alternative code snippets were considered to perform GC regression:
 // https://stackoverflow.com/questions/5083465/fast-efficient-least-squares-fit-algorithm-in-c
 // https://github.com/natedomin/polyfit/blob/master/polyfit.c
 // https://software.intel.com/sites/products/documentation/doclib/mkl_sa/11/mkl_lapack_examples/sgels_ex.c.htm
@@ -1686,9 +1683,11 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 		}
 	}
 
-	if (model->order_lrr_gc >= 0)
+	if (model->lrr_gc_order > 0 && n > model->lrr_gc_order)
 		adjust_lrr(lrr, model->gc_arr, n, self->vcf_imap_arr, self->stats.coeffs,
-			   model->order_lrr_gc);
+			   model->lrr_gc_order);
+	else if (model->lrr_gc_order != -1)
+		adjust_lrr(lrr, model->gc_arr, n, self->vcf_imap_arr, self->stats.coeffs, 0);
 
 	int8_t *bdev_phase = (int8_t *)calloc(n, sizeof(int8_t));
 	int *pos = (int *)malloc(n * sizeof(int));
@@ -1701,14 +1700,12 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 	int16_t *ldev = (int16_t *)calloc(n, sizeof(int16_t));
 	int16_t *bdev = (int16_t *)calloc(n, sizeof(int16_t));
 
-	// TODO do I need special normalization for the X nonPAR region?
-	if (model->rid == model->genome_rules->x_rid) {
+	if (model->rid == model->genome_rules->x_rid && self->sex == SEX_MAL) {
 		for (int i = 0; i < n; i++) {
 			if (pos[i] > model->genome_rules->x_nonpar_beg
 			    && pos[i] < model->genome_rules->x_nonpar_end) {
-				lrr[i] = (self->sex == SEX_MAL) ? NAN
-								: lrr[i] - model->lrr_auto2sex;
-				baf[i] = (self->sex == SEX_MAL) ? NAN : baf[i];
+				lrr[i] = NAN;
+				baf[i] = NAN;
 			}
 		}
 	}
@@ -2259,21 +2256,24 @@ static void sample_stats(sample_t *self, const model_t *model)
 			(float)conc / (float)(conc + disc);
 		self->stats_arr[self->n_stats - 1].baf_auto =
 			get_baf_auto_corr(baf, self->phase_arr, n, NULL);
-		if (model->order_lrr_gc == 0) {
-			self->stats_arr[self->n_stats - 1].coeffs[0] = get_median(lrr, n, NULL);
-		}
 		// performs polynomial regression for LRR
-		else if (model->order_lrr_gc > 0) {
+		if (model->lrr_gc_order > 0 && n > model->lrr_gc_order) {
 			float tss = get_tss(lrr, n);
-			polyfit(lrr, model->gc_arr, n, self->vcf_imap_arr, model->order_lrr_gc,
-				self->stats_arr[self->n_stats - 1].coeffs);
+			int ret = polyfit(lrr, model->gc_arr, n, self->vcf_imap_arr,
+					  model->lrr_gc_order,
+					  self->stats_arr[self->n_stats - 1].coeffs);
+			if (ret < 0)
+				error("Polynomial regression failed\n");
 			adjust_lrr(lrr, model->gc_arr, n, self->vcf_imap_arr,
 				   self->stats_arr[self->n_stats - 1].coeffs,
-				   model->order_lrr_gc);
+				   model->lrr_gc_order);
 			self->stats_arr[self->n_stats - 1].coeffs[0] +=
 				get_median(lrr, n, NULL); // further adjusts by median
 			float rss = get_tss(lrr, n);
 			self->stats_arr[self->n_stats - 1].rel_ess = 1.0f - rss / tss;
+		} else if (model->lrr_gc_order != -1) {
+			self->stats_arr[self->n_stats - 1].coeffs[0] = get_median(lrr, n, NULL);
+			self->stats_arr[self->n_stats - 1].rel_ess = NAN;
 		}
 		// compute autocorrelation after GC correction
 		self->stats_arr[self->n_stats - 1].lrr_auto = get_lrr_auto_corr(lrr, n, NULL);
@@ -2292,8 +2292,8 @@ static void sample_summary(sample_t *self, int n, model_t *model)
 
 	for (int i = 0; i < n; i++) {
 		hts_expand(float,
-			   self[i].n_stats *(model->order_lrr_gc < 0 ? 1
-								     : model->order_lrr_gc + 1),
+			   self[i].n_stats *(model->lrr_gc_order < 0 ? 1
+								     : model->lrr_gc_order + 1),
 			   m_tmp, tmp_arr);
 
 		for (int j = 0; j < self[i].n_stats; j++)
@@ -2316,20 +2316,20 @@ static void sample_summary(sample_t *self, int n, model_t *model)
 		self[i].stats.baf_auto = get_median(tmp_arr, self[i].n_stats, NULL);
 
 		self[i].adjlrr_sd = self[i].stats.lrr_sd;
-		if (model->order_lrr_gc == 0) {
+		if (model->lrr_gc_order == 0) {
 			for (int j = 0; j < self[i].n_stats; j++)
 				tmp_arr[j] = self[i].stats_arr[j].coeffs[0];
 			self[i].stats.coeffs[0] = get_median(tmp_arr, self[i].n_stats, NULL);
-		} else if (model->order_lrr_gc > 0 && self[i].n_stats > 0) {
+		} else if (model->lrr_gc_order > 0 && self[i].n_stats > 0) {
 			for (int j = 0; j < self[i].n_stats; j++)
-				for (int k = 0; k <= model->order_lrr_gc; k++)
-					tmp_arr[j * (model->order_lrr_gc + 1) + k] =
+				for (int k = 0; k <= model->lrr_gc_order; k++)
+					tmp_arr[j * (model->lrr_gc_order + 1) + k] =
 						self[i].stats_arr[j].coeffs[k];
 			int medoid_idx =
-				get_medoid(tmp_arr, self[i].n_stats, model->order_lrr_gc);
-			for (int k = 0; k <= model->order_lrr_gc; k++)
+				get_medoid(tmp_arr, self[i].n_stats, model->lrr_gc_order);
+			for (int k = 0; k <= model->lrr_gc_order; k++)
 				self[i].stats.coeffs[k] =
-					tmp_arr[medoid_idx * (model->order_lrr_gc + 1) + k];
+					tmp_arr[medoid_idx * (model->lrr_gc_order + 1) + k];
 			for (int j = 0; j < self[i].n_stats; j++)
 				tmp_arr[j] = self[i].stats_arr[j].rel_ess;
 			self[i].stats.rel_ess = get_median(tmp_arr, self[i].n_stats, NULL);
@@ -2343,8 +2343,6 @@ static void sample_summary(sample_t *self, int n, model_t *model)
 	if (model->flags & WGS_DATA) {
 		if (isnan(model->lrr_cutoff))
 			model->lrr_cutoff = -0.3f; // arbitrary cutoff between -M_LN2 and 0
-		if (isnan(model->lrr_auto2sex))
-			model->lrr_auto2sex = 0.0f;
 	}
 
 	// determine LRR cutoff between haploid and diploid
@@ -2370,23 +2368,6 @@ static void sample_summary(sample_t *self, int n, model_t *model)
 			self[i].sex = SEX_FEM;
 	}
 
-	// determine LRR difference between autosomes and sex chromosomes
-	if (isnan(model->lrr_auto2sex)) {
-		int j = 0;
-		for (int i = 0; i < n; i++)
-			if (self[i].sex == SEX_FEM)
-				tmp_arr[j++] = isnan(self[i].stats.lrr_median)
-						       ? self[i].x_nonpar_lrr_median
-						       : self[i].x_nonpar_lrr_median
-								 - self[i].stats.lrr_median;
-		if (j == 0) // if no females are present it doesn't matter
-		{
-			model->lrr_auto2sex = 0.0f;
-		} else {
-			float lrr_females = get_median(tmp_arr, j, NULL);
-			model->lrr_auto2sex = lrr_females;
-		}
-	}
 	free(tmp_arr);
 }
 
@@ -2506,8 +2487,8 @@ static int put_contig(bcf_srs_t *sr, const sample_t *sample, const model_t *mode
 			}
 		}
 		if (!(model->flags & WGS_DATA)) {
-			bcf_update_info_float(out_hdr, line, "ADJUST_BAF_LRR",
-					      &model->locus_arr[i].adjust, 4);
+			bcf_update_info_float(out_hdr, line, "ADJ_COEFF",
+					      model->locus_arr[i].adjust, 9);
 		}
 		if (!(model->flags & NO_ANNOT)) {
 			bcf_update_format_float(out_hdr, line, "Ldev", ldev, (int)nsmpl);
@@ -2532,10 +2513,10 @@ static bcf_hdr_t *print_hdr(htsFile *out_fh, bcf_hdr_t *hdr, int argc, char *arg
 			    int record_cmd_line, int flags)
 {
 	bcf_hdr_t *out_hdr = bcf_hdr_dup(hdr);
-	if (!(flags & WGS_DATA) && bcf_hdr_id2int(out_hdr, BCF_DT_ID, "ADJUST_BAF_LRR") < 0)
+	if (!(flags & WGS_DATA) && bcf_hdr_id2int(out_hdr, BCF_DT_ID, "ADJ_COEFF") < 0)
 		bcf_hdr_append(
 			out_hdr,
-			"##INFO=<ID=ADJUST_BAF_LRR,Number=4,Type=Float,Description=\"Adjust values for BAF and LRR\">");
+			"##INFO=<ID=ADJ_COEFF,Number=9,Type=Float,Description=\"Adjust coefficients (order=AA_BAF0,AA_BAF1,AA_LRR0,AB_BAF0,AB_BAF1,AB_LRR0,BB_BAF0,BB_BAF1,BB_LRR0)\">");
 	if (!(flags & NO_ANNOT)) {
 		if (bcf_hdr_id2int(out_hdr, BCF_DT_ID, "Ldev") < 0)
 			bcf_hdr_append(
@@ -2605,42 +2586,6 @@ static int bcf_get_ab_genotypes(bcf_fmt_t *fmt, int8_t *gts, int nsmpl, int alle
 	return 1;
 }
 
-// check whether the BAF is flipped at homozygous sites
-// if the BAF is completely flipped, complement the BAF values
-// return -1 in case of error, 0 in case of an okay site, and 1 in case of a flipped site
-static int bcf_check_baf_flipped(const int8_t *gts, const bcf_fmt_t *baf_fmt, int nsmpl)
-{
-	if (!baf_fmt || baf_fmt->n != 1 || baf_fmt->type != BCF_BT_FLOAT)
-		return -1;
-
-	int okay = 0, flipped = 0;
-
-	float *p = (float *)baf_fmt->p;
-	for (int i = 0; i < nsmpl; i++, p++) {
-		if (gts[i] == GT_NC)
-			continue;
-		else if (gts[i] == GT_AA) {
-			okay += p[0] < .5f;
-			flipped += p[0] > .5f;
-		} else if (gts[i] == GT_BB) {
-			okay += p[0] > .5f;
-			flipped += p[0] < .5f;
-		}
-	}
-
-	if (okay > 0 && flipped > 0)
-		return -1;
-	else if (flipped > 0) {
-		p = (float *)baf_fmt->p;
-		for (int i = 0; i < nsmpl; i++, p++) {
-			p[0] = 1.0f - p[0];
-		}
-		return 1;
-	}
-
-	return 0;
-}
-
 // read one contig
 static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 {
@@ -2654,11 +2599,15 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 
 	int i;
 	int allele_a_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ALLELE_A");
+	if (allele_a_id < 0)
+		error("Error: input VCF missing the ALLELE_A info field.\nUse bcftools +mochatools -- --infer-BAF-alleles to infer ALLELE_A\n");
 	if (allele_a_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, allele_a_id) != BCF_HT_INT)
-		error("Error: input VCF file ALLELE_A info field is not of integer type\n");
+		error("Error: input VCF file ALLELE_A info field is not of integer type\nUse bcftools +mochatools -- --infer-BAF-alleles to fix ALLELE_A\n");
 	int allele_b_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ALLELE_B");
+	if (allele_b_id < 0)
+		error("Error: input VCF missing the ALLELE_B info field.\nUse bcftools +mochatools -- --infer-BAF-alleles to infer ALLELE_B\n");
 	if (allele_b_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, allele_b_id) != BCF_HT_INT)
-		error("Error: input VCF file ALLELE_B info field is not of integer type\n");
+		error("Error: input VCF file ALLELE_B info field is not of integer type\nUse bcftools +mochatools -- --infer-BAF-alleles to fix ALLELE_B\n");
 	int gc_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GC");
 	if (gc_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, gc_id) != BCF_HT_REAL)
 		error("Error: input VCF file GC info field is not of float type\n");
@@ -2681,20 +2630,24 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 	if (!(model->flags & WGS_DATA) && (baf_id < 0 || lrr_id < 0))
 		error("Error: input VCF file has no BAF or LRR format field\n");
 
+	model->n = 0;
+	model->n_flipped = 0;
+	for (int j = 0; j < nsmpl; j++)
+		sample[j].n = 0;
+
+	if (!(model->flags & USE_NO_RULES_CHRS) && model->genome_rules->cen_beg[rid] == 0
+	    && model->genome_rules->cen_end[rid] == 0)
+		return;
+
 	int8_t *gts = (int8_t *)malloc(nsmpl * sizeof(int8_t));
 	int8_t *phase_arr = (int8_t *)malloc(nsmpl * sizeof(int8_t));
-	float *float_arr = (float *)malloc(nsmpl * sizeof(float));
+	int *imap_arr = (int *)malloc(nsmpl * sizeof(int));
 	int16_t *gt0 = (int16_t *)malloc(nsmpl * sizeof(int16_t));
 	int16_t *gt1 = (int16_t *)malloc(nsmpl * sizeof(int16_t));
 	int16_t *ad0 = (int16_t *)malloc(nsmpl * sizeof(int16_t));
 	int16_t *ad1 = (int16_t *)malloc(nsmpl * sizeof(int16_t));
 	int *last_het_pos = (int *)calloc(nsmpl, sizeof(int));
 	int *last_pos = (int *)calloc(nsmpl, sizeof(int));
-
-	model->n = 0;
-	model->n_flipped = 0;
-	for (int j = 0; j < nsmpl; j++)
-		sample[j].n = 0;
 
 	for (i = 0; bcf_sr_next_line_reader0(sr); i++) {
 		bcf1_t *line = bcf_sr_get_line(sr, 0);
@@ -2703,27 +2656,27 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 		int pos = line->pos + 1;
 
 		hts_expand(locus_t, i + 1, model->m_locus, model->locus_arr);
+
 		model->locus_arr[i].pos = pos;
-		if (allele_a_id >= 0 && allele_b_id >= 0) {
-			if ((info = bcf_get_info_id(line, allele_a_id)))
-				model->locus_arr[i].allele_a = info->v1.i;
-			else
-				error("Error: ALLELE_A missing at position %s:%" PRId64 "\n",
-				      bcf_hdr_id2name(hdr, line->rid), line->pos + 1);
-			if ((info = bcf_get_info_id(line, allele_b_id)))
-				model->locus_arr[i].allele_b = info->v1.i;
-			else
-				error("Error: ALLELE_B missing at position %s:%" PRId64 "\n",
-				      bcf_hdr_id2name(hdr, line->rid), line->pos + 1);
-		} else {
-			model->locus_arr[i].allele_a = 0;
-			model->locus_arr[i].allele_b = 1;
-		}
+		if ((info = bcf_get_info_id(line, allele_a_id)))
+			model->locus_arr[i].allele_a = info->v1.i;
+		else
+			error("Error: ALLELE_A missing at position %s:%" PRId64 "\n",
+			      bcf_hdr_id2name(hdr, line->rid), line->pos + 1);
+		if ((info = bcf_get_info_id(line, allele_b_id)))
+			model->locus_arr[i].allele_b = info->v1.i;
+		else
+			error("Error: ALLELE_B missing at position %s:%" PRId64 "\n",
+			      bcf_hdr_id2name(hdr, line->rid), line->pos + 1);
 		hts_expand(float, i + 1, model->m_gc, model->gc_arr);
 		if (gc_id >= 0 && (info = bcf_get_info_id(line, gc_id)))
 			model->gc_arr[i] = info->v1.f;
 		else
 			model->gc_arr[i] = NAN;
+
+		// missing ALLELE_A and ALLELE_B information
+		if (model->locus_arr[i].allele_a < 0 || model->locus_arr[i].allele_b < 0)
+			continue;
 
 		// if failing inclusion/exclusion requirement, skip line
 		if ((model->flags & FLT_EXCLUDE) && bcf_sr_get_line(sr, 1))
@@ -2762,50 +2715,11 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 				continue;
 
 			for (int j = 0; j < nsmpl; j++) {
-				if (bcf_float_is_missing(
-					    ((float *)(lrr_fmt->p
-						       + lrr_fmt->size * sample[j].idx))[0]))
-					((float *)(lrr_fmt->p
-						   + lrr_fmt->size * sample[j].idx))[0] = NAN;
-				if (bcf_float_is_missing(
-					    ((float *)(baf_fmt->p
-						       + baf_fmt->size * sample[j].idx))[0]))
-					((float *)(baf_fmt->p
-						   + baf_fmt->size * sample[j].idx))[0] = NAN;
+				if (bcf_float_is_missing(((float *)lrr_fmt->p)[sample[j].idx]))
+					((float *)lrr_fmt->p)[sample[j].idx] = NAN;
+				if (bcf_float_is_missing(((float *)baf_fmt->p)[sample[j].idx]))
+					((float *)baf_fmt->p)[sample[j].idx] = NAN;
 			}
-
-			// check whether you need to flip the BAF but only for bi-allelic sites
-			if (!(model->flags & NO_BAF_FLIP)) {
-				int ret = bcf_check_baf_flipped(gts, baf_fmt, nsmpl);
-				if (ret < 0)
-					error("Error: site %s:%" PRId64
-					      " contains a mix of flipped and unflipped BAF values\n"
-					      "Use bcftools query -f \"[%%CHROM\\t%%POS\\t%%SAMPLE\\t%%GT\\t%%BAF\\n]\" -r %s:%" PRId64
-					      "-%" PRId64
-					      " to investigate the issue\n"
-					      "Use --no-BAF-flip to suppress BAF flipping\n",
-					      bcf_hdr_id2name(hdr, line->rid), line->pos + 1,
-					      bcf_hdr_id2name(hdr, line->rid), line->pos,
-					      line->pos + 1);
-				else
-					model->n_flipped += ret;
-			}
-
-			// if allele A index is bigger than allele B index flip the BAF to make
-			// sure it refers to the highest allele
-			if (model->locus_arr[i].allele_a > model->locus_arr[i].allele_b) {
-				for (int j = 0; j < nsmpl; j++)
-					((float *)(baf_fmt->p
-						   + baf_fmt->size * sample[j].idx))[0] =
-						1.0f
-						- ((float *)(baf_fmt->p
-							     + baf_fmt->size
-								       * sample[j].idx))[0];
-			}
-
-			// adjust BAF and LRR
-			for (int j = 0; j < 4; j++)
-				model->locus_arr[i].adjust[j] = 0.0f;
 
 			int is_x_nonpar = rid == model->genome_rules->x_rid
 					  && pos > model->genome_rules->x_nonpar_beg
@@ -2815,52 +2729,80 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 			int is_y_or_mt = rid == model->genome_rules->y_rid
 					 || rid == model->genome_rules->mt_rid;
 
-			// compute BAF cluster center for heterozygous genotypes
-			int k = 0;
+			// adjust cluster centers and slopes, inspired by
+			// (i) Staaf, J. et al. Normalization of Illumina Infinium whole-genome
+			// SNP data improves copy number estimates and allelic intensity ratios.
+			// BMC Bioinformatics 9, 409 (2008) & (ii) Mayrhofer, M., Viklund, B. &
+			// Isaksson, A. Rawcopy: Improved copy number analysis with Affymetrix
+			// arrays. Sci Rep 6, 36158 (2016)
+			for (int gt = GT_AA; gt <= GT_BB; gt++) {
+				if (is_y_or_mt)
+					continue;
+				int k = 0;
+				for (int j = 0; j < nsmpl; j++) {
+					if (is_x_nonpar && sample[j].sex == SEX_MAL)
+						continue;
+					if (gts[sample[j].idx] == gt)
+						imap_arr[k++] = sample[j].idx;
+				}
+				float baf_b = 0.0f, baf_m = 0.0f, lrr_b = 0.0f;
+				if (model->regress_baf_lrr != -1
+				    && model->regress_baf_lrr <= k) {
+					float xss = 0.0f, yss = 0.0f, xyss = 0.0f;
+					get_cov((float *)lrr_fmt->p, (float *)baf_fmt->p, k,
+						imap_arr, &xss, &yss, &xyss);
+					baf_m = xyss / xss;
+					for (int j = 0; j < k; j++)
+						((float *)baf_fmt->p)[imap_arr[j]] -=
+							baf_m
+							* ((float *)lrr_fmt->p)[imap_arr[j]];
+				}
+				if (model->adj_baf_lrr != -1 && k >= model->adj_baf_lrr) {
+					baf_b = get_median((float *)baf_fmt->p, k, imap_arr)
+						- (float)(gt - 1) * 0.5f;
+					if (isnan(baf_b))
+						baf_b = 0.0f;
+					for (int j = 0; j < k; j++)
+						((float *)baf_fmt->p)[imap_arr[j]] -= baf_b;
+					lrr_b = get_median((float *)lrr_fmt->p, k, imap_arr);
+					if (isnan(lrr_b))
+						lrr_b = 0.0f;
+					for (int j = 0; j < k; j++)
+						((float *)lrr_fmt->p)[imap_arr[j]] -= lrr_b;
+				}
+				// corrects males on X nonPAR
+				if (is_x_nonpar) {
+					for (int j = 0; j < nsmpl; j++) {
+						if (sample[j].sex != SEX_MAL)
+							continue;
+						if (gts[sample[j].idx] == gt) {
+							((float *)baf_fmt->p)[sample[j].idx] -=
+								baf_m
+									* ((float *)lrr_fmt->p)
+										[sample[j].idx]
+								+ baf_b;
+							((float *)lrr_fmt->p)[sample[j].idx] -=
+								lrr_b;
+						}
+					}
+				}
+				model->locus_arr[i].adjust[gt - 1][0] = baf_b;
+				model->locus_arr[i].adjust[gt - 1][1] = baf_m;
+				model->locus_arr[i].adjust[gt - 1][2] = lrr_b;
+			}
+
+			// if allele A index is bigger than allele B index flip the BAF to make
+			// sure it refers to the highest allele
+			if (model->locus_arr[i].allele_a > model->locus_arr[i].allele_b) {
+				for (int j = 0; j < nsmpl; j++)
+					((float *)baf_fmt->p)[sample[j].idx] =
+						1.0f - ((float *)baf_fmt->p)[sample[j].idx];
+			}
+
 			for (int j = 0; j < nsmpl; j++)
 				if (gts[j] != GT_AB || (is_x_nonpar && sample[j].sex == SEX_MAL)
 				    || is_y_or_mt)
-					((float *)(baf_fmt->p
-						   + baf_fmt->size * sample[j].idx))[0] = NAN;
-				else
-					float_arr[k++] =
-						((float *)(baf_fmt->p
-							   + baf_fmt->size * sample[j].idx))[0];
-			if (model->median_baf_adj >= 0 && k >= model->median_baf_adj)
-				model->locus_arr[i].adjust[0] =
-					get_median(float_arr, k, NULL) - 0.5f;
-
-			// compute LRR cluster center for each genotype
-			if (model->rid != model->genome_rules->x_rid
-			    && model->rid != model->genome_rules->y_rid) {
-				for (int gt = GT_AA; gt <= GT_BB; gt++) {
-					k = 0;
-					for (int j = 0; j < nsmpl; j++)
-						if (gts[j] == gt
-						    && !(is_x_nonpar
-							 && sample[j].sex == SEX_MAL)
-						    && !is_y_or_mt)
-							float_arr[k++] = ((
-								float *)(lrr_fmt->p
-									 + lrr_fmt->size
-										   * sample[j]
-											     .idx))
-								[0];
-					if (model->median_lrr_adj >= 0
-					    && k >= model->median_lrr_adj)
-						model->locus_arr[i].adjust[gt] =
-							get_median(float_arr, k, NULL);
-				}
-			}
-
-			for (int j = 0; j < nsmpl; j++) {
-				((float *)(baf_fmt->p + baf_fmt->size * sample[j].idx))[0] -=
-					model->locus_arr[i].adjust[0];
-				if (gts[j])
-					((float *)(lrr_fmt->p
-						   + lrr_fmt->size * sample[j].idx))[0] -=
-						model->locus_arr[i].adjust[gts[j]];
-			}
+					((float *)baf_fmt->p)[sample[j].idx] = NAN;
 		}
 
 		// read line in memory
@@ -2900,11 +2842,9 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 				sample[j].data_arr[AD1][sample[j].n - 1] = ad1[j];
 
 			} else {
-				float lrr = ((float *)(lrr_fmt->p
-						       + lrr_fmt->size * sample[j].idx))[0];
-				float baf = ((float *)(baf_fmt->p
-						       + baf_fmt->size * sample[j].idx))[0];
-				if (lrr == NAN && baf == NAN)
+				float lrr = ((float *)lrr_fmt->p)[sample[j].idx];
+				float baf = ((float *)baf_fmt->p)[sample[j].idx];
+				if (isnan(lrr) && isnan(baf))
 					continue;
 
 				sample[j].n++;
@@ -2925,7 +2865,7 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model)
 	}
 	free(gts);
 	free(phase_arr);
-	free(float_arr);
+	free(imap_arr);
 	free(gt0);
 	free(gt1);
 	free(ad0);
@@ -2965,6 +2905,7 @@ static const char *usage_text(void)
 	       "    -f, --apply-filters <list>        require at least one of the listed FILTER strings (e.g. \"PASS,.\")\n"
 	       "    -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants\n"
 	       "                                      to include (or exclude with \"^\" prefix) in the analysis\n"
+	       "    -p  --cnp <file>                  list of regions to genotype in BED format\n"
 	       "        --threads <int>               number of extra output compression threads [0]\n"
 	       "\n"
 	       "Output Options:\n"
@@ -2979,23 +2920,18 @@ static const char *usage_text(void)
 	       "    -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]\n"
 	       "\n"
 	       "HMM Options:\n"
-	       "    -p  --cnp <file>                  list of regions to genotype in BED format\n"
 	       "        --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model [" BDEV_LRR_BAF_DFLT
 	       "]\n"
 	       "        --bdev-BAF-phase <list>       comma separated list of inverse BAF deviations for BAF+phase model\n"
 	       "                                      [" BDEV_BAF_PHASE_DFLT
 	       "]\n"
-	       "    -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [" MIN_DST_DFLT
+	       "        --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [" MIN_DST_DFLT
 	       "]\n"
-	       "        --no-BAF-flip                 do not correct BAF at flipped sites\n"
-	       "        --median-BAF-adjust <int>     minimum number of heterozygous genotypes required to perform\n"
-	       "                                      median BAF adjustment (-1 for no across samples BAF adjustment) [" MEDIAN_BAF_ADJ_DFLT
+	       "        --adjust-BAF-LRR <int>        minimum number of genotypes for a cluster to median adjust BAF and LRR (-1 for no adjustment) [" ADJ_BAF_LRR_DFLT
 	       "]\n"
-	       "        --median-LRR-adjust <int>     minimum number of same type genotypes required to perform\n"
-	       "                                      median LRR adjustment (-1 for no across samples LRR adjustment) [" MEDIAN_LRR_ADJ_DFLT
+	       "        --regress-BAF-LRR <int>       minimum number of genotypes for a cluster to regress BAF against LRR (-1 for no regression) [" REGRESS_BAF_LRR_DFLT
 	       "]\n"
-	       "        --order-LRR-GC <int>          order of polynomial in local GC content to be used for polynomial\n"
-	       "                                      regression of LRR (-1 for no LRR adjustment) [" ORDER_LRR_GC_DFLT
+	       "        --LRR-GC-order <int>          order of polynomial to regress LRR against local GC content (-1 for no regression) [" LRR_GC_ORDER_DFLT
 	       "]\n"
 	       "        --xy-prob <float>             transition probability [" XY_PRB_DFLT
 	       "]\n"
@@ -3007,20 +2943,20 @@ static const char *usage_text(void)
 	       "]\n"
 	       "        --centromere-penalty <float>  centromere penalty [" CEN_PRB_DFLT
 	       "]\n"
-	       "        --short_arm_chrs <list>       list of chromosomes with short arms [" SHORT_ARM_CHRS_DFLT
+	       "        --short-arm-chrs <list>       list of chromosomes with short arms [" SHORT_ARM_CHRS_DFLT
 	       "]\n"
-	       "        --use_short_arms              use variants in short arms\n"
-	       "        --use_centromeres             use variants in centromeres\n"
-	       "        --LRR-cutoff <float>          LRR cutoff between haploid and diploid [estimated from X nonPAR]\n"
-	       "        --LRR-hap2dip <float>         LRR difference between haploid and diploid [" LRR_HAP2DIP_DFLT
+	       "        --use-short-arms              use variants in short arms [FALSE]\n"
+	       "        --use-centromeres             use variants in centromeres [FALSE]\n"
+	       "        --use-no-rules-chrs           use chromosomes without centromere rules [FALSE]\n"
+	       "        --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [" LRR_BIAS_DFLT
 	       "]\n"
-	       "        --LRR-auto2sex <float>        LRR difference between autosomes and diploid sex chromosomes [estimated from X nonPAR]\n"
-	       "        --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [" SHORT_ARM_CHRS_DFLT
+	       "        --LRR-hap2dip <float>         difference between LRR for haploid and diploid [" LRR_HAP2DIP_DFLT
 	       "]\n"
+	       "        --LRR-cutoff <float>          cutoff between LRR for haploid and diploid [estimated from X nonPAR]\n"
 	       "\n"
 	       "Examples:\n"
 	       "    bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed\n"
-	       "    bcftools +mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -c 1.0 --LRR-weight 0.5\n"
+	       "    bcftools +mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv --LRR-weight 0.5\n"
 	       "\n";
 }
 
@@ -3136,12 +3072,11 @@ int run(int argc, char *argv[])
 	model.cen_log_prb = logf(strtof(CEN_PRB_DFLT, &tmp));
 	model.min_dst = (int)strtol(MIN_DST_DFLT, &tmp, 0);
 	model.lrr_bias = strtof(LRR_BIAS_DFLT, &tmp);
-	model.lrr_cutoff = NAN;
 	model.lrr_hap2dip = strtof(LRR_HAP2DIP_DFLT, &tmp);
-	model.lrr_auto2sex = NAN;
-	model.median_baf_adj = (int)strtol(MEDIAN_BAF_ADJ_DFLT, &tmp, 0);
-	model.median_lrr_adj = (int)strtol(MEDIAN_LRR_ADJ_DFLT, &tmp, 0);
-	model.order_lrr_gc = (int)strtol(ORDER_LRR_GC_DFLT, &tmp, 0);
+	model.lrr_cutoff = NAN;
+	model.adj_baf_lrr = (int)strtol(ADJ_BAF_LRR_DFLT, &tmp, 0);
+	model.regress_baf_lrr = (int)strtol(REGRESS_BAF_LRR_DFLT, &tmp, 0);
+	model.lrr_gc_order = (int)strtol(LRR_GC_ORDER_DFLT, &tmp, 0);
 
 	// create synced reader object
 	bcf_srs_t *sr = bcf_sr_init();
@@ -3156,6 +3091,7 @@ int run(int argc, char *argv[])
 					   {"targets-file", required_argument, NULL, 'T'},
 					   {"apply-filters", required_argument, NULL, 'f'},
 					   {"variants", required_argument, NULL, 'v'},
+					   {"cnp", required_argument, NULL, 'p'},
 					   {"threads", required_argument, NULL, 9},
 					   {"output", required_argument, NULL, 'o'},
 					   {"output-type", required_argument, NULL, 'O'},
@@ -3166,29 +3102,27 @@ int run(int argc, char *argv[])
 					   {"ucsc-bed", required_argument, NULL, 'u'},
 					   {"log", required_argument, NULL, 'l'},
 					   {"no-log", no_argument, NULL, 10},
-					   {"cnp", required_argument, NULL, 'p'},
 					   {"bdev-LRR-BAF", required_argument, NULL, 11},
 					   {"bdev-BAF-phase", required_argument, NULL, 12},
-					   {"min-dist", required_argument, NULL, 'd'},
-					   {"no-BAF-flip", no_argument, NULL, 13},
-					   {"median-BAF-adjust", required_argument, NULL, 14},
-					   {"median-LRR-adjust", required_argument, NULL, 15},
-					   {"order-LRR-GC", required_argument, NULL, 16},
+					   {"min-dist", required_argument, NULL, 13},
+					   {"adjust-BAF-LRR", required_argument, NULL, 14},
+					   {"regress-BAF-LRR", required_argument, NULL, 15},
+					   {"LRR-GC-order", required_argument, NULL, 16},
 					   {"xy-prob", required_argument, NULL, 17},
 					   {"err-prob", required_argument, NULL, 18},
 					   {"flip-prob", required_argument, NULL, 19},
 					   {"telomere-advantage", required_argument, NULL, 20},
 					   {"centromere-penalty", required_argument, NULL, 21},
-					   {"short_arm_chrs", required_argument, NULL, 22},
-					   {"use_short_arms", no_argument, NULL, 23},
-					   {"use_centromeres", no_argument, NULL, 24},
-					   {"LRR-cutoff", required_argument, NULL, 25},
-					   {"LRR-hap2dip", required_argument, NULL, 26},
-					   {"LRR-auto2sex", required_argument, NULL, 27},
-					   {"LRR-weight", required_argument, NULL, 28},
+					   {"short-arm-chrs", required_argument, NULL, 22},
+					   {"use-short-arms", no_argument, NULL, 23},
+					   {"use-centromeres", no_argument, NULL, 24},
+					   {"use-no-rules-chrs", no_argument, NULL, 25},
+					   {"LRR-weight", required_argument, NULL, 26},
+					   {"LRR-hap2dip", required_argument, NULL, 27},
+					   {"LRR-cutoff", required_argument, NULL, 28},
 					   {NULL, 0, NULL, 0}};
 	int c;
-	while ((c = getopt_long(argc, argv, "h?r:R:s:S:t:T:f:v:o:O:am:g:u:l:p:c:b:d:", loptions,
+	while ((c = getopt_long(argc, argv, "h?r:R:s:S:t:T:f:v:p:o:O:am:g:u:l:", loptions,
 				NULL))
 	       >= 0) {
 		switch (c) {
@@ -3284,28 +3218,25 @@ int run(int argc, char *argv[])
 		case 12:
 			bdev_baf_phase = optarg;
 			break;
-		case 'd':
+		case 13:
 			model.min_dst = (int)strtol(optarg, &tmp, 0);
 			if (*tmp)
 				error("Could not parse: --min-dist %s\n", optarg);
 			break;
-		case 13:
-			model.flags |= NO_BAF_FLIP;
-			break;
 		case 14:
-			model.median_baf_adj = (int)strtol(optarg, &tmp, 0);
+			model.adj_baf_lrr = (int)strtol(optarg, &tmp, 0);
 			if (*tmp)
-				error("Could not parse: --median-BAF-adjust %s\n", optarg);
+				error("Could not parse: --adjust-BAF-LRR %s\n", optarg);
 			break;
 		case 15:
-			model.median_lrr_adj = (int)strtol(optarg, &tmp, 0);
+			model.regress_baf_lrr = (int)strtol(optarg, &tmp, 0);
 			if (*tmp)
-				error("Could not parse: --median-LRR-adjust %s\n", optarg);
+				error("Could not parse: --regress-BAF-LRR %s\n", optarg);
 			break;
 		case 16:
-			model.order_lrr_gc = (int)strtol(optarg, &tmp, 0);
+			model.lrr_gc_order = (int)strtol(optarg, &tmp, 0);
 			if (*tmp)
-				error("Could not parse: --order-LRR-GC %s\n", optarg);
+				error("Could not parse: --LRR-GC-order %s\n", optarg);
 			break;
 		case 17:
 			model.xy_log_prb = logf(strtof(optarg, &tmp));
@@ -3342,24 +3273,22 @@ int run(int argc, char *argv[])
 			model.flags |= USE_CENTROMERES;
 			break;
 		case 25:
-			model.lrr_cutoff = strtof(optarg, &tmp);
-			if (*tmp)
-				error("Could not parse: --LRR-cutoff %s\n", optarg);
+			model.flags |= USE_NO_RULES_CHRS;
 			break;
 		case 26:
+			model.lrr_bias = strtof(optarg, &tmp);
+			if (*tmp)
+				error("Could not parse: --LRR-weight %s\n", optarg);
+			break;
+		case 27:
 			model.lrr_hap2dip = strtof(optarg, &tmp);
 			if (*tmp)
 				error("Could not parse: --LRR-hap2dip %s\n", optarg);
 			break;
-		case 27:
-			model.lrr_auto2sex = strtof(optarg, &tmp);
-			if (*tmp)
-				error("Could not parse: --LRR-auto2sex %s\n", optarg);
-			break;
 		case 28:
-			model.lrr_bias = strtof(optarg, &tmp);
+			model.lrr_cutoff = strtof(optarg, &tmp);
 			if (*tmp)
-				error("Could not parse: --LRR-weight %s\n", optarg);
+				error("Could not parse: --LRR-cutoff %s\n", optarg);
 			break;
 		case 'h':
 		case '?':
@@ -3384,10 +3313,10 @@ int run(int argc, char *argv[])
 		error("%s", usage_text());
 	}
 
-	if (model.order_lrr_gc > MAX_ORDER) {
+	if (model.lrr_gc_order > MAX_ORDER) {
 		fprintf(log_file,
-			"Polynomial order must not be greater than %d: --order-LRR-GC %d\n",
-			MAX_ORDER, model.order_lrr_gc);
+			"Polynomial order must not be greater than %d: --LRR-GC-order %d\n",
+			MAX_ORDER, model.lrr_gc_order);
 		error("%s", usage_text());
 	}
 
@@ -3441,15 +3370,58 @@ int run(int argc, char *argv[])
 	} else if ((bcf_hdr_id2int(hdr, BCF_DT_ID, "LRR") < 0
 		    || bcf_hdr_id2int(hdr, BCF_DT_ID, "BAF") < 0))
 		error("Error: input VCF file must contain either the AD format field or the LRR and BAF format fields\n");
-	if (model.order_lrr_gc > 0 && (bcf_hdr_id2int(hdr, BCF_DT_ID, "GC") < 0))
-		error("Error: input VCF has no GC info field: use \"--order-LRR-GC 0/-1\" to disable LRR adjustment through GC correction\n");
+	if (model.lrr_gc_order > 0 && (bcf_hdr_id2int(hdr, BCF_DT_ID, "GC") < 0))
+		error("Error: input VCF has no GC info field: use \"--LRR-GC-order 0/-1\" to disable LRR adjustment through GC correction\n");
 
 	// median adjustment is necessary with sequencing counts data
-	if ((model.order_lrr_gc < 0) && (model.flags & WGS_DATA))
-		model.order_lrr_gc = 0;
+	if ((model.lrr_gc_order < 0) && (model.flags & WGS_DATA))
+		model.lrr_gc_order = 0;
 
-	fprintf(log_file, "Running MoChA version %s\n", MOCHA_VERSION);
-	fprintf(log_file, "For updates: https://github.com/freeseek/mocha\n");
+	// beginning of plugin run
+	fprintf(log_file, "MoChA " MOCHA_VERSION " https://github.com/freeseek/mocha\n");
+	fprintf(log_file, "Genome reference: %s\n", rules);
+	if (sample_names)
+		fprintf(log_file, "Samples: %s\n", sample_names);
+	if (targets_list)
+		fprintf(log_file, "Targets: %s\n", targets_list);
+	if (sr->apply_filters)
+		fprintf(log_file, "Filters: %s\n", sr->apply_filters);
+	if (filter_fname)
+		fprintf(log_file, "Variants: %s\n", filter_fname);
+	if (cnp_fname)
+		fprintf(log_file, "Regions to genotype: %s\n", cnp_fname);
+	fprintf(log_file, "BAF deviations for LRR+BAF model: %s\n", bdev_lrr_baf);
+	fprintf(log_file, "BAF deviations for BAF+phase model: %s\n", bdev_baf_phase);
+	if (model.flags & WGS_DATA) {
+		fprintf(log_file, "Minimum base pair distance between consecutive sites: %d\n",
+			model.min_dst);
+	} else {
+		fprintf(log_file,
+			"Minimum number of genotypes for a cluster to median adjust BAF and LRR: %d\n",
+			model.adj_baf_lrr);
+		fprintf(log_file,
+			"Minimum number of genotypes for a cluster to regress BAF against LRR: %d\n",
+			model.regress_baf_lrr);
+	}
+	fprintf(log_file,
+		"Order of polynomial in local GC content to be used to regress LRR against GC: %d\n",
+		model.lrr_gc_order);
+	fprintf(log_file, "Transition probability: %.2g\n", expf(model.xy_log_prb));
+	fprintf(log_file, "Uniform error probability: %.2g\n", expf(model.err_log_prb));
+	fprintf(log_file, "Phase flip probability: %.2g\n", expf(model.flip_log_prb));
+	fprintf(log_file, "Telomere advantage: %.2g\n", expf(model.tel_log_prb));
+	fprintf(log_file, "Centromere penalty: %.2g\n", expf(model.cen_log_prb));
+	fprintf(log_file, "List of short arms: %s\n", short_arm_chrs);
+	fprintf(log_file, "Use variants in short arms: %s\n",
+		model.flags & USE_SHORT_ARMS ? "TRUE" : "FALSE");
+	fprintf(log_file, "Use variants in centromeres: %s\n",
+		model.flags & USE_CENTROMERES ? "TRUE" : "FALSE");
+	fprintf(log_file, "Use chromosomes without centromere rules: %s\n",
+		model.flags & USE_NO_RULES_CHRS ? "TRUE" : "FALSE");
+	fprintf(log_file, "Relative contribution from LRR for LRR+BAF model: %.2f\n",
+		model.lrr_bias);
+	fprintf(log_file, "Difference between LRR for haploid and diploid: %.2f\n",
+		model.lrr_hap2dip);
 
 	// initialize genome parameters
 	if (rules_is_file)
@@ -3493,12 +3465,18 @@ int run(int argc, char *argv[])
 		error("Subsetting has removed all samples\n");
 	if (!(model.flags & NO_LOG))
 		fprintf(log_file, "Loading %d sample(s) from the VCF file\n", nsmpl);
-	if (nsmpl < model.median_baf_adj && !(model.flags & WGS_DATA))
-		error("Error: cannot perform median BAF adjustment with only %d sample(s): use \"--median-BAF-adjust -1\" to disable BAF adjustment\n",
-		      nsmpl);
-	if (nsmpl < model.median_lrr_adj && !(model.flags & WGS_DATA))
-		error("Error: cannot perform median LRR adjustment with only %d sample(s): use \"--median-LRR-adjust -1\" to disable LRR adjustment\n",
-		      nsmpl);
+	if (!(model.flags & WGS_DATA)) {
+		if (model.regress_baf_lrr != -1
+		    && (model.adj_baf_lrr == -1 || model.regress_baf_lrr <= model.adj_baf_lrr))
+			error("Error: median adjustment must be performed whenever regression adjustment is performed\n%d %d \n",
+			      model.regress_baf_lrr, model.adj_baf_lrr);
+		if (nsmpl < model.adj_baf_lrr)
+			error("Error: cannot perform median adjustment with only %d sample(s): use \"--adjust-BAF-LRR -1\" to disable median adjustment\n",
+			      nsmpl);
+		if (nsmpl < model.regress_baf_lrr)
+			error("Error: cannot perform regression adjustment with only %d sample(s): use \"--regress-BAF-LRR -1\" to disable regression adjustment\n",
+			      nsmpl);
+	}
 
 	sample = (sample_t *)calloc(nsmpl, sizeof(sample_t));
 	for (int i = 0; i < nsmpl; i++) {
@@ -3513,15 +3491,9 @@ int run(int argc, char *argv[])
 		get_contig(sr, sample, &model);
 		if (model.n <= 0)
 			continue;
-		if (!(model.flags & NO_LOG)) {
-			if (model.flags & NO_BAF_FLIP || model.n_flipped == 0)
-				fprintf(log_file, "Read %d variants from contig %s\n", model.n,
-					bcf_hdr_id2name(hdr, rid));
-			else
-				fprintf(log_file,
-					"Read %d variants (%d BAF flipped) from contig %s\n",
-					model.n, model.n_flipped, bcf_hdr_id2name(hdr, rid));
-		}
+		if (!(model.flags & NO_LOG))
+			fprintf(log_file, "Read %d variants from contig %s\n", model.n,
+				bcf_hdr_id2name(hdr, rid));
 		if (model.genome_rules->length[rid] < model.locus_arr[model.n - 1].pos)
 			model.genome_rules->length[rid] = model.locus_arr[model.n - 1].pos;
 		for (int j = 0; j < nsmpl; j++)
@@ -3539,31 +3511,21 @@ int run(int argc, char *argv[])
 	sample_print(out_fg, sample, nsmpl, hdr, model.flags);
 
 	if (isnan(model.lrr_cutoff))
-		error("Error: Unable to estimate LRR-cutoff. Make sure "
+		error("Error: Unable to estimate LRR cutoff. Make sure "
 		      "the X nonPAR region and both male and female samples are present in the VCF or specify the parameter\n");
-	if (isnan(model.lrr_auto2sex))
-		error("Error: Unable to estimate LRR-auto2sex. Make sure "
-		      "both autosomes and the X nonPAR region are present in the VCF or specify the parameter\n");
 
 	if (!(model.flags & NO_LOG))
-		fprintf(log_file,
-			"Model LRR parameters: LRR-cutoff=%.4f LRR-hap2dip=%.4f LRR-auto2sex=%.4f\n",
-			model.lrr_cutoff, model.lrr_hap2dip, model.lrr_auto2sex);
+		fprintf(log_file, "Cutoff between LRR for haploid and diploid: %.2f\n",
+			model.lrr_cutoff);
 
 	for (int rid = 0; rid < hdr->n[BCF_DT_CTG]; rid++) {
 		model.rid = rid;
 		get_contig(sr, sample, &model);
 		if (model.n <= 0)
 			continue;
-		if (!(model.flags & NO_LOG)) {
-			if (model.flags & NO_BAF_FLIP || model.n_flipped == 0)
-				fprintf(log_file, "Read %d variants from contig %s\n", model.n,
-					bcf_hdr_id2name(hdr, rid));
-			else
-				fprintf(log_file,
-					"Read %d variants (%d BAF flipped) from contig %s\n",
-					model.n, model.n_flipped, bcf_hdr_id2name(hdr, rid));
-		}
+		if (!(model.flags & NO_LOG))
+			fprintf(log_file, "Read %d variants from contig %s\n", model.n,
+				bcf_hdr_id2name(hdr, rid));
 		for (int j = 0; j < nsmpl; j++) {
 			if (model.cnp_idx)
 				regidx_overlap(model.cnp_idx, bcf_hdr_id2name(hdr, rid), 0,
@@ -3609,10 +3571,10 @@ int run(int argc, char *argv[])
 		float rare_del_ldev = get_median(rare_ldev, n_rare_del, NULL);
 		float rare_dup_ldev =
 			get_median(&rare_ldev[mocha_table.n - n_rare_dup], n_rare_dup, NULL);
-		fprintf(log_file, "Adjusted LRR at CNP deletions=%.4f\n", cnp_del_ldev);
-		fprintf(log_file, "Adjusted LRR at CNP duplications=%.4f\n", cnp_dup_ldev);
-		fprintf(log_file, "Adjusted LRR at rare deletions=%.4f\n", rare_del_ldev);
-		fprintf(log_file, "Adjusted LRR at rare duplications=%.4f\n", rare_dup_ldev);
+		fprintf(log_file, "Adjusted LRR at CNP deletions: %.4f\n", cnp_del_ldev);
+		fprintf(log_file, "Adjusted LRR at CNP duplications: %.4f\n", cnp_dup_ldev);
+		fprintf(log_file, "Adjusted LRR at rare deletions: %.4f\n", rare_del_ldev);
+		fprintf(log_file, "Adjusted LRR at rare duplications: %.4f\n", rare_dup_ldev);
 		free(cnp_ldev);
 		free(rare_ldev);
 	}

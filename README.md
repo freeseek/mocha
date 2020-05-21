@@ -26,6 +26,8 @@ and this website. For any feedback, send an email to giulio.genovese@gmail.com
 Usage
 =====
 
+NOTICE: Starting from May 2020 MoChA regress the BAF against the LRR following previous studies that showed a residual correlation from both Illumina (Staaf et al. 2008) and Affymetrix (Mayrhofer et al. 2016) DNA microarrays. This leads to a slightly increased capability to detect low cell fraction events
+
 NOTICE: Starting from April 2020 MoChA is distributed as a standalone BCFtools plugin. You have to update `bcftools mocha` to `bcftools +mocha` in your pipelines
 
 ```
@@ -44,6 +46,7 @@ General Options:
     -f, --apply-filters <list>        require at least one of the listed FILTER strings (e.g. "PASS,.")
     -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants
                                       to include (or exclude with "^" prefix) in the analysis
+    -p  --cnp <file>                  list of regions to genotype in BED format
         --threads <int>               number of extra output compression threads [0]
 
 Output Options:
@@ -58,32 +61,29 @@ Output Options:
     -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]
 
 HMM Options:
-    -p  --cnp <file>                  list of regions to genotype in BED format
         --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model [-2.0,-4.0,-6.0,10.0,6.0,4.0]
         --bdev-BAF-phase <list>       comma separated list of inverse BAF deviations for BAF+phase model
                                       [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
-    -d, --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [400]
-        --no-BAF-flip                 do not correct BAF at flipped sites
-        --median-BAF-adjust <int>     minimum number of heterozygous genotypes required to perform
-                                      median BAF adjustment (-1 for no BAF adjustment) [5]
-        --order-LRR-GC <int>          order of polynomial in local GC content to be used for polynomial
-                                      regression of LRR (-1 for no LRR adjustment, 5 maximum) [2]
+        --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [400]
+        --adjust-BAF-LRR <int>        minimum number of genotypes for a cluster to median adjust BAF and LRR (-1 for no adjustment) [5]
+        --regress-BAF-LRR <int>       minimum number of genotypes for a cluster to regress BAF against LRR (-1 for no regression) [15]
+        --LRR-GC-order <int>          order of polynomial to regress LRR against local GC content (-1 for no regression) [2]
         --xy-prob <float>             transition probability [1e-09]
         --err-prob <float>            uniform error probability [1e-04]
         --flip-prob <float>           phase flip probability [1e-02]
         --telomere-advantage <float>  telomere advantage [1e-02]
         --centromere-penalty <float>  centromere penalty [1e-04]
-        --short_arm_chrs <list>       list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
-        --use_short_arms              use variants in short arms
-        --use_centromeres             use variants in centromeres
-        --LRR-cutoff <float>          LRR cutoff between haploid and diploid [estimated from X nonPAR]
-        --LRR-hap2dip <float>         LRR difference between haploid and diploid [0.45]
-        --LRR-auto2sex <float>        LRR difference between autosomes and diploid sex chromosomes [estimated from X nonPAR]
+        --short-arm-chrs <list>       list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
+        --use-short-arms              use variants in short arms [FALSE]
+        --use-centromeres             use variants in centromeres [FALSE]
+        --use-no-rules-chrs           use chromosomes without centromere rules [FALSE]
         --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [0.2]
+        --LRR-hap2dip <float>         difference between LRR for haploid and diploid [0.45]
+        --LRR-cutoff <float>          cutoff between LRR for haploid and diploid [estimated from X nonPAR]
 
 Examples:
     bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed
-    bcftools +mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv -c 1.0 --LRR-weight 0.5
+    bcftools +mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv --LRR-weight 0.5
 ```
 
 Installation
@@ -91,7 +91,7 @@ Installation
 
 Install basic tools (Debian/Ubuntu specific if you have admin privileges):
 ```
-sudo apt install wget autoconf zlib1g-dev gzip unzip samtools bedtools bcftools r-cran-optparse r-cran-data.table r-cran-ggplot2
+sudo apt install wget autoconf zlib1g-dev gzip unzip samtools bedtools bcftools
 ```
 
 Optionally, you can install these libraries to activate further HTSlib features:
@@ -637,7 +637,7 @@ Plot results
 
 Install basic tools (Debian/Ubuntu specific if you have admin privileges):
 ```
-sudo apt install r-cran-ggplot2 r-cran-data.table
+sudo apt install r-cran-optparse r-cran-ggplot2 r-cran-data.table
 ```
 
 Download R scripts

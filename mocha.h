@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2018-2019 Giulio Genovese
+   Copyright (C) 2018-2020 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -60,6 +60,37 @@ float get_median(const float *v, int n, const int *imap)
 		ret = (ret + w[j / 2 - 1]) * 0.5f;
 	free(w);
 	return ret;
+}
+
+// rho =  xyss / sqrtf(xss * yss)
+// m = xyss / xss
+// b = ym - m * xm;
+static inline int get_cov(const float *x, const float *y, int n, const int *imap, float *xss,
+			  float *yss, float *xyss)
+{
+	if (n < 2)
+		return -1;
+	float xm = 0.0f;
+	float ym = 0.0f;
+	for (int i = 0; i < n; i++) {
+		int idx = imap ? imap[i] : i;
+		xm += x[idx];
+		ym += y[idx];
+	}
+	xm /= n;
+	ym /= n;
+	*xss = 0.0f;
+	*yss = 0.0f;
+	*xyss = 0.0f;
+	for (int i = 0; i < n; i++) {
+		int idx = imap ? imap[i] : i;
+		float xd = x[idx] - xm;
+		float yd = y[idx] - ym;
+		*xss += xd * xd;
+		*yss += yd * yd;
+		*xyss += xd * yd;
+	}
+	return 0;
 }
 
 // retrieve genotype alleles information from BCF record

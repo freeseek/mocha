@@ -34,7 +34,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2020-04-07"
+#define MOCHATOOLS_VERSION "2020-05-20"
 
 static inline double sq(double x)
 {
@@ -47,11 +47,13 @@ typedef struct {
 	int ws;	      // length of window to compute GC and CpG content
 	char *format; // format field for sign balance test
 	int infer_baf_alleles;
-	int nsmpl, gt_id, ad_id, baf_id, fmt_id;
+	int cor_baf_lrr;
+	int nsmpl, gt_id, ad_id, baf_id, lrr_id, fmt_id, allele_a_id, allele_b_id;
 	int *sex;
 	int8_t *gt_phase_arr, *fmt_sign_arr;
 	int16_t *gt0_arr, *gt1_arr, *ad0_arr, *ad1_arr;
 	float *baf_arr[2];
+	int *imap_arr;
 	faidx_t *fai;
 	bcf_hdr_t *in_hdr, *out_hdr;
 } args_t;
@@ -80,7 +82,8 @@ const char *usage(void)
 	       "   -x  --sex <file>              file including information about sex of samples\n"
 	       "   -f, --fasta-ref <file>        reference sequence to compute GC and CpG content\n"
 	       "   -w, --window-size <int>       window size in bp used to compute the GC and CpG content [200]\n"
-	       "       --infer-baf-alleles       infer from genotypes and BAF which ones are the A and B alleles\n"
+	       "       --infer-BAF-alleles       infer from genotypes and BAF which ones are the A and B alleles\n"
+	       "       --cor-BAF-LRR             computes Pearson correlation between BAF and LRR at heterozygous sites\n"
 	       "   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with \"^\" prefix)\n"
 	       "   -S, --samples-file [^]<file>  file of samples to include (or exclude with \"^\" prefix)\n"
 	       "       --force-samples           only warn about unknown subset samples\n"
@@ -148,10 +151,11 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
 					   {"phase", no_argument, NULL, 'p'},
 					   {"fasta-ref", required_argument, NULL, 'f'},
 					   {"window-size", required_argument, NULL, 'w'},
-					   {"infer-baf-alleles", no_argument, NULL, 1},
+					   {"infer-BAF-alleles", no_argument, NULL, 1},
+					   {"cor-BAF-LRR", no_argument, NULL, 2},
 					   {"samples", required_argument, NULL, 's'},
 					   {"samples-file", required_argument, NULL, 'S'},
-					   {"force-samples", no_argument, NULL, 2},
+					   {"force-samples", no_argument, NULL, 3},
 					   {"drop-genotypes", no_argument, NULL, 'G'},
 					   {NULL, 0, NULL, 0}};
 
@@ -182,6 +186,9 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
 		case 1:
 			args->infer_baf_alleles = 1;
 			break;
+		case 2:
+			args->cor_baf_lrr = 1;
+			break;
 		case 's':
 			sample_names = optarg;
 			break;
@@ -189,7 +196,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
 			sample_names = optarg;
 			sample_is_file = 1;
 			break;
-		case 2:
+		case 3:
 			force_samples = 1;
 			break;
 		case 'G':
@@ -262,8 +269,11 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
 	args->gt_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "GT");
 	args->ad_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "AD");
 	args->baf_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "BAF");
+	args->lrr_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "LRR");
 	args->fmt_id =
 		args->format ? bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, args->format) : -1;
+	args->allele_a_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_A");
+	args->allele_b_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_B");
 
 	if (args->format && args->fmt_id < 0)
 		error("Error: %s format field is not present, cannot perform --balance analysis\n",
@@ -340,6 +350,20 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
 			"##INFO=<ID=ALLELE_B,Number=1,Type=Integer,Description=\"B allele\">");
 	}
 
+	if (args->cor_baf_lrr) {
+		if (args->allele_a_id < 0)
+			error("Error: ALLELE_A field is not present, cannot perform --cor-BAF-LRR analysis\n");
+		if (args->allele_b_id < 0)
+			error("Error: ALLELE_B field is not present, cannot perform --cor-BAF-LRR analysis\n");
+		if (args->baf_id < 0)
+			error("Error: BAF format is not present, cannot perform --cor-BAF-LRR analysis\n");
+		if (args->lrr_id < 0)
+			error("Error: LRR format is not present, cannot perform --cor-BAF-LRR analysis\n");
+		bcf_hdr_append(
+			args->out_hdr,
+			"##INFO=<ID=Cor_BAF_LRR,Number=3,Type=Float,Description=\"Pearson correlation for BAF and LRR at AA, AB, and BB genotypes\">");
+	}
+
 	if (sites_only)
 		if (bcf_hdr_set_samples(args->out_hdr, NULL, 0) < 0)
 			error("Error parsing the sample list\n");
@@ -352,6 +376,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out)
 	args->ad1_arr = (int16_t *)malloc(args->nsmpl * sizeof(int16_t));
 	args->baf_arr[0] = (float *)malloc(args->nsmpl * sizeof(float));
 	args->baf_arr[1] = (float *)malloc(args->nsmpl * sizeof(float));
+	args->imap_arr = (int *)malloc(args->nsmpl * sizeof(int));
 
 	return 0;
 }
@@ -393,7 +418,7 @@ static double binom_exact(int k, int n)
 			int curr_idx = 1 + (i >> 1) * ((i + 1) >> 1);
 			dbinom[curr_idx] = dbinom[prev_idx] * 0.5;
 			pbinom[curr_idx] = dbinom[curr_idx];
-			for (int j = 1; j<(i + 1)>> 1; j++) {
+			for (int j = 1; j<(i + 1) >> 1; j++) {
 				curr_idx++;
 				dbinom[curr_idx] =
 					(double)i / (double)j * dbinom[prev_idx] * 0.5;
@@ -408,26 +433,25 @@ static double binom_exact(int k, int n)
 	return 2.0 * pbinom[idx];
 }
 
-// Giulio Genovese's implementation in bcftools/vcfmocha.c
-static int sample_mean_var(const float *x, int n, double *mu, double *s2)
+static int sample_mean_var(const float *x, int n, double *xm, double *xss)
 {
 	if (n < 2)
 		return -1;
-	*mu = 0;
-	*s2 = 0;
+	*xm = 0;
+	*xss = 0;
 	int j = 0;
 	for (int i = 0; i < n; i++) {
 		if (!isnan(x[i])) {
-			*mu += (double)x[i];
-			*s2 += sq((double)x[i]);
+			*xm += (double)x[i];
+			*xss += sq((double)x[i]);
 			j++;
 		}
 	}
 	if (j <= 1)
 		return -1;
-	*mu /= (double)j;
-	*s2 -= sq(*mu) * (double)j;
-	*s2 /= (double)(j - 1);
+	*xm /= (double)j;
+	*xss -= sq(*xm) * (double)j;
+	*xss /= (double)(j - 1);
 	return 0;
 }
 
@@ -549,80 +573,6 @@ static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *fmt_sign_arr, int nsmpl)
 	return 1;
 }
 
-// TODO include this into vcfmocha.c
-static int get_alleles_idx(bcf_fmt_t *gt_fmt, bcf_fmt_t *baf_fmt, int nsmpl, int nals,
-			   int alleles_idx[2])
-{
-	if (!gt_fmt || gt_fmt->n != 2 || !baf_fmt || baf_fmt->n != 1
-	    || baf_fmt->type != BCF_BT_FLOAT || nals > 31)
-		return -1;
-
-	int alleles_cnt[2] = {0, 0};
-#define BRANCH(type_t, bcf_type_vector_end)                                                    \
-	{                                                                                      \
-		type_t *p = (type_t *)gt_fmt->p;                                               \
-		float *q = (float *)baf_fmt->p;                                                \
-		for (int i = 0; i < nsmpl; i++, p += 2, q++) {                                 \
-			if (p[0] == bcf_type_vector_end || bcf_gt_is_missing(p[0])             \
-			    || p[1] == bcf_type_vector_end || bcf_gt_is_missing(p[1])) {       \
-				continue;                                                      \
-			} else if (bcf_gt_allele(p[0]) == bcf_gt_allele(p[1])) {               \
-				if (q[0] < .5f)                                                \
-					alleles_cnt[0] |= 1 << bcf_gt_allele(p[0]);            \
-				else if (q[0] > .5f)                                           \
-					alleles_cnt[1] |= 1 << bcf_gt_allele(p[0]);            \
-			}                                                                      \
-		}                                                                              \
-	}
-	switch (gt_fmt->type) {
-	case BCF_BT_INT8:
-		BRANCH(int8_t, bcf_int8_vector_end);
-		break;
-	case BCF_BT_INT16:
-		BRANCH(int16_t, bcf_int16_vector_end);
-		break;
-	case BCF_BT_INT32:
-		BRANCH(int32_t, bcf_int32_vector_end);
-		break;
-	default:
-		error("Unexpected type %d\n", gt_fmt->type);
-	}
-#undef BRANCH
-
-	int ret = 0;
-	for (int i = 0; i < 2; i++) {
-		if (alleles_cnt[i] == 0)
-			alleles_idx[i] = -1;
-		else if (alleles_cnt[i] & (alleles_cnt[i] - 1))
-			ret = -1; // Brian Kernighan’s algorithm to test whether a number is a
-				  // power of 2
-		else
-			for (int j = 0; j < nals; j++)
-				if (alleles_cnt[i] == 1 << j)
-					alleles_idx[i] = j;
-	}
-
-	// in the case of two alternate alleles max, it imputes the non-observed homozygous
-	if (nals == 2) {
-		if (alleles_idx[0] < 0 && alleles_idx[1] >= 0)
-			alleles_idx[0] = 1 - alleles_idx[1];
-		if (alleles_idx[1] < 0 && alleles_idx[0] >= 0)
-			alleles_idx[1] = 1 - alleles_idx[0];
-	} else if (nals == 3) {
-		if (alleles_idx[0] < 0 && alleles_idx[1] > 0)
-			alleles_idx[0] = 3 - alleles_idx[1];
-		if (alleles_idx[1] < 0 && alleles_idx[0] > 0)
-			alleles_idx[1] = 3 - alleles_idx[0];
-	}
-
-	if (ret < 0 || alleles_idx[0] < 0 || alleles_idx[1] < 0) {
-		alleles_idx[0] = -1;
-		alleles_idx[1] = -1;
-	}
-
-	return ret;
-}
-
 bcf1_t *process(bcf1_t *rec)
 {
 	// compute GC and CpG content for each site
@@ -669,6 +619,8 @@ bcf1_t *process(bcf1_t *rec)
 			: 0;
 	bcf_fmt_t *baf_fmt = bcf_get_fmt_id(rec, args->baf_id);
 	int baf = baf_fmt && baf_fmt->n == 1 && baf_fmt->type == BCF_BT_FLOAT ? 1 : 0;
+	bcf_fmt_t *lrr_fmt = bcf_get_fmt_id(rec, args->lrr_id);
+	int lrr = lrr_fmt && lrr_fmt->n == 1 && lrr_fmt->type == BCF_BT_FLOAT ? 1 : 0;
 
 	float ret[4];
 	int ac_het = 0, ac_sex[] = {0, 0, 0, 0}, ac_het_sex[] = {0, 0}, ac_het_phase[] = {0, 0},
@@ -780,16 +732,82 @@ bcf1_t *process(bcf1_t *rec)
 		bcf_update_info_float(args->out_hdr, rec, "BAF_Phase_Test", &ret, 4);
 	}
 
+	if (!baf || !lrr)
+		goto ret;
+
 	if (args->infer_baf_alleles) {
-		int alleles_idx[2];
-		if (get_alleles_idx(gt_fmt, baf_fmt, args->nsmpl, rec->n_allele, alleles_idx)
-		    < 0)
+		int alleles[2];
+		switch (rec->n_allele) {
+		case 1:
+			alleles[0] = -1;
+			alleles[1] = -1;
+			break;
+		case 2:
+			alleles[0] = 0;
+			alleles[1] = 1;
+			break;
+		case 3:
+			alleles[0] = 1;
+			alleles[1] = 2;
+			break;
+		default:
+			error("Observed wrong number of alleles at %s:%" PRId64 "\n",
+			      bcf_hdr_id2name(args->in_hdr, rec->rid), rec->pos + 1);
+		}
+		float median[2] = {NAN, NAN};
+		int alleles_idx[2] = {-1, -1};
+		for (int i = 0; i < 2; i++) {
+			int n = 0;
+			for (int j = 0; j < args->nsmpl; j++)
+				if (args->gt0_arr[j] == alleles[i]
+				    && args->gt1_arr[j] == alleles[i])
+					args->imap_arr[n++] = j;
+			median[i] = get_median((float *)baf_fmt->p, n, args->imap_arr);
+			if (median[i] < .5)
+				alleles_idx[i] = alleles[0];
+			else if (median[i] > .5)
+				alleles_idx[i] = alleles[1];
+		}
+		if (alleles_idx[0] == alleles_idx[1]) {
+			alleles_idx[0] = -1;
+			alleles_idx[1] = -1;
 			fprintf(stderr,
 				"Unable to infer the A and B alleles while parsing the site %s:%" PRId64
 				"\n",
 				bcf_hdr_id2name(args->in_hdr, rec->rid), rec->pos + 1);
+		} else if (alleles_idx[0] == -1) {
+			alleles_idx[0] = alleles_idx[1] == alleles[0] ? alleles[1] : alleles[0];
+		} else if (alleles_idx[1] == -1) {
+			alleles_idx[1] = alleles_idx[0] == alleles[0] ? alleles[1] : alleles[0];
+		}
 		bcf_update_info_int32(args->out_hdr, rec, "ALLELE_A", &alleles_idx[0], 1);
 		bcf_update_info_int32(args->out_hdr, rec, "ALLELE_B", &alleles_idx[1], 1);
+	}
+
+	if (args->cor_baf_lrr) {
+		bcf_info_t *allele_a_info = bcf_get_info_id(rec, args->allele_a_id);
+		int8_t allele_a = ((int8_t *)allele_a_info->vptr)[0];
+		bcf_info_t *allele_b_info = bcf_get_info_id(rec, args->allele_b_id);
+		int8_t allele_b = ((int8_t *)allele_b_info->vptr)[0];
+
+		float rho[3];
+		for (int i = 0; i < 3; i++) {
+			int n = 0;
+			for (int j = 0; j < args->nsmpl; j++) {
+				int n_a = (args->gt0_arr[j] == allele_a)
+					  + (args->gt1_arr[j] == allele_a);
+				int n_b = (args->gt0_arr[j] == allele_b)
+					  + (args->gt1_arr[j] == allele_b);
+				if (n_a == 2 - i && n_b == i)
+					args->imap_arr[n++] = j;
+			}
+			// compute the Pearson correlation
+			float xss = 0.0f, yss = 0.0f, xyss = 0.0f;
+			get_cov((float *)baf_fmt->p, (float *)lrr_fmt->p, n, args->imap_arr,
+				&xss, &yss, &xyss);
+			rho[i] = xyss / sqrtf(xss * yss);
+		}
+		bcf_update_info_float(args->out_hdr, rec, "Cor_BAF_LRR", &rho, 3);
 	}
 
 ret:
@@ -811,5 +829,6 @@ void destroy(void)
 	free(args->ad1_arr);
 	free(args->baf_arr[0]);
 	free(args->baf_arr[1]);
+	free(args->imap_arr);
 	free(args);
 }
