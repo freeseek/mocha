@@ -1,0 +1,8 @@
+{
+  "IdatToGtc.green_idat": "gs://broad-dsde-methods-cwhelan/mocha-data/HapMap.HumanOmni25M-8v1-1/9295359049/9295359049_R01C01_Grn.idat",
+  "IdatToGtc.red_idat": "gs://broad-dsde-methods-cwhelan/mocha-data/HapMap.HumanOmni25M-8v1-1/9295359049/9295359049_R01C01_Red.idat",
+  "IdatToGtc.bpm_manifest": "gs://broad-dsde-methods-cwhelan/mocha-data/HapMap.HumanOmni25M-8v1-1/HumanOmni2.5M-8v1-1_B.bpm",
+  "IdatToGtc.egt_cluster_file": "gs://broad-dsde-methods-cwhelan/mocha-data/HapMap.HumanOmni25M-8v1-1/humanomni2-5m-8v1-1_b.egt",
+  "IdatToGtc.sample": "NA20827"
+}
+

@@ -1,0 +1,19 @@
+{
+  "Gtc2Vcf.egt_cluster_file": "gs://broad-dsde-methods-cwhelan/mocha-data/HapMap.HumanOmni25M-8v1-1/humanomni2-5m-8v1-1_b.egt",
+  "Gtc2Vcf.bpm_manifest": "gs://broad-dsde-methods-cwhelan/mocha-data/HapMap.HumanOmni25M-8v1-1/HumanOmni25M-8v1-1_B.bpm",
+  "Gtc2Vcf.csv_manifest": "gs://broad-dsde-methods-cwhelan/mocha-data/HapMap.HumanOmni25M-8v1-1/HumanOmni25M-8v1-1_B.csv",
+
+  "Gtc2Vcf.ref_fasta_pac": "gs://broad-dsde-methods-cwhelan/mocha-resources/GRCh38/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.pac",
+  "Gtc2Vcf.ref_fasta_sa": "gs://broad-dsde-methods-cwhelan/mocha-resources/GRCh38/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.sa",
+  "Gtc2Vcf.gtcs" : 
+     [
+       "gs://broad-methods-cromwell-exec-bucket-v47/IdatToGtc/55fc0814-3249-4e82-83e3-41d333591482/call-GenCall/9295359049_R01C01.gtc"
+     ],
+  "Gtc2Vcf.ref_fasta_fai": "gs://broad-dsde-methods-cwhelan/mocha-resources/GRCh38/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai",
+  "Gtc2Vcf.out_prefix": "test_sample_set",  
+  "Gtc2Vcf.ref_fasta_ann": "gs://broad-dsde-methods-cwhelan/mocha-resources/GRCh38/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.ann",
+  "Gtc2Vcf.ref_fasta": "gs://broad-dsde-methods-cwhelan/mocha-resources/GRCh38/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna",  
+  "Gtc2Vcf.ref_fasta_amb": "gs://broad-dsde-methods-cwhelan/mocha-resources/GRCh38/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.amb",
+  "Gtc2Vcf.ref_fasta_bwt": "gs://broad-dsde-methods-cwhelan/mocha-resources/GRCh38/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.bwt"
+}
+
