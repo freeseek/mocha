@@ -1,0 +1,13 @@
+{
+  "ubuntu": "ubuntu:20.10",
+  "pandas": "fastgenomics/pandas:0.22-p36-v3",
+  "iaap_cli": "us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-20200720",
+  "autoconvert": "us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-20200720",
+  "apt": "us.gcr.io/mccarroll-mocha/apt:1.10.2-20200720",
+  "gtc2vcf": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
+  "bcftools": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
+  "shapeit4": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
+  "eagle": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
+  "mocha": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
+  "mocha_plot":"us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-20200720"
+}
