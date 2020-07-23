@@ -26,7 +26,7 @@ and this website. For any feedback or questions, contact the <a href="mailto:giu
 Usage
 =====
 
-NOTICE: Starting from July 2020 a <a href="wdl">WDL</> pipeline is available to run the entire MoChA pipeline from raw intensity files to final calls
+NOTICE: Starting from July 2020 a <a href="wdl">WDL</a> pipeline is available to run the entire MoChA pipeline from raw intensity files to final calls
 
 ```
 Usage:   bcftools +mocha [OPTIONS] <in.vcf>
