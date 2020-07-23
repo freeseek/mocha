@@ -26,9 +26,7 @@ and this website. For any feedback or questions, contact the <a href="mailto:giu
 Usage
 =====
 
-NOTICE: Starting from May 2020 MoChA regress the BAF against the LRR following previous studies that showed a residual correlation from both Illumina (Staaf et al. 2008) and Affymetrix (Mayrhofer et al. 2016) DNA microarrays. This leads to a slightly increased capability to detect low cell fraction events
-
-NOTICE: Starting from April 2020 MoChA is distributed as a standalone BCFtools plugin. You have to update `bcftools mocha` to `bcftools +mocha` in your pipelines
+NOTICE: Starting from July 2020 a <a href="wdl">WDL</> pipeline is available to run the entire MoChA pipeline from raw intensity files to final calls
 
 ```
 Usage:   bcftools +mocha [OPTIONS] <in.vcf>
