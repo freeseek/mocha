@@ -36,6 +36,7 @@ parser <- add_option(parser, c('--cytoband'), type = 'character', help = 'cytoba
 parser <- add_option(parser, c('--wgs'), action = 'store_true', default = FALSE, help = 'whether the input VCF file contains WGS data')
 parser <- add_option(parser, c('--mocha'), action = 'store_true', default = FALSE, help = 'whether the input VCF file contains Ldev/Bdev data')
 parser <- add_option(parser, c('--no-adjust'), action = 'store_true', default = FALSE, help = 'for array data whether BAF and LRR should not be adjusted')
+parser <- add_option(parser, c('--stats'), type = 'character', help = 'input MoChA stats file', metavar = '<file.tsv>')
 parser <- add_option(parser, c('--vcf'), type = 'character', help = 'input VCF file', metavar = '<file.vcf>')
 parser <- add_option(parser, c('--exclude'), type = 'character', help = 'regions to exclude listed in a file', metavar = '<file.bed>')
 parser <- add_option(parser, c('--pdf'), type = 'character', help = 'output PDF file', metavar = '<file.pdf>')
@@ -95,8 +96,8 @@ if (!is.null(args$cytoband)) {
 }
 
 # load main table from VCF file
-fmt <- '"[%CHROM\\t%POS\\t%REF\\t%ALT\\t%SAMPLE\\t%GT'
-names <- c('CHROM', 'POS', 'REF', 'ALT', 'SAMPLE', 'GT')
+fmt <- '"[%CHROM\\t%POS\\t%REF\\t%ALT\\t%INFO/GC\\t%SAMPLE\\t%GT'
+names <- c('CHROM', 'POS', 'REF', 'ALT', 'GC', 'SAMPLE', 'GT')
 if (!args$wgs) {
   if (args$mocha && !args$no_adjust)
   {
@@ -159,6 +160,14 @@ if (!args$wgs && args$mocha && !args$no_adjust) {
     idx <- df$GTS == gt
     df$BAF[idx] <- df$BAF[idx] - df[idx, paste0(gt, '_BAF1')] * df$LRR[idx] - df[idx, paste0(gt, '_BAF0')]
     df$LRR[idx] <- df$LRR[idx] - df[idx, paste0(gt, '_LRR0')]
+  }
+}
+if (!is.null(args$stats)) {
+  df_stats <- read.table(args$stats, sep = '\t', header = TRUE)
+  lrr_gc_order <- length(df_stats) - 17
+  df <- merge(df, setNames(df_stats[, c(1, 17+(0:lrr_gc_order))], c('SAMPLE', paste0('lrr_gc_', 0:lrr_gc_order))))
+  for (i in 0:lrr_gc_order) {
+    df$LRR <- df$LRR - as.numeric(df$GC)^i * df[,paste0('gc', i)]
   }
 }
 

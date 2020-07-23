@@ -38,35 +38,33 @@
 typedef struct _beta_binom_t beta_binom_t;
 
 struct _beta_binom_t {
-	double p;
-	double rho;
-	int n1;
-	int n2;
-	double *log_gamma_alpha;
-	double *log_gamma_beta;
-	double *log_gamma_alpha_beta;
-	int m_log_gamma_alpha;
-	int m_log_gamma_beta;
-	int m_log_gamma_alpha_beta;
+    double p;
+    double rho;
+    int n1;
+    int n2;
+    double *log_gamma_alpha;
+    double *log_gamma_beta;
+    double *log_gamma_alpha_beta;
+    int m_log_gamma_alpha;
+    int m_log_gamma_beta;
+    int m_log_gamma_alpha_beta;
 };
 
-beta_binom_t *beta_binom_init()
-{
-	beta_binom_t *self = (beta_binom_t *)calloc(1, sizeof(beta_binom_t));
-	hts_expand0(double, 1, self->m_log_gamma_alpha, self->log_gamma_alpha);
-	hts_expand0(double, 1, self->m_log_gamma_beta, self->log_gamma_beta);
-	hts_expand0(double, 1, self->m_log_gamma_alpha_beta, self->log_gamma_alpha_beta);
-	self->p = NAN;
-	self->rho = NAN;
-	return self;
+beta_binom_t *beta_binom_init() {
+    beta_binom_t *self = (beta_binom_t *)calloc(1, sizeof(beta_binom_t));
+    hts_expand0(double, 1, self->m_log_gamma_alpha, self->log_gamma_alpha);
+    hts_expand0(double, 1, self->m_log_gamma_beta, self->log_gamma_beta);
+    hts_expand0(double, 1, self->m_log_gamma_alpha_beta, self->log_gamma_alpha_beta);
+    self->p = NAN;
+    self->rho = NAN;
+    return self;
 }
 
-void beta_binom_destroy(beta_binom_t *self)
-{
-	free(self->log_gamma_alpha);
-	free(self->log_gamma_beta);
-	free(self->log_gamma_alpha_beta);
-	free(self);
+void beta_binom_destroy(beta_binom_t *self) {
+    free(self->log_gamma_alpha);
+    free(self->log_gamma_beta);
+    free(self->log_gamma_alpha_beta);
+    free(self);
 }
 
 /**
@@ -85,61 +83,53 @@ void beta_binom_destroy(beta_binom_t *self)
 // p is the probability of success
 // rho is the "intra class" or "intra cluster" correlation
 // in Artieri et al. 2017, overdispersion is exactly "(1 - rho) / rho"
-void beta_binom_update(beta_binom_t *self, double p, double rho, int n1, int n2)
-{
-	if (self->p != p || self->rho != rho) {
-		self->p = p;
-		self->rho = rho;
-		self->n1 = 0;
-		self->n2 = 0;
-	}
+void beta_binom_update(beta_binom_t *self, double p, double rho, int n1, int n2) {
+    if (self->p != p || self->rho != rho) {
+        self->p = p;
+        self->rho = rho;
+        self->n1 = 0;
+        self->n2 = 0;
+    }
 
-	hts_expand(double, n1 + 1, self->m_log_gamma_alpha, self->log_gamma_alpha);
-	hts_expand(double, n1 + 1, self->m_log_gamma_beta, self->log_gamma_beta);
-	hts_expand(double, n2 + 1, self->m_log_gamma_alpha_beta, self->log_gamma_alpha_beta);
+    hts_expand(double, n1 + 1, self->m_log_gamma_alpha, self->log_gamma_alpha);
+    hts_expand(double, n1 + 1, self->m_log_gamma_beta, self->log_gamma_beta);
+    hts_expand(double, n2 + 1, self->m_log_gamma_alpha_beta, self->log_gamma_alpha_beta);
 
-	if (rho == 0) // binomial distribution case (no overdispersion)
-	{
-		double log_alpha = log(p);
-		double log_beta = log(1.0 - p);
+    if (rho == 0) // binomial distribution case (no overdispersion)
+    {
+        double log_alpha = log(p);
+        double log_beta = log(1.0 - p);
 
-		while (self->n1 < n1) {
-			self->n1++;
-			double log_n1 = log(self->n1);
-			self->log_gamma_alpha[self->n1] =
-				self->log_gamma_alpha[self->n1 - 1] + log_alpha - log_n1;
-			self->log_gamma_beta[self->n1] =
-				self->log_gamma_beta[self->n1 - 1] + log_beta - log_n1;
-		}
+        while (self->n1 < n1) {
+            self->n1++;
+            double log_n1 = log(self->n1);
+            self->log_gamma_alpha[self->n1] = self->log_gamma_alpha[self->n1 - 1] + log_alpha - log_n1;
+            self->log_gamma_beta[self->n1] = self->log_gamma_beta[self->n1 - 1] + log_beta - log_n1;
+        }
 
-		while (self->n2 < n2) {
-			self->n2++;
-			self->log_gamma_alpha_beta[self->n2] =
-				self->log_gamma_alpha_beta[self->n2 - 1] - log(self->n2);
-		}
-	} else {
-		double s = (1.0 - rho) / rho;
-		double alpha = p * s;
-		double beta = (1.0 - p) * s;
+        while (self->n2 < n2) {
+            self->n2++;
+            self->log_gamma_alpha_beta[self->n2] = self->log_gamma_alpha_beta[self->n2 - 1] - log(self->n2);
+        }
+    } else {
+        double s = (1.0 - rho) / rho;
+        double alpha = p * s;
+        double beta = (1.0 - p) * s;
 
-		while (self->n1 < n1) {
-			self->n1++;
-			self->log_gamma_alpha[self->n1] =
-				self->log_gamma_alpha[self->n1 - 1]
-				+ log((alpha + (double)self->n1 - 1.0) / (double)self->n1);
-			self->log_gamma_beta[self->n1] =
-				self->log_gamma_beta[self->n1 - 1]
-				+ log((beta + (double)self->n1 - 1.0) / (double)self->n1);
-		}
+        while (self->n1 < n1) {
+            self->n1++;
+            self->log_gamma_alpha[self->n1] =
+                self->log_gamma_alpha[self->n1 - 1] + log((alpha + (double)self->n1 - 1.0) / (double)self->n1);
+            self->log_gamma_beta[self->n1] =
+                self->log_gamma_beta[self->n1 - 1] + log((beta + (double)self->n1 - 1.0) / (double)self->n1);
+        }
 
-		while (self->n2 < n2) {
-			self->n2++;
-			self->log_gamma_alpha_beta[self->n2] =
-				self->log_gamma_alpha_beta[self->n2 - 1]
-				+ log((alpha + beta + (double)self->n2 - 1.0)
-				      / (double)self->n2);
-		}
-	}
+        while (self->n2 < n2) {
+            self->n2++;
+            self->log_gamma_alpha_beta[self->n2] = self->log_gamma_alpha_beta[self->n2 - 1]
+                                                   + log((alpha + beta + (double)self->n2 - 1.0) / (double)self->n2);
+        }
+    }
 }
 
 /**
@@ -147,22 +137,18 @@ void beta_binom_update(beta_binom_t *self, double p, double rho, int n1, int n2)
  *  Returns the equivalent of dbeta_binom(a, a+b, p, (1 - rho) / rho, log=TRUE) from R package
  * rmutil
  */
-inline double beta_binom_log_unsafe(const beta_binom_t *self, int a, int b)
-{
-	return self->log_gamma_alpha[a] + self->log_gamma_beta[b]
-	       - self->log_gamma_alpha_beta[a + b];
+inline double beta_binom_log_unsafe(const beta_binom_t *self, int a, int b) {
+    return self->log_gamma_alpha[a] + self->log_gamma_beta[b] - self->log_gamma_alpha_beta[a + b];
 }
 
 /**
  *  Same as before but it performs boundary checking before computing the log likelihood
  */
-inline double beta_binom_log(beta_binom_t *self, int a, int b)
-{
-	if (a < 0 || b < 0)
-		return NAN;
-	if (a > self->n1 || b > self->n1 || a + b > self->n2)
-		beta_binom_update(self, self->p, self->rho, a > b ? a : b, a + b);
-	return beta_binom_log_unsafe(self, a, b);
+inline double beta_binom_log(beta_binom_t *self, int a, int b) {
+    if (a < 0 || b < 0) return NAN;
+    if (a > self->n1 || b > self->n1 || a + b > self->n2)
+        beta_binom_update(self, self->p, self->rho, a > b ? a : b, a + b);
+    return beta_binom_log_unsafe(self, a, b);
 }
 
 #endif

@@ -1,14 +1,14 @@
 ![](mocha_logo.png)
 
-A bcftools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following <a href="http://doi.org/10.1038/s41586-018-0321-x">paper</a> and <a href="http://doi.org/10.1101/653691">preprint</a>:
+A bcftools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following papers from <a href="http://doi.org/10.1038/s41586-018-0321-x">2018</a> and <a href="http://doi.org/10.1038/s41586-020-2430-6">2020</a>:
 ```
 Loh P., Genovese G., McCarroll S., Price A. et al. Insights about clonal expansions from 8,342 mosaic
 chromosomal alterations. Nature 559, 350–355 (2018). [PMID: 29995854] [DOI: 10.1038/s41586-018-0321-x]
 
 Loh P., Genovese G., McCarroll S., Monogenic and polygenic inheritance become
-instruments for clonal selection (2019). [DOI: 10.1101/653691]
+instruments for clonal selection (2020). [PMID: 32581363] [DOI: 10.1038/s41586-020-2430-6]
 ```
-and this website. For any feedback, send an email to giulio.genovese@gmail.com
+and this website. For any feedback or questions, contact the <a href="mailto:giulio.genovese@gmail.com">author</a>
 
 <!--ts-->
    * [Usage](#usage)
@@ -38,13 +38,14 @@ Required options:
     -R, --rules-file <file>           genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE
 
 General Options:
+    -x, --sex <file>                  file including information about the gender of the samples
     -s, --samples [^]<list>           comma separated list of samples to include (or exclude with "^" prefix)
     -S, --samples-file [^]<file>      file of samples to include (or exclude with "^" prefix)
         --force-samples               only warn about unknown subset samples
+    -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants
     -t, --targets [^]<region>         restrict to comma-separated list of regions. Exclude regions with "^" prefix
     -T, --targets-file [^]<file>      restrict to regions listed in a file. Exclude regions with "^" prefix
     -f, --apply-filters <list>        require at least one of the listed FILTER strings (e.g. "PASS,.")
-    -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants
                                       to include (or exclude with "^" prefix) in the analysis
     -p  --cnp <file>                  list of regions to genotype in BED format
         --threads <int>               number of extra output compression threads [0]
@@ -61,7 +62,7 @@ Output Options:
     -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]
 
 HMM Options:
-        --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model [-2.0,-4.0,-6.0,10.0,6.0,4.0]
+        --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model without phase [-2.0,-4.0,-6.0,10.0,6.0,4.0]
         --bdev-BAF-phase <list>       comma separated list of inverse BAF deviations for BAF+phase model
                                       [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
         --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [400]
@@ -79,7 +80,7 @@ HMM Options:
         --use-no-rules-chrs           use chromosomes without centromere rules [FALSE]
         --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [0.2]
         --LRR-hap2dip <float>         difference between LRR for haploid and diploid [0.45]
-        --LRR-cutoff <float>          cutoff between LRR for haploid and diploid [estimated from X nonPAR]
+        --LRR-cutoff <float>          cutoff between LRR for haploid and diploid used to infer gender [estimated from X nonPAR]
 
 Examples:
     bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed
@@ -91,7 +92,7 @@ Installation
 
 Install basic tools (Debian/Ubuntu specific if you have admin privileges):
 ```
-sudo apt install wget autoconf zlib1g-dev gzip unzip samtools bedtools bcftools
+sudo apt install wget git g++ zlib1g-dev unzip samtools bedtools bcftools libgomp1
 ```
 
 Optionally, you can install these libraries to activate further HTSlib features:
@@ -101,7 +102,7 @@ sudo apt install libbz2-dev libssl-dev liblzma-dev libgsl0-dev
 
 Preparation steps
 ```
-mkdir -p $HOME/bin $HOME/res $HOME/res/kgp && cd /tmp
+mkdir -p $HOME/bin $HOME/res && cd /tmp
 ```
 
 We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a>. However, notice that you will require a copy of BCFtools 1.10 or newer (available with Ubuntu 20.04)
@@ -114,15 +115,15 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 
 Download plugins code
 ```
-/bin/rm -f bcftools/plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,importFMT,extendFMT}.c}
-wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,importFMT,extendFMT}.c}
+/bin/rm -f bcftools/plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
+wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
 ```
 
 Compile latest version of HTSlib (optionally disable bz2, gcs, and lzma) and BCFtools (make sure you are using gcc version 5 or newer)
 ```
 cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-gcs --disable-lzma && make && cd ..
 cd bcftools && make && cd ..
-/bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,importFMT,extendFMT}.so} $HOME/bin/
+/bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,extendFMT}.so} $HOME/bin/
 ```
 Notice that you will need some functionalities missing from the base version of bcftools to run the pipeline
 
@@ -166,7 +167,7 @@ wget -P $HOME/res https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tab
 
 1000 Genomes project phase 3
 ```
-cd $HOME/res/kgp
+cd $HOME/res
 wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr{{1..22}.phase3_shapeit2_mvncall_integrated_v5a,X.phase3_shapeit2_mvncall_integrated_v1b,Y.phase3_integrated_v2a}.20130502.genotypes.vcf.gz{,.tbi}
 for chr in {1..22} X Y; do
   bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][ab].20130502.genotypes.vcf.gz | \
@@ -202,7 +203,7 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
 
 1000 Genomes project phase 3 imputation panel for Minimac3 (optional for array data)
 ```
-cd $HOME/res/kgp
+cd $HOME/res
 for chr in {1..22} X; do
   if [ $chr == "X" ]; then
     bcftools +fixploidy --no-version ALL.chr$chr.phase3_integrated.20130502.genotypes.bcf -- -f 2 | \
@@ -219,6 +220,7 @@ for chr in {1..22} X; do
   /bin/rm tmp.chr$chr.GRCh37.vcf
 done
 ```
+Notice that this conversion takes ~26GB of RAM to complete and ~4 days of CPU time
 
 Download cytoband file
 ```
@@ -228,8 +230,9 @@ wget -O $HOME/res/cytoBand.hg19.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath
 Setup variables
 ```
 ref="$HOME/res/human_g1k_v37.fasta"
+mhc="6:32443271-32558428"
 map="$HOME/res/genetic_map_hg19_withX.txt.gz"
-kgp_pfx="$HOME/res/kgp/ALL.chr"
+kgp_pfx="$HOME/res/ALL.chr"
 kgp_sfx=".phase3_integrated.20130502.genotypes"
 rule="GRCh37"
 cnp="$HOME/res/cnp.grch37.bed"
@@ -254,7 +257,7 @@ wget -P $HOME/res https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tab
 
 1000 Genomes project phase 3 (fixing contig names, removing duplicate variants, removing incomplete variants)
 ```
-cd $HOME/res/kgp
+cd $HOME/res
 wget http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/ALL.chr{{1..22},X,Y}_GRCh38.genotypes.20170504.vcf.gz{,.tbi}
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 for chr in {1..22} X Y; do
@@ -296,7 +299,7 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
 
 1000 Genomes project phase 3 imputation panel for Minimac3 (optional for array data)
 ```
-cd $HOME/res/kgp
+cd $HOME/res
 for chr in {1..22} X; do
   if [ $chr == "X" ]; then
     bcftools +fixploidy --no-version ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -- -f 2 | \
@@ -313,6 +316,7 @@ for chr in {1..22} X; do
   /bin/rm tmp.chr$chr.GRCh38.vcf
 done
 ```
+Notice that this conversion takes ~26GB of RAM to complete and ~4 days of CPU time
 
 Download cytoband file
 ```
@@ -322,8 +326,9 @@ wget -O $HOME/res/cytoBand.hg38.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath
 Setup variables
 ```
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
+mhc="chr6:32475494-32590651"
 map="$HOME/res/genetic_map_hg38_withX.txt.gz"
-kgp_pfx="$HOME/res/kgp/ALL.chr"
+kgp_pfx="$HOME/res/ALL.chr"
 kgp_sfx="_GRCh38.genotypes.20170504"
 rule="GRCh38"
 cnp="$HOME/res/cnp.grch38.bed"
@@ -339,30 +344,32 @@ Preparation steps
 vcf="..." # input VCF file with phased GT, LRR, and BAF
 pfx="..." # output prefix
 thr="..." # number of threads to use
-sex="..." # file with sex information (first column sample ID, second column sex: 1=male; 2=female)
+crt="..." # file with call rate information (first column sample ID, second column call rate)
+sex="..." # file with gender information (first column sample ID, second column gender: 1=male; 2=female)
 xcl="..." # VCF file with additional list of variants to exclude (optional)
 ped="..." # pedigree file to use if parent child duos are present
 dir="..." # directory where output files will be generated
 mkdir -p $dir
 ```
 
-If you want to process <b>genotype array</b> data you need a VCF file with ALLELE_A, ALLELE_B, GT, BAF, and LRR information:
+If you want to process <b>genotype array</b> data you need a VCF file with ALLELE_A, ALLELE_B, GC, GT, BAF, and LRR information:
 ```
 ##fileformat=VCFv4.2
 ##INFO=<ID=ALLELE_A,Number=1,Type=Integer,Description="A allele">
 ##INFO=<ID=ALLELE_B,Number=1,Type=Integer,Description="B allele">
+##INFO=<ID=GC,Number=1,Type=Float,Description="GC ratio content around the variant">
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
 ##FORMAT=<ID=BAF,Number=1,Type=Float,Description="B Allele Frequency">
 ##FORMAT=<ID=LRR,Number=1,Type=Float,Description="Log R Ratio">
 #CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	NA12878
-1	752566	rs3094315	G	A	.	.	ALLELE_A=1;ALLELE_B=0	GT:BAF:LRR	1|1:0.0111:-0.0798
-1	776546	rs12124819	A	G	.	.	ALLELE_A=0;ALLELE_B=1	GT:BAF:LRR	0|1:0.5441:0.4959
-1	798959	rs11240777	G	A	.	.	ALLELE_A=1;ALLELE_B=0	GT:BAF:LRR	0|0:0.9712:0.2276
-1	932457	rs1891910	G	A	.	.	ALLELE_A=1;ALLELE_B=0	GT:BAF:LRR	1|0:0.5460:-0.1653
+1	752566	rs3094315	G	A	.	.	ALLELE_A=1;ALLELE_B=0;GC=0.3675	GT:BAF:LRR	1|1:0.0111:-0.0798
+1	776546	rs12124819	A	G	.	.	ALLELE_A=0;ALLELE_B=1;GC=0.435	GT:BAF:LRR	0|1:0.5441:0.4959
+1	798959	rs11240777	G	A	.	.	ALLELE_A=1;ALLELE_B=0;GC=0.4075	GT:BAF:LRR	0|0:0.9712:0.2276
+1	932457	rs1891910	G	A	.	.	ALLELE_A=1;ALLELE_B=0;GC=0.6425	GT:BAF:LRR	1|0:0.5460:-0.1653
 ```
 Making sure that BAF refers to the allele frequency of the reference allele if ALLELE_B=0 and of the alternate allele if ALLELE_B=1
 
-If you do not already have a VCF file but you have Illumina or Affymetrix genotype array data, you can use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> tools to convert the data to VCF. Alternatively you can use your own scripts
+If you do not already have a VCF file but you have Illumina or Affymetrix genotype array data, you can use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> tools to convert the data to VCF and you can use the mochatools plugin to fill the ALLELE_A/ALLELE_B/GC info fields. Alternatively you can use your own scripts
 
 Create a minimal binary VCF
 ```
@@ -371,16 +378,17 @@ bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf $vcf \
   bcftools index -f $dir/$pfx.unphased.bcf
 ```
 
-If you want to process <b>whole-genome sequence</b> data you need a VCF file with GT and AD information:
+If you want to process <b>whole-genome sequence</b> data you need a VCF file with GC, GT and AD information:
 ```
 ##fileformat=VCFv4.2
+##INFO=<ID=GC,Number=1,Type=Float,Description="GC ratio content around the variant">
 ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
 ##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allelic depths for the ref and alt alleles in the order listed">
 #CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	NA12878
-1	752566	rs3094315	G	A	.	.	.	GT:AD	1|1:0,31
-1	776546	rs12124819	A	G	.	.	.	GT:AD	0|1:21,23
-1	798959	rs11240777	G	A	.	.	.	GT:AD	0|0:31,0
-1	932457	rs1891910	G	A	.	.	.	GT:AD	1|0:18,14
+1	752566	rs3094315	G	A	.	.	GC=0.3675	GT:AD	1|1:0,31
+1	776546	rs12124819	A	G	.	.	GC=0.435	GT:AD	0|1:21,23
+1	798959	rs11240777	G	A	.	.	GC=0.4075	GT:AD	0|0:31,0
+1	932457	rs1891910	G	A	.	.	GC=0.6425	GT:AD	1|0:18,14
 ```
 Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will not <a href="https://github.com/samtools/bcftools/issues/360">split properly</a>
 
@@ -396,18 +404,22 @@ bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/'
 ```
 This will set to missing all genotypes that have low coverage or low genotyping quality, as these can cause issues
 
-Perform basic quality control (the generated list of variants will be excluded from modeling by both eagle and mocha)
+Generate a list of variants that will be excluded from modeling by both eagle and mocha (notice that you will need a version newer than BCFtools 1.10.2 with implemented the F_MISSING option, or else you should drop that filter)
 ```
-n=$(bcftools query -l $dir/$pfx.unphased.bcf|wc -l); \
-ns=$((n*98/100)); \
+mhc_chr=$(echo $mhc | cut -d: -f1)
+mhc_beg=$(echo $mhc | cut -d: -f2 | cut -d- -f1)
+mhc_end=$(echo $mhc | cut -d- -f2)
+awk -F"\t" '$2<.97 {print $1}' $crt > samples_xcl_list.txt; \
 echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
-  bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
-  bcftools +fill-tags --no-version -Ou -t ^Y,MT,chrY,chrM -- -t NS,ExcHet | \
+  bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin -x ^samples_xcl_list.txt $dir/$pfx.unphased.bcf | \
+  bcftools filter --no-version -Ou -e "CHROM==\"$mhc_chr\" && POS>$mhc_beg && POS<$mhc_end" --soft-filter MHC | \
+  bcftools +fill-tags --no-version -Ou -t ^Y,MT,chrY,chrM -- -t ExcHet,F_MISSING | \
   bcftools +mochatools --no-version -Ou -- -x $sex -G | \
   bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
-    -i 'FILTER!="." && FILTER!="PASS" || JK<.02 || NS<'$ns' || ExcHet<1e-6 || AC_Sex_Test>6' \
-    -x FILTER,^INFO/JK,^INFO/NS,^INFO/ExcHet,^INFO/AC_Sex_Test && \
-  bcftools index -f $dir/$pfx.xcl.bcf
+    -i 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-.97 || INFO/AC_Sex_Test>6' \
+    -x ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING,^INFO/AC_Sex_Test && \
+  bcftools index -f $dir/$pfx.xcl.bcf;
+/bin/rm samples_xcl_list.txt
 ```
 This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6). If you are using WGS data and you don't have a file with sex information, you can skip the quality control line using this information. When later running MoChA, sex will be imputed and a sex file can be computed from MoChA's output
 
@@ -440,7 +452,9 @@ for chr in {1..22} X; do
   bcftools index -f $dir/$pfx.chr$chr.bcf
 done
 ```
-Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions
+Eagle's <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-100003.2">memory requirements</a> will depend on the number of samples in the target (Nt) and in the reference panel (Nr=2504), and the number of variants (M) in the largest contig, and will amount to 1.5(Nt+Nr)M bytes. The <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-110003.3">running time</a> will be ~1 minute of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">reference-based phasing</a> with a small target and reference panel (see Supplementary Tables 2,3) and ~5 minutes of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">non-reference-based phasing</a> with a large cohort (see Supplementary Tables 7,8). Also, by default, if the option --pbwtIters is not used, Eagle will perform one phasing iteration if Nt<Nr/2=1252, two if 1252=Nr/2<Nt<2Nr=5008, and three if 5008=2Nr<Nt and in the second and third iterations both target and reference panel haplotypes will be used as references for phasing (see <a href="https://www.nature.com/articles/ng.3679#Sec10"here</a>).
+
+Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions. Notice also that phasing can also be performed across overlapping windows rather than entire chromosomes to achieve better parallelization
 
 Extract chromosomes that do not require phasing
 ```
@@ -451,15 +465,14 @@ bcftools index -f $dir/$pfx.other.bcf
 
 Concatenate eagle output into a single VCF file and add GC/CpG content information
 ```
-bcftools concat --no-version -Ou --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf | \
-bcftools +mochatools --no-version -Ob -o $dir/$pfx.bcf -- -f $ref && \
+bcftools concat --no-version -Ob -o $dir/$pfx.bcf --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf && \
 bcftools index -f $dir/$pfx.bcf
 ```
+Notice that if the phasing was made in overlapping windows rather than chromosomes, the overlapping windows should be concatenated using the --ligate option in bcftools concat
 
 If pedigree information with duos or trios is available, you can improve the phased haplotypes from `eagle` by running the following command instead of the previous one:
 ```
 bcftools concat --no-version -Ou --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf | \
-bcftools +mochatools --no-version -Ou -- -f $ref | \
 bcftools +trio-phase --no-version -Ob -o $dir/$pfx.bcf --threads $thr -- -p $ped && \
 bcftools index -f $dir/$pfx.bcf
 ```
@@ -501,6 +514,7 @@ Chromosomal alterations pipeline
 Preparation steps
 ```
 pfx="..." # output prefix
+sex="..." # file with gender information (first column sample ID, second column gender: 1=male; 2=female)
 thr="..." # number of extra threads to use
 lst="..." # file with list of samples to analyze for asymmetries (e.g. samples with 1p CN-LOH)
 ```
@@ -509,6 +523,7 @@ Call mosaic chromosomal alterations with MoChA
 ```
 bcftools +mocha \
   --rules $rule \
+  --sex $sex \
   --no-version \
   --output-type b \
   --output $dir/$pfx.mocha.bcf \
@@ -524,48 +539,49 @@ bcftools index -f $dir/$pfx.mocha.bcf
 
 The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns:
 ```
-               SAMPLE - sample ID
-           XXX_MEDIAN - median LRR or sequencing coverage across autosomes
-               XXX_SD - standard deviation for LRR or sequencing coverage
-             XXX_AUTO - auto correlation across consecutive sites for LRR or sequencing coverage (after GC correction)
-         BAF_SD/_CORR - BAF standard deviation or beta-binomial overdispersion for read counts
-             BAF_CONC - BAF phase concordance across phased heterozygous sites (see Vattathil et al. 2012)
-             BAF_AUTO - phased BAF auto correlation across consecutive phased heterozygous sites
-               NSITES - number of sites across the genome for model based on LRR and BAF
-                NHETS - number of heterozygous sites across the genome for model based on BAF and genotype phase
-       X_NONPAR_NHETS - number of heterozygous sites in the X nonPAR region
-X_NONPAR_BAF_SD/_CORR - BAF standard deviation or beta-binomial overdispersion for read counts in the X nonPAR region
-  X_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the X nonPAR region
-  Y_NONPAR_XXX_MEDIAN - median LRR or sequencing coverage over the Y nonPAR region
-        MT_XXX_MEDIAN - median LRR or sequencing coverage over the mitochondrial genome
-                  SEX - estimated sample sex from X nonPAR region (not heterozygous sites count)
-              REL_ESS - LRR or sequencing coverage explained sum of squares fraction using local GC content
+            sample_id - sample ID
+           XXX_median - median LRR or sequencing coverage across autosomes
+               XXX_sd - standard deviation for LRR or sequencing coverage
+             XXX_auto - auto correlation across consecutive sites for LRR or sequencing coverage (after GC correction)
+          baf_sd/_cor - BAF standard deviation or beta-binomial overdispersion for read counts
+             baf_conc - BAF phase concordance across phased heterozygous sites (see Vattathil et al. 2012)
+             baf_auto - phased BAF auto correlation across consecutive phased heterozygous sites
+               nsites - number of sites across the genome for model based on LRR and BAF
+                nhets - number of heterozygous sites across the genome for model based on BAF and genotype phase
+       x_nonpar_nhets - number of heterozygous sites in the X nonPAR region
+x_nonpar_baf_sd/_corr - BAF standard deviation or beta-binomial overdispersion for read counts in the X nonPAR region
+  x_nonpar_XXX_median - median LRR or sequencing coverage over the X nonPAR region
+  y_nonpar_XXX_median - median LRR or sequencing coverage over the Y nonPAR region
+        mt_XXX_median - median LRR or sequencing coverage over the mitochondrial genome
+         mocha_gender - estimated sample gender from X nonPAR region (not heterozygous sites count)
+       lrr_gc_rel_ess - LRR or sequencing coverage explained sum of squares fraction using local GC content
+             lrr_gc_X - coefficient X for polynomial in GC content fitting LRR estimates
 ```
 
 The mosaic calls file contains information about each mosaic and germline chromosomal alteration called and it includes the following columns:
 ```
-       SAMPLE - sample ID
-          SEX - inferred sample sex
-        CHROM - chromosome
-   BEG_XXXXXX - beginning base pair position for the call (according to XXXXXX genome reference)
-   END_XXXXXX - end base pair position for the call (according to XXXXXX genome reference)
-       LENGTH - base pair length of the call
-        P_ARM - whether the call extends to the small arm and whether it reaches the telomere
-        Q_ARM - whether the call extends to the long arm and whether it reaches the telomere
-       NSITES - number of sites used for the call
-        NHETS - number of heterozygous sites used for the call
-     N50_HETS - N50 value for consecutive heterozygous sites distances
-         BDEV - BAF deviation estimate from 0.5
-      BDEV_SE - standard deviation estimate for BAF deviation
-      REL_COV - relative coverage estimate from LRR or sequencing coverage
-   REL_COV_SE - standard deviation estimate for relative coverage
-  LOD_LRR_BAF - LOD score for model based on LRR and BAF
-LOD_BAF_PHASE - LOD score for model based on BAF and genotype phase
-       NFLIPS - number of phase flips for calls based on BAF and genotype phase model (-1 if LRR and BAF model used)
-     BAF_CONC - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
- LOD_BAF_CONC - LOD score for model based on BAF phase concordance (genome-wide corrected)
-         TYPE - Type of call based on LRR / relative coverage
-           CF - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
+    sample_id - sample ID
+ mocha_gender - inferred sample gender
+        chrom - chromosome
+   beg_XXXXXX - beginning base pair position for the call (according to XXXXXX genome reference)
+   end_XXXXXX - end base pair position for the call (according to XXXXXX genome reference)
+       length - base pair length of the call
+        p_arm - whether the call extends to the small arm and whether it reaches the telomere
+        q_arm - whether the call extends to the long arm and whether it reaches the telomere
+       nsites - number of sites used for the call
+        nhets - number of heterozygous sites used for the call
+     n50_gets - N50 value for consecutive heterozygous sites distances
+         bdev - BAF deviation estimate from 0.5
+      bdev_se - standard deviation estimate for BAF deviation
+      rel_cov - relative coverage estimate from LRR or sequencing coverage
+   rel_cov_se - standard deviation estimate for relative coverage
+  lod_lrr_baf - LOD score for model based on LRR and BAF
+lod_baf_phase - LOD score for model based on BAF and genotype phase
+       nflips - number of phase flips for calls based on BAF and genotype phase model (-1 if LRR and BAF model used)
+     baf_conc - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
+ lod_baf_conc - LOD score for model based on BAF phase concordance (genome-wide corrected)
+         type - Type of call based on LRR / relative coverage
+           cf - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
 ```
 
 The output VCF will contain the following extra FORMAT fields:
@@ -575,9 +591,9 @@ The output VCF will contain the following extra FORMAT fields:
 Bdev_Phase - for heterozygous calls: 1/-1 if the alternate allele is over/under represented
 ```
 
-For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to 9NM bytes. For example, if you are running 4,000 samples and chromosome 1 has ~80K variants, you will need approximately 2-3GB to run MoChA. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the --min-dist parameter (D, 400 by default) and the length of the longest contig (L) and will amount to no more than 9NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter --min-dist 400 and chromosome 1 is ~250Mbp long, you might need up to 5-6GB to run MoChA. Notice that for whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use option --median-BAF-adjust -1)
+For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to 9NM bytes. For example, if you are running 4,000 samples and chromosome 1 has ~80K variants, you will need approximately 2-3GB to run MoChA. It will take ~1/3 second of CPU time per genome to process samples genotyped on the Illumina GSA DNA microarray. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the --min-dist parameter (D, 400 by default) and the length of the longest contig (L) and will amount to no more than 9NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter --min-dist 400 and chromosome 1 is ~250Mbp long, you might need up to 5-6GB to run MoChA. For whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use options --adjust-BAF-LRR -1 and --regress-BAF-LRR -1). Notice that the CPU requirements for MoChA will be negligible compared to the CPU requirements for phasing with Eagle
 
-Notice that, depending on your application, you might want to filter the calls from MoChA. For example, the following code:
+Depending on your application, you might want to filter the calls from MoChA. For example, the following code:
 ```
 awk 'NR==FNR && FNR>1 && $6>.51 {x[$1]++}
   NR>FNR && (FNR==1 || !($1 in x) && $6>1e5 && $17>10 && $21!~"CNP" && $22<.5) {print}' \
@@ -590,11 +606,11 @@ Allelic imbalance pipeline
 
 import results from MoChA into VCF file with imputed genotypes (optional for array data)
 ```
-bcftools +importFMT \
+bcftools annotate \
   --no-version -Ob \
-  --formats Ldev,Bdev,Bdev_Phase \
+  --columns FMT/Ldev,FMT/Bdev,FMT/Bdev_Phase \
   $dir/$pfx.dose.bcf \
-  $dir/$pfx.mocha.bcf \
+  --annotations $dir/$pfx.mocha.bcf \
   -o $dir/$pfx.dose.mocha.bcf && \
 bcftools index $dir/$pfx.dose.mocha.bcf
 ```
@@ -659,8 +675,9 @@ Plot mosaic chromosomal alterations (for array data)
 ```
 mocha_plot.R \
   --mocha \
-  --png MH0145622.png \
+  --stats $dir/$pfx.stats.tsv \
   --vcf $dir/$pfx.mocha.bcf \
+  --png MH0145622.png \
   --samples MH0145622 \
   --regions 11:81098129-115077367 \
   --cytoband $HOME/res/cytoBand.hg19.txt.gz
@@ -675,8 +692,9 @@ Plot mosaic chromosomal alterations (for WGS data)
 mocha_plot.R \
   --wgs \
   --mocha \
-  --png CSES15_P26_140611.png \
+  --stats $dir/$pfx.stats.tsv
   --vcf $dir/$pfx.mocha.bcf \
+  --png CSES15_P26_140611.png \
   --samples CSES15_P26_140611 \
   --regions 1:202236354-211793505 \
   --cytoband $HOME/res/cytoBand.hg19.txt.gz
@@ -688,4 +706,4 @@ Complex duplication overlapping the MDM4 gene (GRCh37 coordinates). Signal over 
 Acknowledgements
 ================
 
-This work is supported by NIH grant <a href="https://projectreporter.nih.gov/project_info_description.cfm?aid=8852155">R01 HG006855</a> and the Stanley Center for Psychiatric Research and by US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244). This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools and Po-Ru Loh <poruloh@broadinstitute.org> in building the Eagle phasing software
+This work is supported by NIH grant <a href="http://grantome.com/grant/NIH/R01-HG006855">R01 HG006855</a>, NIH grant <a href="http://grantome.com/grant/NIH/R01-MH104964">R01 MH104964</a>, US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244), and the Stanley Center for Psychiatric Research. This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools and Po-Ru Loh <poruloh@broadinstitute.org> in building the Eagle phasing software
