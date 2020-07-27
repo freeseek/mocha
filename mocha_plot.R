@@ -167,7 +167,7 @@ if (!is.null(args$stats)) {
   lrr_gc_order <- length(df_stats) - 17
   df <- merge(df, setNames(df_stats[, c(1, 17+(0:lrr_gc_order))], c('SAMPLE', paste0('lrr_gc_', 0:lrr_gc_order))))
   for (i in 0:lrr_gc_order) {
-    df$LRR <- df$LRR - as.numeric(df$GC)^i * df[,paste0('gc', i)]
+    df$LRR <- df$LRR - as.numeric(df$GC)^i * df[,paste0('lrr_gc_', i)]
   }
 }
 
