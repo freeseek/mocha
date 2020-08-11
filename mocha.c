@@ -41,13 +41,12 @@
 #include "beta_binom.h"
 #include "bcftools.h"
 
-#define MOCHA_VERSION "2020-07-20"
+#define MOCHA_VERSION "2020-08-11"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
  ****************************************/
 
-// TODO replace SIGN with copysignf()
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
 #define BDEV_LRR_BAF_DFLT "-2.0,-4.0,-6.0,10.0,6.0,4.0"
@@ -57,11 +56,13 @@
 #define REGRESS_BAF_LRR_DFLT "15"
 #define LRR_GC_ORDER_DFLT "2"
 #define MAX_ORDER 5
-#define XY_PRB_DFLT "1e-09"
-#define ERR_PRB_DFLT "1e-04"
+#define XY_PRB_DFLT "1e-06"
+#define ERR_PRB_DFLT "1e-02"
 #define FLIP_PRB_DFLT "1e-02"
-#define TEL_PRB_DFLT "1e-02"
 #define CEN_PRB_DFLT "1e-04"
+#define TEL_PRB_DFLT "1e-02"
+#define X_TEL_PRB_DFLT "1e-03"
+#define Y_TEL_PRB_DFLT "1e-04"
 #define SHORT_ARM_CHRS_DFLT "13,14,15,21,22,chr13,chr14,chr15,chr21,chr22"
 #define LRR_BIAS_DFLT "0.2"
 // https://www.illumina.com/documents/products/technotes/technote_cnv_algorithms.pdf
@@ -90,12 +91,12 @@
 #define GENDER_MALE 1
 #define GENDER_FEMALE 2
 
-#define MOCHA_UNK 0
-#define MOCHA_DEL 1
-#define MOCHA_DUP 2
-#define MOCHA_UPD 3
-#define MOCHA_CNP_DEL 4
-#define MOCHA_CNP_DUP 5
+#define MOCHA_UNDET 0
+#define MOCHA_LOSS 1
+#define MOCHA_GAIN 2
+#define MOCHA_CNLOH 3
+#define MOCHA_CNP_LOSS 4
+#define MOCHA_CNP_GAIN 5
 #define MOCHA_CNP_CNV 6
 
 #define MOCHA_NOT 0
@@ -122,8 +123,10 @@ typedef struct {
     float xy_log_prb;
     float err_log_prb;
     float flip_log_prb;
-    float tel_log_prb;
     float cen_log_prb;
+    float tel_log_prb;
+    float x_tel_log_prb;
+    float y_tel_log_prb;
     float *bdev_lrr_baf, *bdev_baf_phase;
     int bdev_lrr_baf_n, bdev_baf_phase_n;
     int min_dst;
@@ -149,15 +152,15 @@ typedef struct {
 
 typedef struct {
     int sample_idx;
-    int gender;
+    int computed_gender;
     int rid;
     int beg_pos;
     int end_pos;
     int length;
     int8_t p_arm;
     int8_t q_arm;
-    int nsites;
-    int nhets;
+    int n_sites;
+    int n_hets;
     int n50_hets;
     float bdev;
     float bdev_se;
@@ -165,7 +168,7 @@ typedef struct {
     float ldev_se;
     float lod_lrr_baf;
     float lod_baf_phase;
-    int nflips;
+    int n_flips;
     float baf_conc;
     float lod_baf_conc;
     int8_t type;
@@ -178,6 +181,7 @@ typedef struct {
 } mocha_table_t;
 
 typedef struct {
+    float call_rate;
     float lrr_median;
     float lrr_sd;
     float lrr_auto;
@@ -190,11 +194,13 @@ typedef struct {
 
 typedef struct {
     int idx;
-    int gender;
+    int computed_gender;
+    float call_rate;
     float adjlrr_sd;
-    int nsites;
-    int nhets;
-    int x_nonpar_nhets;
+    int n_sites;
+    int n_missing_gts;
+    int n_hets;
+    int x_nonpar_n_hets;
     float x_nonpar_dispersion; // either rho(AD0, AD1) for WGS model or sd(BAF)
     float x_nonpar_lrr_median;
     float y_nonpar_lrr_median;
@@ -577,7 +583,7 @@ static float *lrr_baf_emis_log_lkl(const float *lrr, const float *baf, int T, co
         for (int i = 0; i < m; i++) {
             emis_log_lkl[t * N + 1 + i] = lrr_baf_log_lkl(x, y, ldev[i], bdev_lrr_baf_arr[i], lrr_sd, baf_sd, lrr_bias);
         }
-        // add states to distinguish LRR waves from true mosaic duplications/deletions
+        // add states to distinguish LRR waves from true mosaic gains/losses
         for (int i = 0; i < m; i++) {
             if (bdev_lrr_baf_arr[i] < -1.0f / 6.0f || bdev_lrr_baf_arr[i] >= 1.0f / 6.0f)
                 emis_log_lkl[t * N + 1 + m + i] = emis_log_lkl[t * N] + err_log_prb;
@@ -716,13 +722,13 @@ static float compare_models(const float *baf, const int8_t *gt_phase, int n, con
     int8_t *path = log_viterbi_run(emis_log_lkl, n, m, xy_log_prb, flip_log_prb, tel_log_prb, 0.0f, 0,
                                    0); // TODO can I not pass these values instead of 0 0?
     free(emis_log_lkl);
-    int nflips = 0;
+    int n_flips = 0;
     for (int i = 1; i < n; i++)
-        if (path[i - 1] && path[i] && path[i - 1] != path[i]) nflips++;
+        if (path[i - 1] && path[i] && path[i - 1] != path[i]) n_flips++;
     double f(double x, void *data) { return -baf_phase_lod(baf, gt_phase, n, imap, path, err_log_prb, baf_sd, x); }
     double x, fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
     free(path);
-    return -(float)fx + (float)nflips * flip_log_prb * (float)M_LOG10E;
+    return -(float)fx + (float)n_flips * flip_log_prb * (float)M_LOG10E;
 }
 
 void get_max_sum(const int16_t *ad0, const int16_t *ad1, int n, const int *imap, int *n1, int *n2) {
@@ -944,13 +950,13 @@ static float compare_wgs_models(const int16_t *ad0, const int16_t *ad1, const in
     int8_t *path = log_viterbi_run(emis_log_lkl, n, m, xy_log_prb, flip_log_prb, tel_log_prb, 0.0f, 0,
                                    0); // TODO can I not pass these values instead of 0 0?
     free(emis_log_lkl);
-    int nflips = 0;
+    int n_flips = 0;
     for (int i = 1; i < n; i++)
-        if (path[i - 1] && path[i] && path[i - 1] != path[i]) nflips++;
+        if (path[i - 1] && path[i] && path[i - 1] != path[i]) n_flips++;
     double f(double x, void *data) { return -ad_phase_lod(ad0, ad1, gt_phase, n, imap, path, err_log_prb, ad_rho, x); }
     double x, fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
     free(path);
-    return -(float)fx + (float)nflips * flip_log_prb * (float)M_LOG10E;
+    return -(float)fx + (float)n_flips * flip_log_prb * (float)M_LOG10E;
 }
 
 // TODO change this or integrate with ad_lod
@@ -1124,32 +1130,32 @@ static float get_se_mean(const float *v, int n, const int *imap) {
 static void mocha_print_ucsc(FILE *restrict stream, const mocha_t *mocha, int n, const bcf_hdr_t *hdr) {
     if (stream == NULL) return;
     const char *name[4];
-    name[MOCHA_UNK] = "mCA_undetermined";
-    name[MOCHA_DEL] = "mCA_loss";
-    name[MOCHA_DUP] = "mCA_gain";
-    name[MOCHA_UPD] = "mCA_neutral";
+    name[MOCHA_UNDET] = "mCA_undetermined";
+    name[MOCHA_LOSS] = "mCA_loss";
+    name[MOCHA_GAIN] = "mCA_gain";
+    name[MOCHA_CNLOH] = "mCA_neutral";
     const char *desc[4];
-    desc[MOCHA_UNK] = "Undetermined";
-    desc[MOCHA_DEL] = "Deletions";
-    desc[MOCHA_DUP] = "Duplications";
-    desc[MOCHA_UPD] = "CN-LOHs";
+    desc[MOCHA_UNDET] = "Undetermined";
+    desc[MOCHA_LOSS] = "Losses";
+    desc[MOCHA_GAIN] = "Gains";
+    desc[MOCHA_CNLOH] = "CN-LOHs";
     kstring_t tmp = {0, 0, NULL};
     for (int i = 0; i < 4; i++) {
         fprintf(stream, "track name=%s description=\"%s\" visibility=4 priority=1 itemRgb=\"On\"\n", name[i], desc[i]);
         for (int j = 0; j < n; j++) {
             uint8_t red = 127, green = 127, blue = 127;
             switch (i) {
-            case MOCHA_DEL:
+            case MOCHA_LOSS:
                 red -= (uint8_t)(127.0f * sqf(mocha[j].cf));
                 green -= (uint8_t)(127.0f * sqf(mocha[j].cf));
                 blue += (uint8_t)(128.0f * sqf(mocha[j].cf));
                 break;
-            case MOCHA_DUP:
+            case MOCHA_GAIN:
                 red += (uint8_t)(128.0f * sqf(mocha[j].cf));
                 green -= (uint8_t)(127.0f * sqf(mocha[j].cf));
                 blue -= (uint8_t)(127.0f * sqf(mocha[j].cf));
                 break;
-            case MOCHA_UPD:
+            case MOCHA_CNLOH:
                 red += (uint8_t)(128.0f * mocha[j].cf);
                 green += (uint8_t)(38.0f * mocha[j].cf);
                 blue -= (uint8_t)(127.0f * mocha[j].cf);
@@ -1176,34 +1182,34 @@ static void mocha_print_ucsc(FILE *restrict stream, const mocha_t *mocha, int n,
     if (stream != stdout && stream != stderr) fclose(stream);
 }
 
-static void mocha_print(FILE *restrict stream, const mocha_t *mocha, int n, const bcf_hdr_t *hdr, int flags,
-                        char *genome, float lrr_hap2dip) {
+static void mocha_print_calls(FILE *restrict stream, const mocha_t *mocha, int n, const bcf_hdr_t *hdr, int flags,
+                              char *genome, float lrr_hap2dip) {
     if (stream == NULL) return;
     char gender[3];
     gender[GENDER_UNKNOWN] = 'U';
     gender[GENDER_MALE] = 'M';
     gender[GENDER_FEMALE] = 'F';
     const char *type[6];
-    type[MOCHA_UNK] = "Undetermined";
-    type[MOCHA_DEL] = "Deletion";
-    type[MOCHA_DUP] = "Duplication";
-    type[MOCHA_UPD] = "CN-LOH";
-    type[MOCHA_CNP_DEL] = "CNP Deletion";
-    type[MOCHA_CNP_DUP] = "CNP Duplication";
+    type[MOCHA_UNDET] = "Undetermined";
+    type[MOCHA_LOSS] = "Loss";
+    type[MOCHA_GAIN] = "Gain";
+    type[MOCHA_CNLOH] = "CN-LOH";
+    type[MOCHA_CNP_LOSS] = "CNP_Loss";
+    type[MOCHA_CNP_GAIN] = "CNP_Gain";
     char arm_type[3];
     arm_type[MOCHA_NOT] = 'N';
     arm_type[MOCHA_ARM] = 'Y';
     arm_type[MOCHA_TEL] = 'T';
     fputs("sample_id", stream);
-    fputs("\tmocha_gender", stream);
+    fputs("\tcomputed_gender", stream);
     fputs("\tchrom", stream);
     fprintf(stream, "\tbeg_%s", genome);
     fprintf(stream, "\tend_%s", genome);
     fputs("\tlength", stream);
     fputs("\tp_arm", stream);
     fputs("\tq_arm", stream);
-    fputs("\tnsites", stream);
-    fputs("\tnhets", stream);
+    fputs("\tn_sites", stream);
+    fputs("\tn_hets", stream);
     fputs("\tn50_hets", stream);
     fputs("\tbdev", stream);
     fputs("\tbdev_se", stream);
@@ -1211,7 +1217,7 @@ static void mocha_print(FILE *restrict stream, const mocha_t *mocha, int n, cons
     fputs("\trel_cov_se", stream);
     fputs("\tlod_lrr_baf", stream);
     fputs("\tlod_baf_phase", stream);
-    fputs("\tnflips", stream);
+    fputs("\tn_flips", stream);
     fputs("\tbaf_conc", stream);
     fputs("\tlod_baf_conc", stream);
     fputs("\ttype", stream);
@@ -1219,15 +1225,15 @@ static void mocha_print(FILE *restrict stream, const mocha_t *mocha, int n, cons
     fputc('\n', stream);
     for (int i = 0; i < n; i++) {
         fputs(bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx), stream);
-        fprintf(stream, "\t%c", gender[mocha->gender]);
+        fprintf(stream, "\t%c", gender[mocha->computed_gender]);
         fprintf(stream, "\t%s", bcf_hdr_id2name(hdr, mocha->rid));
         fprintf(stream, "\t%d", mocha->beg_pos);
         fprintf(stream, "\t%d", mocha->end_pos);
         fprintf(stream, "\t%d", mocha->length);
         fprintf(stream, "\t%c", arm_type[mocha->p_arm]);
         fprintf(stream, "\t%c", arm_type[mocha->q_arm]);
-        fprintf(stream, "\t%d", mocha->nsites);
-        fprintf(stream, "\t%d", mocha->nhets);
+        fprintf(stream, "\t%d", mocha->n_sites);
+        fprintf(stream, "\t%d", mocha->n_hets);
         fprintf(stream, "\t%d", mocha->n50_hets);
         fprintf(stream, "\t%.4f", mocha->bdev);
         fprintf(stream, "\t%.4f", mocha->bdev_se);
@@ -1236,7 +1242,7 @@ static void mocha_print(FILE *restrict stream, const mocha_t *mocha, int n, cons
                 2.0f * expf(mocha->ldev / lrr_hap2dip * (float)M_LN2) * mocha->ldev_se / lrr_hap2dip * (float)M_LN2);
         fprintf(stream, "\t%.2f", mocha->lod_lrr_baf);
         fprintf(stream, "\t%.2f", mocha->lod_baf_phase);
-        fprintf(stream, "\t%d", mocha->nflips);
+        fprintf(stream, "\t%d", mocha->n_flips);
         fprintf(stream, "\t%.4f", mocha->baf_conc);
         fprintf(stream, "\t%.2f", mocha->lod_baf_conc);
         fprintf(stream, "\t%s", type[mocha->type]);
@@ -1280,56 +1286,56 @@ static int get_cnp_edges(const int *pos, int n, int beg, int end, int *a, int *b
 }
 
 // classify mosaic chromosomal alteration type based on LRR and BAF
-// LDEV = -log2( 1 - 2 x BDEV ) * LRR-hap2dip for duplications
-// LDEV = -log2( 1 + 2 x BDEV ) * LRR-hap2dip for deletions
-static int8_t mocha_type(float ldev, float ldev_se, float bdev, int nhets, float lrr_hap2dip, int8_t p_arm,
+// LDEV = -log2( 1 - 2 x BDEV ) * LRR-hap2dip for gains
+// LDEV = -log2( 1 + 2 x BDEV ) * LRR-hap2dip for losses
+static int8_t mocha_type(float ldev, float ldev_se, float bdev, int n_hets, float lrr_hap2dip, int8_t p_arm,
                          int8_t q_arm) {
     // a LOD score can be computed from a chi-squared statistic by dividing by 2ln(10) ~ 4.6
-    float z2_upd = sqf(ldev / ldev_se);
+    float z2_cnloh = sqf(ldev / ldev_se);
     // equivalent of a 2 LOD score bonus for ending in one but not two telomeres
     if ((p_arm != MOCHA_TEL && q_arm != MOCHA_TEL) || (p_arm == MOCHA_TEL && q_arm == MOCHA_TEL))
-        z2_upd += 4.0f * M_LN10;
+        z2_cnloh += 4.0f * M_LN10;
     else
-        z2_upd -= 4.0f * M_LN10;
+        z2_cnloh -= 4.0f * M_LN10;
 
     // if one model has 2 LOD scores point more than the other model, select the better
     // model
     if (ldev > 0) {
-        if (nhets < 5 || isnan(bdev)) {
-            return MOCHA_DUP;
+        if (n_hets < 5 || isnan(bdev)) {
+            return MOCHA_GAIN;
         } else {
             float expected_ldev =
                 -logf(1.0f - 2.0f * bdev > 2.0f / 3.0f ? 1.0f - 2.0f * bdev : 2.0f / 3.0f) * M_LOG2E * lrr_hap2dip;
-            float z2_dup = sqf((ldev - expected_ldev) / ldev_se);
-            if (z2_upd > z2_dup + 4.0f * M_LN10) return MOCHA_DUP;
-            if (z2_dup > z2_upd + 4.0f * M_LN10) return MOCHA_UPD;
+            float z2_gain = sqf((ldev - expected_ldev) / ldev_se);
+            if (z2_cnloh > z2_gain + 4.0f * M_LN10) return MOCHA_GAIN;
+            if (z2_gain > z2_cnloh + 4.0f * M_LN10) return MOCHA_CNLOH;
         }
     } else {
-        if (nhets < 5 || isnan(bdev)) {
-            return MOCHA_DEL;
+        if (n_hets < 5 || isnan(bdev)) {
+            return MOCHA_LOSS;
         } else {
             float expected_ldev = -logf(1.0f + 2.0f * bdev) * M_LOG2E * lrr_hap2dip;
-            float z2_del = sqf((ldev - expected_ldev) / ldev_se);
-            if (z2_upd > z2_del + 4.0f * M_LN10) return MOCHA_DEL;
-            if (z2_del > z2_upd + 4.0f * M_LN10) return MOCHA_UPD;
+            float z2_loss = sqf((ldev - expected_ldev) / ldev_se);
+            if (z2_cnloh > z2_loss + 4.0f * M_LN10) return MOCHA_LOSS;
+            if (z2_loss > z2_cnloh + 4.0f * M_LN10) return MOCHA_CNLOH;
         }
     }
-    return MOCHA_UNK;
+    return MOCHA_UNDET;
 }
 
 // best estimate for cell fraction using the following formula (if BDEV is available):
 // BDEV = | 1 / 2 - 1 / CNF |
-// CNF = 2 / ( 1 + 2 x BDEV ) for deletions
-// CNF = 2 / ( 1 - 2 x BDEV ) for duplications
+// CNF = 2 / ( 1 + 2 x BDEV ) for losses
+// CNF = 2 / ( 1 - 2 x BDEV ) for gains
 // CNF = 2 x 2^( LDEV / LRR-hap2dip )
-// LDEV = - LRR-hap2dip / ln(2) * ln( 1 + 2 x BDEV ) for deletions
-// LDEV = - LRR-hap2dip / ln(2) * ln( 1 - 2 x BDEV ) for duplications
-static float mocha_cell_fraction(float ldev, float ldev_se, float bdev, int nhets, int8_t type, float lrr_hap2dip) {
-    if (nhets < 5 || isnan(bdev)) {
+// LDEV = - LRR-hap2dip / ln(2) * ln( 1 + 2 x BDEV ) for losses
+// LDEV = - LRR-hap2dip / ln(2) * ln( 1 - 2 x BDEV ) for gains
+static float mocha_cell_fraction(float ldev, float ldev_se, float bdev, int n_hets, int8_t type, float lrr_hap2dip) {
+    if (n_hets < 5 || isnan(bdev)) {
         switch (type) {
-        case MOCHA_DEL:
+        case MOCHA_LOSS:
             return ldev < -lrr_hap2dip ? 1.0f : -2.0f * (expf(ldev / lrr_hap2dip * (float)M_LN2) - 1.0f);
-        case MOCHA_DUP:
+        case MOCHA_GAIN:
             return ldev * (float)M_LN2 > lrr_hap2dip * logf(1.5f)
                        ? 1.0f
                        : 2.0f * (expf(ldev / lrr_hap2dip * (float)M_LN2) - 1.0f);
@@ -1338,15 +1344,14 @@ static float mocha_cell_fraction(float ldev, float ldev_se, float bdev, int nhet
         }
     } else {
         switch (type) {
-        case MOCHA_DEL:
+        case MOCHA_LOSS:
             return 4.0f * bdev / (1.0f + 2.0f * bdev);
-        case MOCHA_DUP:
+        case MOCHA_GAIN:
             return bdev > 1.0f / 6.0f ? 1.0f : 4.0f * bdev / (1.0f - 2.0f * bdev);
-        case MOCHA_UPD:
+        case MOCHA_CNLOH:
             return 2.0f * bdev;
-        case MOCHA_UNK:
-            return bdev < 0.05f ? 4.0f * bdev : NAN; // here it assumes it is either
-                                                     // a deletion or a duplication
+        case MOCHA_UNDET:
+            return bdev < 0.05f ? 4.0f * bdev : NAN; // here it assumes it is either a loss or a gain
         default:
             return NAN;
         }
@@ -1355,7 +1360,7 @@ static float mocha_cell_fraction(float ldev, float ldev_se, float bdev, int nhet
 
 static void get_mocha_stats(const int *pos, const float *lrr, const float *baf, const int8_t *gt_phase, int n, int a,
                             int b, int cen_beg, int cen_end, int length, float baf_conc, mocha_t *mocha) {
-    mocha->nsites = b + 1 - a;
+    mocha->n_sites = b + 1 - a;
 
     if (a == 0)
         if (pos[a] < cen_beg)
@@ -1390,9 +1395,9 @@ static void get_mocha_stats(const int *pos, const float *lrr, const float *baf, 
         mocha->q_arm = MOCHA_NOT;
 
     mocha->ldev_se = get_se_mean(lrr + a, b + 1 - a, NULL);
-    mocha->nhets = 0;
+    mocha->n_hets = 0;
     for (int i = a; i <= b; i++)
-        if (!isnan(baf[i])) mocha->nhets++;
+        if (!isnan(baf[i])) mocha->n_hets++;
     int conc, disc;
     get_baf_conc(baf + a, gt_phase + a, b + 1 - a, NULL, &conc, &disc);
     mocha->baf_conc = conc + disc > 0 ? (float)conc / (float)(conc + disc) : NAN;
@@ -1400,7 +1405,7 @@ static void get_mocha_stats(const int *pos, const float *lrr, const float *baf, 
                            + (mocha->baf_conc < 1 ? (float)disc * logf((1 - mocha->baf_conc) / (1 - baf_conc)) : 0))
                           * (float)M_LOG10E;
     mocha->n50_hets = get_n50(pos + a, b + 1 - a, NULL);
-    mocha->nflips = -1;
+    mocha->n_flips = -1;
     mocha->bdev = NAN;
     mocha->bdev_se = NAN;
     mocha->lod_baf_phase = NAN;
@@ -1456,12 +1461,15 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 
     mocha_t mocha;
     mocha.sample_idx = self->idx;
-    mocha.gender = self->gender;
+    mocha.computed_gender = self->computed_gender;
     mocha.rid = model->rid;
 
     int cen_beg = model->genome_rules->cen_beg[model->rid];
     int cen_end = model->genome_rules->cen_end[model->rid];
     int length = model->genome_rules->length[model->rid];
+    float tel_log_prb = model->rid == model->genome_rules->x_rid
+                            ? (self->computed_gender == GENDER_MALE ? model->y_tel_log_prb : model->x_tel_log_prb)
+                            : model->tel_log_prb;
 
     // declutter code by copying these values onto the stack
     int n = self->n;
@@ -1494,7 +1502,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
     int16_t *ldev = (int16_t *)calloc(n, sizeof(int16_t));
     int16_t *bdev = (int16_t *)calloc(n, sizeof(int16_t));
 
-    if (model->rid == model->genome_rules->x_rid && self->gender == GENDER_MALE) {
+    if (model->rid == model->genome_rules->x_rid && self->computed_gender == GENDER_MALE) {
         for (int i = 0; i < n; i++) {
             if (pos[i] > model->genome_rules->x_nonpar_beg && pos[i] < model->genome_rules->x_nonpar_end) {
                 lrr[i] = NAN;
@@ -1510,9 +1518,9 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                 int cnp_type = regitr_payload(model->cnp_itr, int);
                 float exp_ldev = NAN;
                 float exp_bdev = NAN;
-                mocha.type = MOCHA_UNK;
+                mocha.type = MOCHA_UNDET;
                 mocha.ldev = get_median(lrr + a, b + 1 - a, NULL);
-                if (mocha.ldev > 0 && (cnp_type == MOCHA_CNP_DUP || cnp_type == MOCHA_CNP_CNV)) {
+                if (mocha.ldev > 0 && (cnp_type == MOCHA_CNP_GAIN || cnp_type == MOCHA_CNP_CNV)) {
                     if (model->flags & WGS_DATA)
                         mocha.lod_lrr_baf =
                             lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias,
@@ -1522,12 +1530,12 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                             lrr_baf_lod(lrr + a, baf + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias,
                                         model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, 1.0f / 6.0f);
                     if (mocha.lod_lrr_baf > -model->xy_log_prb * (float)M_LOG10E) {
-                        mocha.type = MOCHA_CNP_DUP;
+                        mocha.type = MOCHA_CNP_GAIN;
                         mocha.cf = NAN;
                         exp_ldev = log2f(1.5f) * model->lrr_hap2dip;
                         exp_bdev = 1.0f / 6.0f;
                     }
-                } else if (mocha.ldev <= 0 && (cnp_type == MOCHA_CNP_DEL || cnp_type == MOCHA_CNP_CNV)) {
+                } else if (mocha.ldev <= 0 && (cnp_type == MOCHA_CNP_LOSS || cnp_type == MOCHA_CNP_CNV)) {
                     if (model->flags & WGS_DATA)
                         mocha.lod_lrr_baf =
                             lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias,
@@ -1537,13 +1545,13 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                             lrr_baf_lod(lrr + a, baf + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias,
                                         model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, -0.5f);
                     if (mocha.lod_lrr_baf > -model->xy_log_prb * (float)M_LOG10E) {
-                        mocha.type = MOCHA_CNP_DEL;
+                        mocha.type = MOCHA_CNP_LOSS;
                         mocha.cf = NAN;
                         exp_ldev = -model->lrr_hap2dip;
                         exp_bdev = 0.5f;
                     }
                 }
-                if (mocha.type == MOCHA_CNP_DUP || mocha.type == MOCHA_CNP_DEL) {
+                if (mocha.type == MOCHA_CNP_GAIN || mocha.type == MOCHA_CNP_LOSS) {
                     if (model->flags & WGS_DATA) {
                         if (cnp_edge_is_not_cn2_lrr_ad(lrr, ad0, ad1, n, a, b, model->xy_log_prb, model->err_log_prb,
                                                        model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd,
@@ -1558,7 +1566,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                     get_mocha_stats(pos, lrr, baf, gt_phase, n, a, b, cen_beg, cen_end, length, self->stats.baf_conc,
                                     &mocha);
                     // compute bdev, if possible
-                    if (mocha.nhets > 0) {
+                    if (mocha.n_hets > 0) {
                         double f(double x, void *data) {
                             if (model->flags & WGS_DATA)
                                 return -ad_lod(ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb,
@@ -1640,8 +1648,8 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                                                             self->stats.dispersion, hs_arr, n_hs);
             }
             path = log_viterbi_run(emis_log_lkl, n_imap, n_hs + (hmm_model == LRR_BAF ? n_hs : 0), model->xy_log_prb,
-                                   hmm_model == LRR_BAF ? NAN : model->flip_log_prb, model->tel_log_prb,
-                                   model->cen_log_prb, last_p, first_q);
+                                   hmm_model == LRR_BAF ? NAN : model->flip_log_prb, tel_log_prb, model->cen_log_prb,
+                                   last_p, first_q);
             free(emis_log_lkl);
 
             if (hmm_model == LRR_BAF)
@@ -1675,10 +1683,10 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 
             double f(double x, void *data) {
                 if (model->flags & WGS_DATA)
-                    return -lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.nsites, NULL, model->err_log_prb,
+                    return -lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.n_sites, NULL, model->err_log_prb,
                                        model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
                 else
-                    return -lrr_baf_lod(lrr + a, baf + a, mocha.nsites, NULL, model->err_log_prb, model->lrr_bias,
+                    return -lrr_baf_lod(lrr + a, baf + a, mocha.n_sites, NULL, model->err_log_prb, model->lrr_bias,
                                         model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
             }
             double x, fx = kmin_brent(f, -0.15, 0.15, NULL, KMIN_EPS, &x);
@@ -1697,13 +1705,13 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                 if (model->flags & WGS_DATA) {
                     mocha.lod_baf_phase =
                         compare_wgs_models(ad0, ad1, gt_phase, n_hets_imap, hets_imap_arr, model->xy_log_prb,
-                                           model->err_log_prb, model->flip_log_prb, model->tel_log_prb,
-                                           self->stats.dispersion, model->bdev_baf_phase, model->bdev_baf_phase_n);
+                                           model->err_log_prb, model->flip_log_prb, tel_log_prb, self->stats.dispersion,
+                                           model->bdev_baf_phase, model->bdev_baf_phase_n);
                 } else {
                     mocha.lod_baf_phase =
                         compare_models(baf, gt_phase, n_hets_imap, hets_imap_arr, model->xy_log_prb, model->err_log_prb,
-                                       model->flip_log_prb, model->tel_log_prb, self->stats.dispersion,
-                                       model->bdev_baf_phase, model->bdev_baf_phase_n);
+                                       model->flip_log_prb, tel_log_prb, self->stats.dispersion, model->bdev_baf_phase,
+                                       model->bdev_baf_phase_n);
                 }
                 if (mocha.lod_baf_phase > mocha.lod_lrr_baf) continue;
 
@@ -1726,33 +1734,33 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                     bdev_phase[hets_imap_arr[j]] = (int8_t)SIGN(baf[hets_imap_arr[j]] - 0.5f);
             } else {
                 // penalizes the LOD by the number of phase flips
-                mocha.nflips = 0;
+                mocha.n_flips = 0;
                 for (int j = beg[i]; j < end[i]; j++)
-                    if (path[j] != path[j + 1]) mocha.nflips++;
+                    if (path[j] != path[j + 1]) mocha.n_flips++;
 
                 double f(double x, void *data) {
                     if (model->flags & WGS_DATA)
-                        return -ad_phase_lod(ad0, ad1, gt_phase, mocha.nhets, imap_arr + beg[i], path + beg[i],
+                        return -ad_phase_lod(ad0, ad1, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i],
                                              model->err_log_prb, self->stats.dispersion, x);
                     else
-                        return -baf_phase_lod(baf, gt_phase, mocha.nhets, imap_arr + beg[i], path + beg[i],
+                        return -baf_phase_lod(baf, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i],
                                               model->err_log_prb, self->stats.dispersion, x);
                 }
                 double x, fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
                 mocha.bdev = fabsf((float)x);
-                mocha.lod_baf_phase = -(float)fx + (float)mocha.nflips * model->flip_log_prb * (float)M_LOG10E;
+                mocha.lod_baf_phase = -(float)fx + (float)mocha.n_flips * model->flip_log_prb * (float)M_LOG10E;
 
-                for (int j = 0; j < mocha.nhets; j++)
+                for (int j = 0; j < mocha.n_hets; j++)
                     pbaf_arr[j] = (baf[imap_arr[beg[i] + j]] - 0.5f) * (float)SIGN(path[beg[i] + j]);
-                mocha.bdev_se = get_se_mean(pbaf_arr, mocha.nhets, NULL);
+                mocha.bdev_se = get_se_mean(pbaf_arr, mocha.n_hets, NULL);
                 for (int j = beg[i]; j <= end[i]; j++)
                     bdev_phase[imap_arr[j]] = (int8_t)SIGN(path[j]) * gt_phase[imap_arr[j]];
             }
 
-            mocha.type = mocha_type(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.nhets, model->lrr_hap2dip, mocha.p_arm,
-                                    mocha.q_arm);
-            mocha.cf =
-                mocha_cell_fraction(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.nhets, mocha.type, model->lrr_hap2dip);
+            mocha.type = mocha_type(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.n_hets, model->lrr_hap2dip,
+                                    mocha.p_arm, mocha.q_arm);
+            mocha.cf = mocha_cell_fraction(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.n_hets, mocha.type,
+                                           model->lrr_hap2dip);
             mocha_table->n++;
             hts_expand(mocha_t, mocha_table->n, mocha_table->m, mocha_table->a);
             mocha_table->a[mocha_table->n - 1] = mocha;
@@ -1845,7 +1853,9 @@ static float get_lrr_cutoff(const float *v, int n) {
 static void sample_stats(sample_t *self, const model_t *model) {
     int n = self->n;
     if (n == 0) return;
-    self->nsites += n;
+    self->n_sites += n;
+    for (int i = 0; i < n; i++)
+        if (self->phase_arr[i] == bcf_int8_missing) self->n_missing_gts++;
 
     int16_t *ad0 = self->data_arr[AD0];
     int16_t *ad1 = self->data_arr[AD1];
@@ -1864,11 +1874,11 @@ static void sample_stats(sample_t *self, const model_t *model) {
     if (model->rid == model->genome_rules->x_rid) {
         int n_imap = 0;
         for (int i = 0; i < n; i++) {
-            if (!isnan(baf[i])) self->nhets++;
+            if (!isnan(baf[i])) self->n_hets++;
             int pos = model->locus_arr[self->vcf_imap_arr[i]].pos;
             if (pos > model->genome_rules->x_nonpar_beg && pos < model->genome_rules->x_nonpar_end
                 && (pos < model->genome_rules->x_xtr_beg || pos > model->genome_rules->x_xtr_end)) {
-                if (!isnan(baf[i])) self->x_nonpar_nhets++;
+                if (!isnan(baf[i])) self->x_nonpar_n_hets++;
                 n_imap++;
                 imap_arr[n_imap - 1] = i;
             }
@@ -1887,7 +1897,7 @@ static void sample_stats(sample_t *self, const model_t *model) {
     } else if (model->rid == model->genome_rules->y_rid) {
         int n_imap = 0;
         for (int i = 0; i < n; i++) {
-            if (!isnan(baf[i])) self->nhets++;
+            if (!isnan(baf[i])) self->n_hets++;
             int pos = model->locus_arr[self->vcf_imap_arr[i]].pos;
             if (pos > model->genome_rules->y_nonpar_beg && pos < model->genome_rules->y_nonpar_end
                 && (pos < model->genome_rules->y_xtr_beg || pos > model->genome_rules->y_xtr_end)) {
@@ -1906,14 +1916,13 @@ static void sample_stats(sample_t *self, const model_t *model) {
         if (model->flags & WGS_DATA) {
             double f(double x, void *data) { return -lod_lkl_beta_binomial(ad0, ad1, n, NULL, x); }
             double x;
-            kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS,
-                       &x); // dispersions above 0.5 are not allowed
+            kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x); // dispersions above 0.5 are not allowed
             self->stats_arr[self->n_stats - 1].dispersion = (float)x;
         } else {
             self->stats_arr[self->n_stats - 1].dispersion = get_sample_sd(baf, n, NULL);
         }
         for (int i = 0; i < n; i++)
-            if (!isnan(baf[i])) self->nhets++;
+            if (!isnan(baf[i])) self->n_hets++;
         self->stats_arr[self->n_stats - 1].lrr_median = get_median(lrr, n, NULL);
         self->stats_arr[self->n_stats - 1].lrr_sd = get_sample_sd(lrr, n, NULL);
 
@@ -1946,7 +1955,7 @@ static void sample_stats(sample_t *self, const model_t *model) {
 }
 
 // this function computes the median of contig stats
-static void sample_summary(sample_t *self, int n, model_t *model, int compute_gender) {
+static void sample_summary(sample_t *self, int n, model_t *model, int computed_gender) {
     float *tmp_arr = (float *)malloc(n * sizeof(float));
     int m_tmp = n;
 
@@ -1984,7 +1993,7 @@ static void sample_summary(sample_t *self, int n, model_t *model, int compute_ge
         free(self[i].stats_arr);
     }
 
-    if (compute_gender) {
+    if (computed_gender) {
         if (model->flags & WGS_DATA) {
             if (isnan(model->lrr_cutoff)) model->lrr_cutoff = -0.3f; // arbitrary cutoff between -M_LN2 and 0
         }
@@ -2005,42 +2014,46 @@ static void sample_summary(sample_t *self, int n, model_t *model, int compute_ge
             float tmp = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median
                                                         : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
             if (tmp < model->lrr_cutoff)
-                self[i].gender = GENDER_MALE;
+                self[i].computed_gender = GENDER_MALE;
             else if (tmp > model->lrr_cutoff)
-                self[i].gender = GENDER_FEMALE;
+                self[i].computed_gender = GENDER_FEMALE;
         }
     }
 
     free(tmp_arr);
 }
 
-static void sample_print(FILE *restrict stream, const sample_t *self, int n, int lrr_gc_order, const bcf_hdr_t *hdr,
-                         int flags) {
+static void mocha_print_stats(FILE *restrict stream, const sample_t *self, int n, int lrr_gc_order,
+                              const bcf_hdr_t *hdr, int flags) {
     if (stream == NULL) return;
     char gender[3];
     gender[GENDER_UNKNOWN] = 'U';
     gender[GENDER_MALE] = 'M';
     gender[GENDER_FEMALE] = 'F';
     fputs("sample_id", stream);
+    fputs("\tcomputed_gender", stream);
+    fputs("\tcall_rate", stream);
     fputs(flags & WGS_DATA ? "\tcov_median" : "\tlrr_median", stream);
     fputs(flags & WGS_DATA ? "\tcov_sd" : "\tlrr_sd", stream);
     fputs(flags & WGS_DATA ? "\tcov_auto" : "\tlrr_auto", stream);
     fputs(flags & WGS_DATA ? "\tbaf_corr" : "\tbaf_sd", stream);
     fputs("\tbaf_conc", stream);
     fputs("\tbaf_auto", stream);
-    fputs("\tnsites", stream);
-    fputs("\tnhets", stream);
-    fputs("\tx_nonpar_nhets", stream);
+    fputs("\tn_sites", stream);
+    fputs("\tn_hets", stream);
+    fputs("\tx_nonpar_n_hets", stream);
     fputs("\tx_nonpar_baf_corr", stream);
     fputs(flags & WGS_DATA ? "\tx_nonpar_cov_median" : "\tx_nonpar_lrr_median", stream);
     fputs(flags & WGS_DATA ? "\ty_nonpar_cov_median" : "\ty_nonpar_lrr_median", stream);
     fputs(flags & WGS_DATA ? "\tmt_cov_median" : "\tmt_lrr_median", stream);
-    fputs("\tmocha_gender", stream);
     fputs("\tlrr_gc_rel_ess", stream);
     for (int j = 0; j <= lrr_gc_order; j++) fprintf(stream, "\tlrr_gc_%d", j);
     fputc('\n', stream);
     for (int i = 0; i < n; i++) {
         fputs(bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, self[i].idx), stream);
+        fprintf(stream, "\t%c", gender[self[i].computed_gender]);
+        fprintf(stream, "\t%.4f",
+                self[i].call_rate ? self[i].call_rate : 1.0 - (float)self[i].n_missing_gts / (float)self[i].n_sites);
         fprintf(stream, "\t%.4f", flags & WGS_DATA ? expf(self[i].stats.lrr_median) : self[i].stats.lrr_median);
         fprintf(stream, "\t%.4f",
                 flags & WGS_DATA ? expf(self[i].stats.lrr_median) * self[i].stats.lrr_sd : self[i].stats.lrr_sd);
@@ -2048,14 +2061,13 @@ static void sample_print(FILE *restrict stream, const sample_t *self, int n, int
         fprintf(stream, "\t%.4f", self[i].stats.dispersion);
         fprintf(stream, "\t%.4f", self[i].stats.baf_conc);
         fprintf(stream, "\t%.4f", self[i].stats.baf_auto);
-        fprintf(stream, "\t%d", self[i].nsites);
-        fprintf(stream, "\t%d", self[i].nhets);
-        fprintf(stream, "\t%d", self[i].x_nonpar_nhets);
+        fprintf(stream, "\t%d", self[i].n_sites);
+        fprintf(stream, "\t%d", self[i].n_hets);
+        fprintf(stream, "\t%d", self[i].x_nonpar_n_hets);
         fprintf(stream, "\t%.4f", self[i].x_nonpar_dispersion);
         fprintf(stream, "\t%.4f", flags & WGS_DATA ? expf(self[i].x_nonpar_lrr_median) : self[i].x_nonpar_lrr_median);
         fprintf(stream, "\t%.4f", flags & WGS_DATA ? expf(self[i].y_nonpar_lrr_median) : self[i].y_nonpar_lrr_median);
         fprintf(stream, "\t%.4f", flags & WGS_DATA ? expf(self[i].mt_lrr_median) : self[i].mt_lrr_median);
-        fprintf(stream, "\t%c", gender[self[i].gender]);
         fprintf(stream, "\t%.4f", self[i].stats.lrr_gc_rel_ess);
         for (int j = 0; j <= lrr_gc_order; j++) fprintf(stream, "\t%.4f", self[i].stats.coeffs[j]);
         fputc('\n', stream);
@@ -2348,7 +2360,7 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
                 if (is_y_or_mt) continue;
                 int k = 0;
                 for (int j = 0; j < nsmpl; j++) {
-                    if (is_x_nonpar && sample[j].gender == GENDER_MALE) continue;
+                    if (is_x_nonpar && sample[j].computed_gender == GENDER_MALE) continue;
                     if (gts[sample[j].idx] == gt) imap_arr[k++] = sample[j].idx;
                 }
                 float baf_b = 0.0f, baf_m = 0.0f, lrr_b = 0.0f;
@@ -2370,7 +2382,7 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
                 // corrects males on X nonPAR
                 if (is_x_nonpar) {
                     for (int j = 0; j < nsmpl; j++) {
-                        if (sample[j].gender != GENDER_MALE) continue;
+                        if (sample[j].computed_gender != GENDER_MALE) continue;
                         if (gts[sample[j].idx] == gt) {
                             ((float *)baf_fmt->p)[sample[j].idx] -=
                                 baf_m * ((float *)lrr_fmt->p)[sample[j].idx] + baf_b;
@@ -2391,7 +2403,7 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
             }
 
             for (int j = 0; j < nsmpl; j++)
-                if (gts[j] != GT_AB || (is_x_nonpar && sample[j].gender == GENDER_MALE) || is_y_or_mt)
+                if (gts[j] != GT_AB || (is_x_nonpar && sample[j].computed_gender == GENDER_MALE) || is_y_or_mt)
                     ((float *)baf_fmt->p)[sample[j].idx] = NAN;
         }
 
@@ -2401,16 +2413,16 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
             if (model->flags & WGS_DATA) {
                 if (ad0[j] == bcf_int16_missing && ad1[j] == bcf_int16_missing) continue;
 
-                // site too close to last het site or hom site too close to last
-                // site
+                // site too close to last het site or hom site too close to last site
                 if ((pos < last_het_pos[j] + model->min_dst)
-                    || ((phase_arr[j] == bcf_int8_missing) && (pos < last_pos[j] + model->min_dst)))
+                    || ((phase_arr[j] == bcf_int8_missing || phase_arr[j] == bcf_int8_vector_end)
+                        && (pos < last_pos[j] + model->min_dst)))
                     continue;
 
                 // substitute the last hom site with the current het site
                 if (pos < last_pos[j] + model->min_dst) sample[j].n--;
 
-                if (phase_arr[j] != bcf_int8_missing) last_het_pos[j] = pos;
+                if (phase_arr[j] != bcf_int8_missing || phase_arr[j] == bcf_int8_vector_end) last_het_pos[j] = pos;
                 last_pos[j] = pos;
 
                 sample[j].n++;
@@ -2466,94 +2478,83 @@ static const char *usage_text(void) {
            "Usage:   bcftools +mocha [OPTIONS] <in.vcf>\n"
            "\n"
            "Required options:\n"
-           "    -r, --rules <assembly>[?]         predefined genome reference rules, 'list' to "
-           "print available settings, append '?' for details\n"
-           "    -R, --rules-file <file>           genome reference rules, space/tab-delimited "
-           "CHROM:FROM-TO,TYPE\n"
+           "    -r, --rules <assembly>[?]      predefined genome reference rules, 'list' to print available settings, "
+           "append '?' for details\n"
+           "    -R, --rules-file <file>        genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE\n"
            "\n"
            "General Options:\n"
-           "    -x, --sex <file>                  file including information about the gender "
-           "of the samples\n"
-           "    -s, --samples [^]<list>           comma separated list of samples to include "
-           "(or exclude with \"^\" prefix)\n"
-           "    -S, --samples-file [^]<file>      file of samples to include (or exclude with "
-           "\"^\" prefix)\n"
-           "        --force-samples               only warn about unknown subset samples\n"
-           "    -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file "
-           "containing variants\n"
-           "    -t, --targets [^]<region>         restrict to comma-separated list of regions. "
-           "Exclude regions with \"^\" prefix\n"
-           "    -T, --targets-file [^]<file>      restrict to regions listed in a file. "
-           "Exclude regions with \"^\" prefix\n"
-           "    -f, --apply-filters <list>        require at least one of the listed FILTER "
-           "strings (e.g. \"PASS,.\")\n"
-           "                                      to include (or exclude with \"^\" prefix) in "
-           "the analysis\n"
-           "    -p  --cnp <file>                  list of regions to genotype in BED format\n"
-           "        --threads <int>               number of extra output compression threads "
-           "[0]\n"
+           "    -x, --sex <file>               file including information about the gender of the samples\n"
+           "        --call-rate <file>         file including information about the call_rate of the samples\n"
+           "    -s, --samples [^]<list>        comma separated list of samples to include (or exclude with \"^\" "
+           "prefix)\n"
+           "    -S, --samples-file [^]<file>   file of samples to include (or exclude with \"^\" prefix)\n"
+           "        --force-samples            only warn about unknown subset samples\n"
+           "    -v, --variants [^]<file>       tabix-indexed [compressed] VCF/BCF file containing variants\n"
+           "    -t, --targets [^]<region>      restrict to comma-separated list of regions. Exclude regions with \"^\" "
+           "prefix\n"
+           "    -T, --targets-file [^]<file>   restrict to regions listed in a file. Exclude regions with \"^\" "
+           "prefix\n"
+           "    -f, --apply-filters <list>     require at least one of the listed FILTER strings (e.g. \"PASS,.\")\n"
+           "                                   to include (or exclude with \"^\" prefix) in the analysis\n"
+           "    -p  --cnp <file>               list of regions to genotype in BED format\n"
+           "        --threads <int>            number of extra output compression threads [0]\n"
            "\n"
            "Output Options:\n"
-           "    -o, --output <file>               write output to a file [no output]\n"
-           "    -O, --output-type <b|u|z|v>       b: compressed BCF, u: uncompressed BCF, z: "
-           "compressed VCF, v: uncompressed VCF [v]\n"
-           "        --no-version                  do not append version and command line to "
-           "the header\n"
-           "    -a  --no-annotations              omit Ldev and Bdev FORMAT from output VCF "
-           "(requires --output)\n"
-           "        --no-log                      suppress progress report on standard error\n"
-           "    -l  --log <file>                  write log to file [standard error]\n"
-           "    -m, --mosaic-calls <file>         write mosaic chromosomal alterations to a "
-           "file [standard output]\n"
-           "    -g, --genome-stats <file>         write sample genome-wide statistics to a "
-           "file [no output]\n"
-           "    -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]\n"
+           "    -o, --output <file>            write output to a file [no output]\n"
+           "    -O, --output-type <b|u|z|v>    b: compressed BCF, u: uncompressed BCF, z: compressed VCF, v: "
+           "uncompressed VCF [v]\n"
+           "        --no-version               do not append version and command line to the header\n"
+           "    -a  --no-annotations           omit Ldev and Bdev FORMAT from output VCF (requires --output)\n"
+           "        --no-log                   suppress progress report on standard error\n"
+           "    -l  --log <file>               write log to file [standard error]\n"
+           "    -m, --mosaic-calls <file>      write mosaic chromosomal alterations to a file [standard output]\n"
+           "    -g, --genome-stats <file>      write sample genome-wide statistics to a file [no output]\n"
+           "    -u, --ucsc-bed <file>          write UCSC bed track to a file [no output]\n"
            "\n"
            "HMM Options:\n"
-           "        --bdev-LRR-BAF <list>         comma separated list of inverse BAF "
-           "deviations for LRR+BAF model without phase [" BDEV_LRR_BAF_DFLT
+           "        --bdev-LRR-BAF <list>      comma separated list of inverse BAF deviations for LRR+BAF model "
+           "[" BDEV_LRR_BAF_DFLT
            "]\n"
-           "        --bdev-BAF-phase <list>       comma separated list of inverse BAF "
-           "deviations for BAF+phase model\n"
-           "                                      [" BDEV_BAF_PHASE_DFLT
+           "        --bdev-BAF-phase <list>    comma separated list of inverse BAF deviations for BAF+phase model\n"
+           "                                   [" BDEV_BAF_PHASE_DFLT
            "]\n"
-           "        --min-dist <int>              minimum base pair distance between "
-           "consecutive sites for WGS data [" MIN_DST_DFLT
+           "        --min-dist <int>           minimum base pair distance between consecutive sites for WGS data "
+           "[" MIN_DST_DFLT
            "]\n"
-           "        --adjust-BAF-LRR <int>        minimum number of genotypes for a cluster to "
-           "median adjust BAF and LRR (-1 for no adjustment) [" ADJ_BAF_LRR_DFLT
+           "        --adjust-BAF-LRR <int>     minimum number of genotypes for a cluster to median adjust BAF and LRR "
+           "(-1 for no adjustment) [" ADJ_BAF_LRR_DFLT
            "]\n"
-           "        --regress-BAF-LRR <int>       minimum number of genotypes for a cluster to "
-           "regress BAF against LRR (-1 for no regression) [" REGRESS_BAF_LRR_DFLT
+           "        --regress-BAF-LRR <int>    minimum number of genotypes for a cluster to regress BAF against LRR "
+           "(-1 for no regression) [" REGRESS_BAF_LRR_DFLT
            "]\n"
-           "        --LRR-GC-order <int>          order of polynomial to regress LRR against "
-           "local GC content (-1 for no regression) [" LRR_GC_ORDER_DFLT
+           "        --LRR-GC-order <int>       order of polynomial to regress LRR against local GC content (-1 for no "
+           "regression) [" LRR_GC_ORDER_DFLT
            "]\n"
-           "        --xy-prob <float>             transition probability [" XY_PRB_DFLT
+           "        --xy-prob <float>          transition probability [" XY_PRB_DFLT
            "]\n"
-           "        --err-prob <float>            uniform error probability [" ERR_PRB_DFLT
+           "        --err-prob <float>         uniform error probability [" ERR_PRB_DFLT
            "]\n"
-           "        --flip-prob <float>           phase flip probability [" FLIP_PRB_DFLT
+           "        --flip-prob <float>        phase flip probability [" FLIP_PRB_DFLT
            "]\n"
-           "        --telomere-advantage <float>  telomere advantage [" TEL_PRB_DFLT
+           "        --centromere-loss <float>  penalty to avoid calls spanning centromeres [" CEN_PRB_DFLT
            "]\n"
-           "        --centromere-penalty <float>  centromere penalty [" CEN_PRB_DFLT
+           "        --telomere-gain <float>    telomere advantage to prioritize CN-LOHs [" TEL_PRB_DFLT
            "]\n"
-           "        --short-arm-chrs <list>       list of chromosomes with short arms "
-           "[" SHORT_ARM_CHRS_DFLT
+           "        --x-telomere-gain <float>  X telomere advantage to prioritize mLOX [" X_TEL_PRB_DFLT
            "]\n"
-           "        --use-short-arms              use variants in short arms [FALSE]\n"
-           "        --use-centromeres             use variants in centromeres [FALSE]\n"
-           "        --use-no-rules-chrs           use chromosomes without centromere rules "
-           "[FALSE]\n"
-           "        --LRR-weight <float>          relative contribution from LRR for LRR+BAF "
-           "model [" LRR_BIAS_DFLT
+           "        --y-telomere-gain <float>  Y telomere advantage to prioritize mLOY [" Y_TEL_PRB_DFLT
            "]\n"
-           "        --LRR-hap2dip <float>         difference between LRR for haploid and "
-           "diploid [" LRR_HAP2DIP_DFLT
+           "        --short-arm-chrs <list>    list of chromosomes with short arms [" SHORT_ARM_CHRS_DFLT
            "]\n"
-           "        --LRR-cutoff <float>          cutoff between LRR for haploid and diploid "
-           "used to infer gender [estimated from X nonPAR]\n"
+           "        --use-short-arms           use variants in short arms [FALSE]\n"
+           "        --use-centromeres          use variants in centromeres [FALSE]\n"
+           "        --use-no-rules-chrs        use chromosomes without centromere rules  [FALSE]\n"
+           "        --LRR-weight <float>       relative contribution from LRR for LRR+BAF  model [" LRR_BIAS_DFLT
+           "]\n"
+           "        --LRR-hap2dip <float>      difference between LRR for haploid and diploid [" LRR_HAP2DIP_DFLT
+           "]\n"
+           "        --LRR-cutoff <float>       cutoff between LRR for haploid and diploid used to infer gender "
+           "[estimated from X nonPAR]\n"
            "\n"
            "Examples:\n"
            "    bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv "
@@ -2598,13 +2599,13 @@ static int cnp_parse(const char *line, char **chr_beg, char **chr_end, uint32_t 
     // Parse the payload
     int *dat = (int *)payload;
     if (strncmp(ss, "DEL", 3) == 0)
-        *dat = MOCHA_CNP_DEL;
+        *dat = MOCHA_CNP_LOSS;
     else if (strncmp(ss, "DUP", 3) == 0)
-        *dat = MOCHA_CNP_DUP;
+        *dat = MOCHA_CNP_GAIN;
     else if (strncmp(ss, "CNV", 3) == 0)
         *dat = MOCHA_CNP_CNV;
     else
-        *dat = MOCHA_UNK;
+        *dat = MOCHA_UNDET;
     return 0;
 }
 
@@ -2632,7 +2633,8 @@ int run(int argc, char *argv[]) {
     int output_type = FT_VCF;
     int n_threads = 0;
     int record_cmd_line = 1;
-    char *gender_fname = NULL;
+    char *computed_gender_fname = NULL;
+    char *call_rate_fname = NULL;
     char *sample_names = NULL;
     char *filter_fname = NULL;
     char *targets_list = NULL;
@@ -2651,7 +2653,8 @@ int run(int argc, char *argv[]) {
     const char *short_arm_chrs = SHORT_ARM_CHRS_DFLT;
     const char *bdev_lrr_baf = BDEV_LRR_BAF_DFLT;
     const char *bdev_baf_phase = BDEV_BAF_PHASE_DFLT;
-    int *sample_gender = NULL;
+    int *computed_gender = NULL;
+    float *call_rate = NULL;
 
     // model parameters
     model_t model;
@@ -2659,8 +2662,10 @@ int run(int argc, char *argv[]) {
     model.xy_log_prb = logf(strtof(XY_PRB_DFLT, NULL));
     model.err_log_prb = logf(strtof(ERR_PRB_DFLT, NULL));
     model.flip_log_prb = logf(strtof(FLIP_PRB_DFLT, NULL));
-    model.tel_log_prb = logf(strtof(TEL_PRB_DFLT, NULL));
     model.cen_log_prb = logf(strtof(CEN_PRB_DFLT, NULL));
+    model.tel_log_prb = logf(strtof(TEL_PRB_DFLT, NULL));
+    model.x_tel_log_prb = logf(strtof(X_TEL_PRB_DFLT, NULL));
+    model.y_tel_log_prb = logf(strtof(Y_TEL_PRB_DFLT, NULL));
     model.min_dst = (int)strtol(MIN_DST_DFLT, NULL, 0);
     model.lrr_bias = strtof(LRR_BIAS_DFLT, NULL);
     model.lrr_hap2dip = strtof(LRR_HAP2DIP_DFLT, NULL);
@@ -2676,9 +2681,10 @@ int run(int argc, char *argv[]) {
     static struct option loptions[] = {{"rules", required_argument, NULL, 'r'},
                                        {"rules-file", required_argument, NULL, 'R'},
                                        {"sex", required_argument, NULL, 'x'},
+                                       {"call-rate", required_argument, NULL, 1},
                                        {"samples", required_argument, NULL, 's'},
                                        {"samples-file", required_argument, NULL, 'S'},
-                                       {"force-samples", no_argument, NULL, 1},
+                                       {"force-samples", no_argument, NULL, 2},
                                        {"variants", required_argument, NULL, 'v'},
                                        {"targets", required_argument, NULL, 't'},
                                        {"targets-file", required_argument, NULL, 'T'},
@@ -2703,15 +2709,17 @@ int run(int argc, char *argv[]) {
                                        {"xy-prob", required_argument, NULL, 17},
                                        {"err-prob", required_argument, NULL, 18},
                                        {"flip-prob", required_argument, NULL, 19},
-                                       {"telomere-advantage", required_argument, NULL, 20},
-                                       {"centromere-penalty", required_argument, NULL, 21},
-                                       {"short-arm-chrs", required_argument, NULL, 22},
-                                       {"use-short-arms", no_argument, NULL, 23},
-                                       {"use-centromeres", no_argument, NULL, 24},
-                                       {"use-no-rules-chrs", no_argument, NULL, 25},
-                                       {"LRR-weight", required_argument, NULL, 26},
-                                       {"LRR-hap2dip", required_argument, NULL, 27},
-                                       {"LRR-cutoff", required_argument, NULL, 28},
+                                       {"centromere-penalty", required_argument, NULL, 20},
+                                       {"telomere-advantage", required_argument, NULL, 21},
+                                       {"x-telomere-advantage", required_argument, NULL, 22},
+                                       {"y-telomere-advantage", required_argument, NULL, 23},
+                                       {"short-arm-chrs", required_argument, NULL, 24},
+                                       {"use-short-arms", no_argument, NULL, 25},
+                                       {"use-centromeres", no_argument, NULL, 26},
+                                       {"use-no-rules-chrs", no_argument, NULL, 27},
+                                       {"LRR-weight", required_argument, NULL, 28},
+                                       {"LRR-hap2dip", required_argument, NULL, 29},
+                                       {"LRR-cutoff", required_argument, NULL, 30},
                                        {NULL, 0, NULL, 0}};
     int c;
     while ((c = getopt_long(argc, argv, "h?r:R:x:s:S:v:t:T:f:p:o:O:am:g:u:l:", loptions, NULL)) >= 0) {
@@ -2724,7 +2732,7 @@ int run(int argc, char *argv[]) {
             rules_is_file = 1;
             break;
         case 'x':
-            gender_fname = optarg;
+            computed_gender_fname = optarg;
             break;
         case 's':
             sample_names = optarg;
@@ -2734,6 +2742,9 @@ int run(int argc, char *argv[]) {
             sample_is_file = 1;
             break;
         case 1:
+            call_rate_fname = optarg;
+            break;
+        case 2:
             force_samples = 1;
             break;
         case 'v':
@@ -2839,34 +2850,42 @@ int run(int argc, char *argv[]) {
             if (*tmp) error("Could not parse: --flip-prob %s\n", optarg);
             break;
         case 20:
-            model.tel_log_prb = logf(strtof(optarg, &tmp));
-            if (*tmp) error("Could not parse: --telomere-advantage %s\n", optarg);
-            break;
-        case 21:
             model.cen_log_prb = logf(strtof(optarg, &tmp));
             if (*tmp) error("Could not parse: --centromere-penalty %s\n", optarg);
             break;
+        case 21:
+            model.tel_log_prb = logf(strtof(optarg, &tmp));
+            if (*tmp) error("Could not parse: --telomere-advantage %s\n", optarg);
+            break;
         case 22:
-            short_arm_chrs = optarg;
+            model.x_tel_log_prb = logf(strtof(optarg, &tmp));
+            if (*tmp) error("Could not parse: --x-telomere-advantage %s\n", optarg);
             break;
         case 23:
-            model.flags |= USE_SHORT_ARMS;
+            model.y_tel_log_prb = logf(strtof(optarg, &tmp));
+            if (*tmp) error("Could not parse: --y-telomere-advantage %s\n", optarg);
             break;
         case 24:
-            model.flags |= USE_CENTROMERES;
+            short_arm_chrs = optarg;
             break;
         case 25:
-            model.flags |= USE_NO_RULES_CHRS;
+            model.flags |= USE_SHORT_ARMS;
             break;
         case 26:
+            model.flags |= USE_CENTROMERES;
+            break;
+        case 27:
+            model.flags |= USE_NO_RULES_CHRS;
+            break;
+        case 28:
             model.lrr_bias = strtof(optarg, &tmp);
             if (*tmp) error("Could not parse: --LRR-weight %s\n", optarg);
             break;
-        case 27:
+        case 29:
             model.lrr_hap2dip = strtof(optarg, &tmp);
             if (*tmp) error("Could not parse: --LRR-hap2dip %s\n", optarg);
             break;
-        case 28:
+        case 30:
             model.lrr_cutoff = strtof(optarg, &tmp);
             if (*tmp) error("Could not parse: --LRR-cutoff %s\n", optarg);
             break;
@@ -2898,7 +2917,7 @@ int run(int argc, char *argv[]) {
         error("%s", usage_text());
     }
 
-    if (gender_fname && !isnan(model.lrr_cutoff)) {
+    if (computed_gender_fname && !isnan(model.lrr_cutoff)) {
         fprintf(log_file, "Cannot use options --sex and --LRR-cutoff together\n");
         error("%s", usage_text());
     }
@@ -2951,7 +2970,10 @@ int run(int argc, char *argv[]) {
             "adjustment through GC correction\n");
 
     // read gender information if provided
-    if (gender_fname) sample_gender = parse_gender(hdr, gender_fname);
+    if (computed_gender_fname) computed_gender = mocha_parse_gender(hdr, computed_gender_fname);
+
+    // read call rate information if provided
+    if (call_rate_fname) call_rate = mocha_parse_float(hdr, call_rate_fname);
 
     // median adjustment is necessary with sequencing counts data
     if ((model.lrr_gc_order < 0) && (model.flags & WGS_DATA)) model.lrr_gc_order = 0;
@@ -2979,8 +3001,10 @@ int run(int argc, char *argv[]) {
     fprintf(log_file, "Transition probability: %.2g\n", expf(model.xy_log_prb));
     fprintf(log_file, "Uniform error probability: %.2g\n", expf(model.err_log_prb));
     fprintf(log_file, "Phase flip probability: %.2g\n", expf(model.flip_log_prb));
-    fprintf(log_file, "Telomere advantage: %.2g\n", expf(model.tel_log_prb));
     fprintf(log_file, "Centromere penalty: %.2g\n", expf(model.cen_log_prb));
+    fprintf(log_file, "Telomere advantage: %.2g\n", expf(model.tel_log_prb));
+    fprintf(log_file, "X telomere advantage: %.2g\n", expf(model.x_tel_log_prb));
+    fprintf(log_file, "Y telomere advantage: %.2g\n", expf(model.y_tel_log_prb));
     fprintf(log_file, "List of short arms: %s\n", short_arm_chrs);
     fprintf(log_file, "Use variants in short arms: %s\n", model.flags & USE_SHORT_ARMS ? "TRUE" : "FALSE");
     fprintf(log_file, "Use variants in centromeres: %s\n", model.flags & USE_CENTROMERES ? "TRUE" : "FALSE");
@@ -3044,9 +3068,13 @@ int run(int argc, char *argv[]) {
     }
 
     sample = (sample_t *)calloc(nsmpl, sizeof(sample_t));
-    if (sample_gender) {
-        for (int i = 0; i < nsmpl; i++) sample[i].gender = sample_gender[i];
-        free(sample_gender);
+    if (computed_gender) {
+        for (int i = 0; i < nsmpl; i++) sample[i].computed_gender = computed_gender[i];
+        free(computed_gender);
+    }
+    if (call_rate) {
+        for (int i = 0; i < nsmpl; i++) sample[i].call_rate = call_rate[i];
+        free(call_rate);
     }
     for (int i = 0; i < nsmpl; i++) {
         sample[i].idx = i;
@@ -3066,15 +3094,15 @@ int run(int argc, char *argv[]) {
         for (int j = 0; j < nsmpl; j++) sample_stats(sample + j, &model);
     }
 
-    sample_summary(sample, nsmpl, &model, sample_gender == NULL);
+    sample_summary(sample, nsmpl, &model, computed_gender == NULL);
     int cnt[3] = {0, 0, 0};
-    for (int i = 0; i < nsmpl; i++) cnt[sample[i].gender]++;
+    for (int i = 0; i < nsmpl; i++) cnt[sample[i].computed_gender]++;
     if (!(model.flags & NO_LOG))
         fprintf(log_file, "Estimated %d sample(s) of unknown gender, %d male(s) and %d female(s)\n",
                 cnt[GENDER_UNKNOWN], cnt[GENDER_MALE], cnt[GENDER_FEMALE]);
-    sample_print(out_fg, sample, nsmpl, model.lrr_gc_order, hdr, model.flags);
+    mocha_print_stats(out_fg, sample, nsmpl, model.lrr_gc_order, hdr, model.flags);
 
-    if (sample_gender == NULL) {
+    if (computed_gender == NULL) {
         if (isnan(model.lrr_cutoff))
             error(
                 "Error: Unable to estimate LRR cutoff. Make sure "
@@ -3105,31 +3133,32 @@ int run(int argc, char *argv[]) {
         }
     }
 
-    // estimate LRR at common autosomal deletions and duplications
+    // estimate LRR at common autosomal losses and gains
     if (!(model.flags & NO_LOG) && model.cnp_itr) {
-        int n_cnp_del = 0, n_cnp_dup = 0, n_rare_dup = 0, n_rare_del = 0;
+        int n_cnp_loss = 0, n_cnp_gain = 0, n_rare_gain = 0, n_rare_loss = 0;
         float *cnp_ldev = (float *)malloc(mocha_table.n * sizeof(float));
         float *rare_ldev = (float *)malloc(mocha_table.n * sizeof(float));
         for (int i = 0; i < mocha_table.n; i++) {
             if (mocha_table.a[i].rid == model.genome_rules->x_rid) continue;
-            if (mocha_table.a[i].type == MOCHA_CNP_DEL && mocha_table.a[i].nhets == 0)
-                cnp_ldev[n_cnp_del++] = mocha_table.a[i].ldev;
-            else if (mocha_table.a[i].type == MOCHA_CNP_DUP && mocha_table.a[i].nhets >= 5
+            if (mocha_table.a[i].type == MOCHA_CNP_LOSS && mocha_table.a[i].n_hets == 0)
+                cnp_ldev[n_cnp_loss++] = mocha_table.a[i].ldev;
+            else if (mocha_table.a[i].type == MOCHA_CNP_GAIN && mocha_table.a[i].n_hets >= 5
                      && mocha_table.a[i].bdev >= 0.1f)
-                cnp_ldev[mocha_table.n - (++n_cnp_dup)] = mocha_table.a[i].ldev;
-            else if (mocha_table.a[i].type == MOCHA_DEL && mocha_table.a[i].nhets == 0)
-                rare_ldev[n_rare_del++] = mocha_table.a[i].ldev;
-            else if (mocha_table.a[i].type == MOCHA_DUP && mocha_table.a[i].nhets >= 5 && mocha_table.a[i].bdev >= 0.1f)
-                rare_ldev[mocha_table.n - (++n_rare_dup)] = mocha_table.a[i].ldev;
+                cnp_ldev[mocha_table.n - (++n_cnp_gain)] = mocha_table.a[i].ldev;
+            else if (mocha_table.a[i].type == MOCHA_LOSS && mocha_table.a[i].n_hets == 0)
+                rare_ldev[n_rare_loss++] = mocha_table.a[i].ldev;
+            else if (mocha_table.a[i].type == MOCHA_GAIN && mocha_table.a[i].n_hets >= 5
+                     && mocha_table.a[i].bdev >= 0.1f)
+                rare_ldev[mocha_table.n - (++n_rare_gain)] = mocha_table.a[i].ldev;
         }
-        float cnp_del_ldev = get_median(cnp_ldev, n_cnp_del, NULL);
-        float cnp_dup_ldev = get_median(&cnp_ldev[mocha_table.n - n_cnp_dup], n_cnp_dup, NULL);
-        float rare_del_ldev = get_median(rare_ldev, n_rare_del, NULL);
-        float rare_dup_ldev = get_median(&rare_ldev[mocha_table.n - n_rare_dup], n_rare_dup, NULL);
-        fprintf(log_file, "Adjusted LRR at CNP deletions: %.4f\n", cnp_del_ldev);
-        fprintf(log_file, "Adjusted LRR at CNP duplications: %.4f\n", cnp_dup_ldev);
-        fprintf(log_file, "Adjusted LRR at rare deletions: %.4f\n", rare_del_ldev);
-        fprintf(log_file, "Adjusted LRR at rare duplications: %.4f\n", rare_dup_ldev);
+        float cnp_loss_ldev = get_median(cnp_ldev, n_cnp_loss, NULL);
+        float cnp_gain_ldev = get_median(&cnp_ldev[mocha_table.n - n_cnp_gain], n_cnp_gain, NULL);
+        float rare_loss_ldev = get_median(rare_ldev, n_rare_loss, NULL);
+        float rare_gain_ldev = get_median(&rare_ldev[mocha_table.n - n_rare_gain], n_rare_gain, NULL);
+        fprintf(log_file, "Adjusted LRR at CNP losses: %.4f\n", cnp_loss_ldev);
+        fprintf(log_file, "Adjusted LRR at CNP gains: %.4f\n", cnp_gain_ldev);
+        fprintf(log_file, "Adjusted LRR at rare losses: %.4f\n", rare_loss_ldev);
+        fprintf(log_file, "Adjusted LRR at rare gains: %.4f\n", rare_gain_ldev);
         free(cnp_ldev);
         free(rare_ldev);
     }
@@ -3153,7 +3182,7 @@ int run(int argc, char *argv[]) {
     ad_to_lrr_baf(NULL, NULL, NULL, NULL, 0);
 
     // write table with mosaic chromosomal alterations (and UCSC bed track)
-    mocha_print(out_fm, mocha_table.a, mocha_table.n, hdr, model.flags, rules, model.lrr_hap2dip);
+    mocha_print_calls(out_fm, mocha_table.a, mocha_table.n, hdr, model.flags, rules, model.lrr_hap2dip);
     mocha_print_ucsc(out_fu, mocha_table.a, mocha_table.n, hdr);
     free(mocha_table.a);
 

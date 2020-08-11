@@ -2,7 +2,7 @@
   "name": "GRCh37",
   "fasta_ref": "human_g1k_v37.fasta",
   "n_chrs": 23,
-  "mhc_reg": "6:32443271-32558428",
+  "mhc_reg": "6:29669719-33093965",
   "dup_file": "dup.grch37.bed.gz",
   "genetic_map_file": "genetic_map_hg19_withX.txt.gz",
   "cnp_file": "cnp.grch37.bed",

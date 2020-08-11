@@ -37,7 +37,7 @@
 #include <htslib/kseq.h>
 #include "bcftools.h"
 
-#define TRIO_PHASE_VERSION "2020-07-20"
+#define TRIO_PHASE_VERSION "2020-08-11"
 
 #define ABSOLUTE (1 << 24)
 #define TRANSMITTED (1 << 16)

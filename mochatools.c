@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2020-07-20"
+#define MOCHATOOLS_VERSION "2020-08-11"
 
 #define GC_WIN_DFLT "200"
 
@@ -71,28 +71,20 @@ const char *usage(void) {
            "   run \"bcftools plugin\" for a list of common options\n"
            "\n"
            "Plugin options:\n"
-           "   -b, --balance <ID>            performs binomial test for sign balance of format "
-           "field ID\n"
+           "   -b, --balance <ID>            performs binomial test for sign balance of format field ID\n"
            "   -p, --phase                   integrates genotype phase in the balance tests\n"
-           "   -a, --ad-het                  performs binomial test for reference / alternate "
-           "allelic depth (AD)\n"
-           "   -x, --sex <file>              file including information about the gender of "
-           "the samples\n"
+           "   -a, --ad-het                  performs binomial test for reference / alternate allelic depth (AD)\n"
+           "   -x, --sex <file>              file including information about the gender of the samples\n"
            "   -f, --fasta-ref <file>        reference sequence to compute GC and CpG content\n"
-           "       --gc-window-size <int>    window size in bp used to compute the GC and CpG "
-           "content [" GC_WIN_DFLT
+           "       --gc-window-size <int>    window size in bp used to compute the GC and CpG content [" GC_WIN_DFLT
            "]\n"
-           "       --infer-BAF-alleles       infer from genotypes and BAF which ones are the A "
-           "and B alleles\n"
-           "       --cor-BAF-LRR             computes Pearson correlation between BAF and LRR "
-           "at heterozygous sites\n"
-           "   -s, --samples [^]<list>       comma separated list of samples to include (or "
-           "exclude with \"^\" prefix)\n"
-           "   -S, --samples-file [^]<file>  file of samples to include (or exclude with \"^\" "
+           "       --infer-BAF-alleles       infer from genotypes and BAF which ones are the A and B alleles\n"
+           "       --cor-BAF-LRR             computes Pearson correlation between BAF and LRR at heterozygous sites\n"
+           "   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with \"^\" "
            "prefix)\n"
+           "   -S, --samples-file [^]<file>  file of samples to include (or exclude with \"^\" prefix)\n"
            "       --force-samples           only warn about unknown subset samples\n"
-           "   -G, --drop-genotypes          drop individual genotype information (after "
-           "running statistical tests)\n"
+           "   -G, --drop-genotypes          drop individual genotype information (after running statistical tests)\n"
            "\n"
            "Example:\n"
            "    bcftools +mochatools file.bcf -- --balance Bdev_Phase --drop-genotypes\n"
@@ -210,7 +202,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
         free(smpl);
     }
 
-    if (gender_fname) args->gender = parse_gender(args->in_hdr, gender_fname);
+    if (gender_fname) args->gender = mocha_parse_gender(args->in_hdr, gender_fname);
 
     if (ref_fname) {
         args->fai = fai_load(ref_fname);
@@ -224,7 +216,8 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     }
 
     args->nsmpl = bcf_hdr_nsamples(args->in_hdr);
-    if (args->nsmpl == 0) error("Error: input VCF file has no samples\n");
+    if (args->nsmpl == 0) return 0;
+
     args->gt_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "GT");
     args->ad_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "AD");
     args->baf_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "BAF");
@@ -532,6 +525,7 @@ bcf1_t *process(bcf1_t *rec) {
         ratio = (float)cpg_cnt / (float)(fa_len);
         bcf_update_info_float(args->out_hdr, rec, "CpG", &ratio, 1);
     }
+    if (args->nsmpl == 0) return rec;
 
     // extract format information from VCF format records
     bcf_fmt_t *gt_fmt = bcf_get_fmt_id(rec, args->gt_id);

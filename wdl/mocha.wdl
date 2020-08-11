@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2020 Giulio Genovese
 ##
-## Version 2020-07-22
+## Version 2020-08-11
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -51,6 +51,7 @@ workflow mocha {
     File batch_tsv_file # batch_id path bpm csv egt sam xml zip snp report calls confidences summary vcf vcf_index xcl_vcf xcl_vcf_index
     File? ped_file
     File? extra_xcl_vcf_file
+    String? mocha_extra_args
     Boolean autoconvert = false
     Boolean? table_output
     Boolean? do_not_check_bpm
@@ -58,7 +59,7 @@ workflow mocha {
     Boolean eagle = false
     String delim = "~"
     Array[String]? chip_type
-    Array[String] tags = ["GT", "BAF", "LRR"]
+    String tags = "GT,BAF,LRR"
     Int? gc_window_size
   }
 
@@ -117,23 +118,24 @@ workflow mocha {
       call tsv_column as red_idat_lines { input: tsv_file = sample_sorted_tsv.file, column = "red_idat", docker = docker["ubuntu"] }
       # group samples by IDAT batches
       call batch_scatter as idat_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = idat_batch_size, delim = delim, docker = docker["ubuntu"] }
-      Map[String, Array[String]] idat_batch2green_idat = collect_by_key(zip(read_lines(idat_scatter.sub_batch_id), read_lines(green_idat_lines.file)))
-      Map[String, Array[String]] idat_batch2red_idat = collect_by_key(zip(read_lines(idat_scatter.sub_batch_id), read_lines(red_idat_lines.file)))
-      Map[String, Int] idat_sub_batch2idx = as_map(zip(idat_scatter.sub_batches, idat_scatter.idxs))
+      Map[String, Array[String]] idat_batch2green_idat_files = collect_by_key(zip(read_lines(idat_scatter.sub_batch_id), read_lines(green_idat_lines.file)))
+      Map[String, Array[String]] idat_batch2red_idat_files = collect_by_key(zip(read_lines(idat_scatter.sub_batch_id), read_lines(red_idat_lines.file)))
+      Map[String, Int] idat_batch2idx = as_map(zip(idat_scatter.sub_batches, idat_scatter.idxs))
       scatter (idat_batch in idat_scatter.sub_batches) {
-        Int idat_idx = idat_sub_batch2idx[idat_batch]
+        Int idat_idx = idat_batch2idx[idat_batch]
         call idat2gtc {
           input:
             bpm_file = manifest_path + batch_tbl["bpm"][idat_idx],
             egt_file = manifest_path + batch_tbl["egt"][idat_idx],
-            green_idat_files = prefix(data_paths[idat_idx], idat_batch2green_idat[idat_batch]),
-            red_idat_files = prefix(data_paths[idat_idx], idat_batch2red_idat[idat_batch]),
+            green_idat_files = prefix(data_paths[idat_idx], idat_batch2green_idat_files[idat_batch]),
+            red_idat_files = prefix(data_paths[idat_idx], idat_batch2red_idat_files[idat_batch]),
             autoconvert = autoconvert,
             filebase = sample_set_id + "." + idat_batch,
             docker = docker[if autoconvert then "autoconvert" else "iaap_cli"],
         }
       }
-      call tsv_concat as idat_tsv { input: tsv_files = idat2gtc.idat_tsv, filebase = sample_set_id + ".idat", docker = docker["ubuntu"] }
+      call tsv_concat as green_idat_tsv { input: tsv_files = idat2gtc.green_idat_tsv, filebase = sample_set_id + ".green_idat", docker = docker["ubuntu"] }
+      call tsv_concat as red_idat_tsv { input: tsv_files = idat2gtc.red_idat_tsv, filebase = sample_set_id + ".red_idat", docker = docker["ubuntu"] }
     }
 
     if (mode == "gtc") {
@@ -145,12 +147,12 @@ workflow mocha {
       call batch_scatter as gtc_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = gtc_batch_size, delim = delim, docker = docker["ubuntu"] }
       Array[String]+ input_gtc_files = if mode == "idat" then flatten(select_first([idat2gtc.gtc_files])) else read_lines(select_first([gtc_lines.file]))
       Map[String, Array[String]] gtc_batch2gtc_files = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), input_gtc_files))
-      scatter (file in input_gtc_files) { String gtc_barcode = basename(file, ".gtc") }
+      scatter (file in input_gtc_files) { String gtc_barcode = basename(basename(file, ".gz"), ".gtc") }
       Map[String, Array[String]] gtc_batch2barcode = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), gtc_barcode))
       Map[String, Array[String]] gtc_batch2sample_id = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), read_lines(sample_id_lines.file)))
-      Map[String, Int] gtc_sub_batch2idx = as_map(zip(gtc_scatter.sub_batches, gtc_scatter.idxs))
+      Map[String, Int] gtc_batch2idx = as_map(zip(gtc_scatter.sub_batches, gtc_scatter.idxs))
       scatter (gtc_batch in gtc_scatter.sub_batches) {
-        Int gtc_idx = gtc_sub_batch2idx[gtc_batch]
+        Int gtc_idx = gtc_batch2idx[gtc_batch]
         call gtc2vcf {
           input:
             tags = tags,
@@ -218,13 +220,13 @@ workflow mocha {
       call batch_scatter as chp_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = chp_batch_size, delim = delim, docker = docker["ubuntu"] }
       Array[String]+ input_chp_files = if mode == "cel" then flatten(select_first([cel2chp.chp_files])) else read_lines(select_first([chp_lines.file]))
       Map[String, Array[String]] chp_batch2chp_files = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), input_chp_files))
-      scatter (file in input_chp_files) { String chp_barcode = basename(basename(file, ".AxiomGT1.chp"), ".birdseed-v2.chp") }
+      scatter (file in input_chp_files) { String chp_barcode = basename(basename(basename(file, ".gz"), ".AxiomGT1.chp"), ".birdseed-v2.chp") }
       Map[String, Array[String]] chp_batch2barcode = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), chp_barcode))
       Map[String, Array[String]] chp_batch2sample_id = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), read_lines(sample_id_lines.file)))
-      Map[String, Int] chp_sub_batch2idx = as_map(zip(chp_scatter.sub_batches, chp_scatter.idxs))
+      Map[String, Int] chp_batch2idx = as_map(zip(chp_scatter.sub_batches, chp_scatter.idxs))
       scatter (chp_batch in chp_scatter.sub_batches) {
-        Int chp_idx = chp_sub_batch2idx[chp_batch]
-        call affy2vcf as chp2vcf {
+        Int chp_idx = chp_batch2idx[chp_batch]
+        call chp2vcf {
           input:
             tags = tags,
             csv_file = manifest_path + batch_tbl["csv"][chp_idx],
@@ -239,7 +241,6 @@ workflow mocha {
             docker = docker["gtc2vcf"]
         }
       }
-      call tsv_concat as chp_tsv { input: tsv_files = select_all(chp2vcf.chp_tsv), filebase = sample_set_id + ".chp", docker = docker["ubuntu"] }
 
       # this job can be long, so it is better to run as non-preemptible
       Map[Int, Array[String]] idx2chp2vcf_files = collect_by_key(zip(chp_scatter.idxs, chp2vcf.vcf_file))
@@ -260,12 +261,12 @@ workflow mocha {
 
     if (mode == "txt") {
       scatter (key in keys(batch_tbl)) { Boolean? is_key_equal_confidences = if key == "confidences" then true else None }
-      scatter (file in read_lines(select_first([cel_lines.file]))) { String cel_barcode = basename(file, ".CEL") }
+      scatter (file in read_lines(select_first([cel_lines.file]))) { String cel_barcode = basename(basename(file, ".gz"), ".CEL") }
       Map[String, Array[String]] batch2barcode = collect_by_key(zip(read_lines(batch_id_lines.file), cel_barcode))
       Map[String, Array[String]] batch2sample_id = collect_by_key(zip(read_lines(batch_id_lines.file), read_lines(sample_id_lines.file)))
       scatter (idx in range(n_batches)) {
         # this job can be long, so it is better to run as non-preemptible
-        call affy2vcf as txt2vcf {
+        call txt2vcf {
           input:
             tags = tags,
             csv_file = manifest_path + batch_tbl["csv"][idx],
@@ -275,15 +276,18 @@ workflow mocha {
             calls_file = data_paths[idx] + batch_tbl["calls"][idx],
             confidences_file = if length(select_all(is_key_equal_confidences))>0 then data_paths[idx] + batch_tbl["confidences"][idx] else None,
             summary_file = data_paths[idx] + batch_tbl["summary"][idx],
+            report_file = data_paths[idx] + batch_tbl["report"][idx],
             snp_file = data_paths[idx] + batch_tbl["snp"][idx],
             sam_file = sams[idx],
             reheader_map = as_map(zip(batch2barcode[(batches[idx])], batch2sample_id[(batches[idx])])),
             filebase = sample_set_id + "." + batches[idx],
             docker = docker["gtc2vcf"]
         }
-        File reports = data_paths[idx] + batch_tbl["report"][idx]
       }
-      call tsv_concat as txt_tsv { input: tsv_files = reports, filebase = sample_set_id + ".txt", docker = docker["ubuntu"] }
+    }
+
+    if (mode == "cel" || mode == "chp" || mode == "txt") {
+      call tsv_concat as affy_tsv { input: tsv_files = select_first([chp2vcf.affy_tsv, txt2vcf.affy_tsv]), filebase = sample_set_id + ".affy", docker = docker["ubuntu"] }
     }
 
     Array[File] unphased_vcf_files = select_first([gtc2vcf_files, chp2vcf_files, txt2vcf.vcf_file])
@@ -295,7 +299,8 @@ workflow mocha {
     call tsv_column as vcf_sample_id_lines { input: tsv_file = sample_tsv_file, column = "sample_id", docker = docker["ubuntu"] }
   }
 
-  call tsv_column as computed_gender_lines { input: tsv_file = select_first([gtc_tsv.file, chp_tsv.file, txt_tsv.file, sample_tsv_file]), column = "computed_gender", docker = docker["ubuntu"] }
+  call tsv_column as computed_gender_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "computed_gender", docker = docker["ubuntu"] }
+  call tsv_column as call_rate_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "call_rate", docker = docker["ubuntu"] }
   if (mode != "pvcf" && !do_not_phase) {
     call ref_scatter {
       input:
@@ -326,7 +331,6 @@ workflow mocha {
     }
 
     call lst_concat as sample_id_split_tsv { input: lst_files = vcf_scatter.sample_id_lines, filebase = "split_sample_id", docker = docker["ubuntu"] }
-    call tsv_column as call_rate_lines { input: tsv_file = select_first([gtc_tsv.file, chp_tsv.file, txt_tsv.file, sample_tsv_file]), column = "call_rate", docker = docker["ubuntu"] }
     Int n_smpls = length(flatten(read_tsv(sample_id_split_tsv.file)))
     Boolean use_reference = !select_first([do_not_use_reference, !eagle && n_smpls > 2 * ref["n_smpls"]])
     Array[Array[File]] interval_slices = transpose(vcf_scatter.vcf_files)
@@ -415,31 +419,44 @@ workflow mocha {
           vcf_idx = if mode == "pvcf" then data_paths[idx] + batch_tbl["vcf_index"][idx] else select_first([vcf_import.vcf_idx])[idx],
           sample_id_file = select_first([flatten_sample_id_lines.file, vcf_sample_id_lines.file]),
           computed_gender_file = computed_gender_lines.file,
+          call_rate_file = call_rate_lines.file,
           xcl_vcf_file = if mode == "pvcf" then data_paths[idx] + batch_tbl["xcl_vcf"][idx] else xcl_vcf_concat.vcf_file,
           xcl_vcf_idx = if mode == "pvcf" then data_paths[idx] + batch_tbl["xcl_vcf_index"][idx] else xcl_vcf_concat.vcf_idx,
           cnp_file = ref_path + ref["cnp_file"],
+          mocha_extra_args = mocha_extra_args,
           docker = docker["mocha"]
+      }
+      call mocha_plot {
+        input:
+          vcf_file = vcf_mocha.mocha_vcf_file,
+          vcf_idx = vcf_mocha.mocha_vcf_idx,
+          stats_tsv = vcf_mocha.stats_tsv,
+          calls_tsv = vcf_mocha.calls_tsv,
+          cyto_file = ref_path + ref["cyto_file"],
+          docker = docker["mocha_plot"]
       }
     }
     call tsv_concat as mocha_stats_tsv { input: tsv_files = vcf_mocha.stats_tsv, filebase = sample_set_id + ".stats", docker = docker["ubuntu"] }
     call tsv_concat as mocha_calls_tsv { input: tsv_files = vcf_mocha.calls_tsv, filebase = sample_set_id + ".calls", docker = docker["ubuntu"] }
-    call mocha_summary { input: calls_tsv = mocha_calls_tsv.file, stats_tsv = mocha_stats_tsv.file, ucsc_beds = vcf_mocha.ucsc_bed, filebase = sample_set_id, docker = docker["mocha_plot"] }
+    call mocha_summary { input: calls_tsv = mocha_calls_tsv.file, stats_tsv = mocha_stats_tsv.file, ucsc_beds = vcf_mocha.ucsc_bed, cyto_file = ref_path + ref["cyto_file"], filebase = sample_set_id, docker = docker["mocha_plot"] }
   }
 
   output {
     File? ref_intervals_bed = ref_scatter.intervals_bed
-    File? idat_tsv_file = idat_tsv.file
+    File? green_idat_tsv_file = green_idat_tsv.file
+    File? red_idat_tsv_file = red_idat_tsv.file
     File? gtc_tsv_file = gtc_tsv.file
     File? cel_tsv_file = cel_tsv.file
-    File? chp_tsv_file = chp_tsv.file
-    File? txt_tsv_file = txt_tsv.file
+    File? affy_tsv_file = affy_tsv.file
     File sample_id_file = select_first([flatten_sample_id_lines.file, vcf_sample_id_lines.file])
     File computed_gender_file = computed_gender_lines.file
-    File? call_rate_file = call_rate_lines.file
+    File call_rate_file = call_rate_lines.file
     File? mocha_stats_file = mocha_stats_tsv.file
     File? mocha_calls_file = mocha_calls_tsv.file
-    File? mocha_summary_pdf = mocha_summary.pdf
     File? mocha_ucsc_bed = mocha_summary.ucsc_bed
+    File? mocha_summary_pdf = mocha_summary.summary_pdf
+    File? mocha_pileup_pdf = mocha_summary.pileup_pdf
+    Array[File]? pngs = if !do_not_phase && !do_not_mocha then flatten(select_first([mocha_plot.png_files])) else None
     Array[File]? bam_files = csv2bam.bam_file
     Array[File]? mendel_files = if mode != "pvcf" && !do_not_phase && defined(ped_file) then select_all(select_first([vcf_split.mendel_tsv])) else None
     Array[File]? gtc_files = if mode == "idat" && gtc_output then flatten(select_first([idat2gtc.gtc_files])) else None
@@ -458,7 +475,6 @@ workflow mocha {
   }
 }
 
-# uses https://stackoverflow.com/questions/22464786/ignoring-bash-pipefail-for-error-code-141#comment60412687_33026977
 task tsv_sorted {
   input {
     File tsv_file
@@ -476,11 +492,14 @@ task tsv_sorted {
 
   command <<<
     set -euo pipefail
-    col=$((grep -v ^# "~{tsv_file}" || if [[ $? -eq 141 ]]; then true; else exit $?; fi) | \
-      head -n1 | tr '\t' '\n' | awk -F"\t" '$0=="~{column}" {print NR}')
-    grep -v ^# "~{tsv_file}" | \
-      (read -r; printf "%s\n" "$REPLY"; sort -k $col,$col -s -t $'\t') > "~{filebase}.sorted.tsv"
-    rm "~{tsv_file}"
+    mv "~{tsv_file}" .
+    col=$(head -n1 "~{basename(tsv_file)}" | tr '\t' '\n' | awk -F"\t" '$0=="~{column}" {print NR}')
+    if [ "$col" == "" ]; then
+      echo "Column \"~{column}\" does not exist" 1>&2
+      exit 1
+    fi
+    cat "~{basename(tsv_file)}" | (read -r; printf "%s\n" "$REPLY"; sort -k $col,$col -s -t $'\t') > "~{filebase}.sorted.tsv"
+    rm "~{basename(tsv_file)}"
   >>>
 
   output {
@@ -512,9 +531,16 @@ task tsv_column {
 
   command <<<
     set -euo pipefail
-    grep -v ^# "~{tsv_file}" | \
-      awk -F"\t" 'NR==1 {for (i=1; i<=NF; i++) if ($i=="~{column}") col=i} NR>1 {print $col}' > "~{column}.lines"
-    rm "~{tsv_file}"
+    mv "~{tsv_file}" .
+    col=$(head -n1 "~{basename(tsv_file)}" | tr '\t' '\n' | awk -F"\t" '$0=="~{column}" {print NR}')
+    if [ "$col" == "" ]; then
+      echo "Column \"~{column}\" does not exist" 1>&2
+      exit 1
+    fi
+    ~{if column != "call_rate" then "tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col > \"" + column + ".lines\""
+    else "max_call_rate=$(tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | sort -g | tail -n1)\n" +
+    "tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | if [[ $max_call_rate > 1 ]]; then awk '{print $0/100}'; else cat; fi > \"" + column + ".lines\"\n"}
+    rm "~{basename(tsv_file)}"
   >>>
 
   output {
@@ -532,8 +558,6 @@ task tsv_column {
 }
 
 
-# uses https://stackoverflow.com/questions/22464786/ignoring-bash-pipefail-for-error-code-141#comment60412687_33026977
-# code to avoid https://github.com/broadinstitute/cromwell/issues/5540
 task tsv_concat {
   input {
     Array[File]+ tsv_files
@@ -550,11 +574,10 @@ task tsv_concat {
   command <<<
     set -euo pipefail
     tsv_files=~{write_lines(tsv_files)}
-    ((grep -v ^# "~{tsv_files[0]}" || if [[ $? -eq 141 ]]; then true; else exit $?; fi) | head -n1
-    while IFS= read -r file
-    do
-      grep -v ^# "$file" | tail -n+2
-    done < $tsv_files) > "~{filebase}.tsv"
+    cat $tsv_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $tsv_files
+    (head -n1 "~{basename(tsv_files[0])}";
+    cat $tsv_files | tr '\n' '\0' | xargs -0 tail -qn+2) > "~{filebase}.tsv"
     cat $tsv_files | tr '\n' '\0' | xargs -0 rm
   >>>
 
@@ -588,6 +611,8 @@ task lst_flatten {
   command <<<
     set -euo pipefail
     lst_files=~{write_lines(lst_files)}
+    cat $lst_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $lst_files
     cat $lst_files | tr '\n' '\0' | xargs -0 awk 1 > "~{filebase}.lines"
     cat $lst_files | tr '\n' '\0' | xargs -0 rm
   >>>
@@ -622,6 +647,8 @@ task lst_concat {
   command <<<
     set -euo pipefail
     lst_files=~{write_lines(lst_files)}
+    cat $lst_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $lst_files
     cat $lst_files | tr '\n' '\0' | xargs -0 -n 1 awk '{printf $0"\t"} END {printf "\n"}' | sed 's/\t$//' > "~{filebase}.tsv"
     cat $lst_files | tr '\n' '\0' | xargs -0 rm
   >>>
@@ -657,13 +684,12 @@ task batch_scatter {
 
   command <<<
     set -euo pipefail
+    mv "~{batch_id_file}" .
     awk -F"\t" 'NR==FNR {x[$0]++} NR>FNR {n=x[$0]/int((x[$0]-1)/~{sub_batch_size}+1); print $0"~{delim}"int(y[$0]/n); y[$0]++}' \
-      "~{batch_id_file}" \
-      "~{batch_id_file}" \
-      > sub_batch_ids.lines
+      "~{basename(batch_id_file)}" "~{basename(batch_id_file)}" > sub_batch_ids.lines
     uniq sub_batch_ids.lines
     uniq sub_batch_ids.lines | awk -F"~{delim}" -v OFS="~{delim}" '{NF--} !x[$0]++ {idx++} {print idx-1}' 1>&2
-    rm "~{batch_id_file}"
+    rm "~{basename(batch_id_file)}"
   >>>
 
   output {
@@ -682,7 +708,6 @@ task batch_scatter {
   }
 }
 
-# once String sep(String, Array[String]) is implemented code can be modified, as the current syntax is non-compliant
 task csv2bam {
   input {
     String plugin = "gtc2vcf"
@@ -698,7 +723,7 @@ task csv2bam {
     Int maxRetries = 0
   }
 
-  Float csv_size = size(csv_file, "GiB")
+  Float csv_size = (if basename(csv_file) != basename(csv_file, ".gz") then 4.0 else 1.0) * size(csv_file, "GiB")
   Float ref_size = size(fasta_ref, "GiB")
   Float index_size = size(fasta_ref_idxs, "GiB")
   Int disk_size = select_first([disk_size_override, ceil(10.0 + 2.0 * csv_size + ref_size + index_size)])
@@ -708,14 +733,14 @@ task csv2bam {
   command <<<
     set -euo pipefail
     echo "~{sep="\n" flatten([[csv_file, fasta_ref], fasta_ref_idxs])}" | \
-      tr '\n' '\0' | xargs -0 -n 1 ln -s
+      tr '\n' '\0' | xargs -0 mv -t .
     bcftools +~{plugin} \
       --csv "~{basename(csv_file)}" \
       --fasta-flank | \
       bwa mem~{if cpu > 1 then " -t " + cpu else ""} -M "~{basename(fasta_ref)}" - | \
       samtools view -bS -o "~{basename(csv_file, ".csv")}.bam"
     echo "~{sep="\n" flatten([[csv_file, fasta_ref], fasta_ref_idxs])}" | \
-      awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
@@ -751,21 +776,28 @@ task idat2gtc {
     Int maxRetries = 0
   }
 
-  Float bpm_size = size(bpm_file, "GiB")
-  Float egt_size = size(egt_file, "GiB")
+  Float bpm_size = (if basename(bpm_file) != basename(bpm_file, ".gz") then 4.0 else 1.0) * size(bpm_file, "GiB")
+  Float egt_size = (if basename(egt_file) != basename(egt_file, ".gz") then 2.0 else 1.0) * size(egt_file, "GiB")
   Float green_idat_size = length(green_idat_files) * size(green_idat_files[0], "GiB")
   Float red_idat_size = length(red_idat_files) * size(red_idat_files[0], "GiB")
-  Int disk_size = select_first([disk_size_override, ceil(10.0 + bpm_size + egt_size + 2.0 * green_idat_size + 2.0 * red_idat_size)])
+  Int disk_size = select_first([disk_size_override, ceil(10.0 + bpm_size + egt_size + 4.0 * (green_idat_size + red_idat_size))])
   Float memory = select_first([memory_override, 3.5 + 5.0 * bpm_size + 5.0 * egt_size]) # will request more than 8GB for Omni5
 
   command <<<
     set -euo pipefail
     green_idat_files=~{write_lines(green_idat_files)}
     red_idat_files=~{write_lines(red_idat_files)}
-    echo "~{sep="\n" flatten([[bpm_file, egt_file]])}" | \
-      cat - $green_idat_files $red_idat_files | tr '\n' '\0' | xargs -0 -n 1 ln -s
-    awk -F/ '{print $NF}' $green_idat_files $red_idat_files > idat_file.lines
-    bcftools +gtc2vcf --idat --gtcs idat_file.lines --output "~{filebase}.idat.tsv"
+    mv "~{bpm_file}" .
+    mv "~{egt_file}" .
+    cat $green_idat_files $red_idat_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $green_idat_files $red_idat_files
+    ~{if basename(bpm_file) != basename(bpm_file, ".gz") then "gunzip --force \"" + basename(bpm_file) + "\"" else ""}
+    ~{if basename(egt_file) != basename(egt_file, ".gz") then "gunzip --force \"" + basename(egt_file) + "\"" else ""}
+    (grep -h "\.gz" $green_idat_files $red_idat_files || if [[ $? -eq 1 ]]; then true; else exit $?; fi) | \
+      tr '\n' '\0' | xargs -0 gunzip --force
+    sed -i 's/.gz$//' $green_idat_files $red_idat_files
+    bcftools +gtc2vcf --idat --gtcs $green_idat_files --output "~{filebase}.green_idat.tsv"
+    bcftools +gtc2vcf --idat --gtcs $red_idat_files --output "~{filebase}.red_idat.tsv"
     ~{if autoconvert then
       "sed -i 's/^   <NumberOfThreads>4<\\/NumberOfThreads>\\r$/   <NumberOfThreads>" + cpu + "<\\/NumberOfThreads>\\r/' \\\n" +
       "  \"/opt/AutoConvert 2.0/AutoCallConfig.xml\"\n" +
@@ -775,26 +807,27 @@ task idat2gtc {
       "  \"/opt/AutoConvert 2.0/AutoConvert.exe\" \\\n" +
       "  \"{}\" \\\n" +
       "  gtcs \\\n" +
-      "  \"" + basename(bpm_file) + "\" \\\n" +
-      "  \"" + basename(egt_file) + "\" \\\n"
+      "  \"" + basename(bpm_file, ".gz") + "\" \\\n" +
+      "  \"" + basename(egt_file, ".gz") + "\" \\\n"
     else
       "iaap-cli \\\n" +
       "  gencall \\\n" +
-      "  \"" + basename(bpm_file) + "\" \\\n" +
-      "  \"" + basename(egt_file) + "\" \\\n" +
+      "  \"" + basename(bpm_file, ".gz") + "\" \\\n" +
+      "  \"" + basename(egt_file, ".gz") + "\" \\\n" +
       "  gtcs \\\n" +
       "  --idat-folder . \\\n" +
       "  --output-gtc \\\n" +
       (if is_gender_autocall then "  --gender-estimate-call-rate-threshold -0.1 \\\n" else "") +
       (if cpu > 1 then "  --num-threads " + cpu + " \\\n" else "")}  1>&2
-    awk -F/ '{print "gtcs/"$NF}' $green_idat_files | sed 's/_Grn\.idat$/.gtc/'
-    echo "~{sep="\n" flatten([[bpm_file, egt_file]])}" | \
-      cat - $green_idat_files $red_idat_files | awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
-    rm idat_file.lines
+    sed 's/^/gtcs\//;s/_Grn\.idat$/.gtc/' $green_idat_files
+    rm "~{basename(bpm_file, ".gz")}"
+    rm "~{basename(egt_file, ".gz")}"
+    cat $green_idat_files $red_idat_files | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
-    File idat_tsv = filebase + ".idat.tsv"
+    File green_idat_tsv = filebase + ".green_idat.tsv"
+    File red_idat_tsv = filebase + ".red_idat.tsv"
     Directory gtcs = "gtcs"
     Array[File] gtc_files = read_lines(stdout())
   }
@@ -809,7 +842,6 @@ task idat2gtc {
   }
 }
 
-# once String sep(String, Array[String]) is implemented --chip-type can be simplified, as the current syntax is non-compliant
 # https://support.terra.bio/hc/en-us/community/posts/360071476431-Terra-fails-to-delocalize-files-listed-through-read-lines-
 task cel2affy {
   input {
@@ -844,7 +876,7 @@ task cel2affy {
   Float xml_size = size(xml_file, "GiB")
   Float zip_size = size(zip_file, "GiB")
   Float cel_size = length(cel_files) * size(cel_files[0], "GiB")
-  Int disk_size = select_first([disk_size_override, ceil(10.0 + xml_size + zip_size + (if table_output then 4.0 else 3.0) * cel_size)])
+  Int disk_size = select_first([disk_size_override, ceil(10.0 + xml_size + zip_size + (if table_output then 8.0 else 6.0) * cel_size)])
   Float memory = select_first([memory_override, 2 * 7.25])
 
   String? zip_dir = if defined(zip_file) then basename(select_first([zip_file]), ".zip") else None
@@ -854,14 +886,18 @@ task cel2affy {
     set -euo pipefail
     cel_files=~{write_lines(cel_files)}
     echo "~{sep="\n" select_all([xml_file, zip_file, cdf, chrX_snps, special_snps, chrX_probes, chrY_probes, read_models_brlmmp, target_sketch])}" | \
-      cat - $cel_files | tr '\n' '\0' | xargs -0 -n 1 ln -s
+      cat - $cel_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $cel_files
+    (grep "\.gz" $cel_files  || if [[ $? -eq 1 ]]; then true; else exit $?; fi) | \
+      tr '\n' '\0' | xargs -0 gunzip --force
+    sed -i 's/.gz$//' $cel_files
     ~{if defined(zip_file) then "unzip -jd \"" + zip_dir + "\" \"" + basename(select_first([zip_file])) + "\" 1>&2" else ""}
-    awk -F/ 'BEGIN {print "cel_files"} {print $NF}' $cel_files > cel_file.lines
     bcftools +affy2vcf --cel --chps $cel_files --output "~{filebase}.cel.tsv"
+    echo "cel_files" | cat - $cel_files > cel_files.lines
     apt-probeset-genotype \
       ~{if defined(zip_dir) then "--analysis-files-path \"" + zip_dir + "\"" else ""} \
       ~{if defined(xml_file) then "--xml-file \"" + basename(select_first([xml_file])) + "\"" else ""} \
-      --cel-files cel_file.lines \
+      --cel-files cel_files.lines \
       ~{if defined(cdf) then "--cdf-file \"" + basename(select_first([cdf])) + "\"" else ""} \
       ~{if defined(chrX_snps) then "--chrX-snps \"" + basename(select_first([chrX_snps])) + "\"" else ""} \
       ~{if defined(special_snps) then "--special-snps \"" + basename(select_first([special_snps])) + "\"" else ""} \
@@ -883,15 +919,15 @@ task cel2affy {
     for sfx in snp-posteriors report~{if table_output then " calls confidences summary normalized-summary" else ""}; do
       mv "~{analysis_name}.$sfx.txt" "~{filebase}.$sfx.txt"
     done
-    awk -F/ '{print "cc-chp/"$NF}' $cel_files | sed 's/\.CEL$/.~{analysis_name}.chp/'
+    sed 's/^/cc-chp\//;s/\.CEL$/.~{analysis_name}.chp/' $cel_files
     echo "~{sep="\n" select_all([xml_file, zip_file, cdf, chrX_snps, special_snps, chrX_probes, chrY_probes, read_models_brlmmp, target_sketch])}" | \
-      cat - $cel_files | awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
+      sed 's/^.*\///' | cat - $cel_files | tr '\n' '\0' | xargs -0 rm
     ~{if defined(zip_file) then "rm -r \"" + zip_dir + "\"" else ""}
-    rm cel_file.lines
-    touch "~{filebase}.calls.txt" \
-      "~{filebase}.confidences.txt" \
-      "~{filebase}.summary.txt" \
-      "~{filebase}.normalized-summary.txt"
+    rm cel_files.lines
+    touch "~{filebase}.calls.txt"
+    touch "~{filebase}.confidences.txt"
+    touch "~{filebase}.summary.txt"
+    touch "~{filebase}.normalized-summary.txt"
   >>>
 
   output {
@@ -917,13 +953,12 @@ task cel2affy {
   }
 }
 
-# current sep() syntax is non-compliant
 task gtc2vcf {
   input {
-    Array[String]? tags
-    File? bpm_file
-    File? csv_file
-    File? egt_file
+    String? tags
+    File bpm_file
+    File csv_file
+    File egt_file
     File fasta_ref
     File fasta_ref_fai
     Int? gc_window_size
@@ -944,13 +979,13 @@ task gtc2vcf {
     Int maxRetries = 0
   }
 
-  Float bpm_size = size(bpm_file, "GiB")
-  Float csv_size = size(csv_file, "GiB")
-  Float egt_size = size(egt_file, "GiB")
+  Float bpm_size = (if basename(bpm_file) != basename(bpm_file, ".gz") then 4.0 else 1.0) * size(bpm_file, "GiB")
+  Float csv_size = (if basename(csv_file) != basename(csv_file, ".gz") then 4.0 else 1.0) * size(csv_file, "GiB")
+  Float egt_size = (if basename(egt_file) != basename(egt_file, ".gz") then 2.0 else 1.0) * size(egt_file, "GiB")
   Float ref_size = size(fasta_ref, "GiB")
   Float gtc_size = length(gtc_files) * size(gtc_files[0], "GiB")
   Float sam_size = size(sam_file, "GiB")
-  Int disk_size = select_first([disk_size_override, ceil(10.0 + bpm_size + csv_size + egt_size + ref_size + 4.0 * gtc_size + sam_size)])
+  Int disk_size = select_first([disk_size_override, ceil(10.0 + bpm_size + csv_size + egt_size + ref_size + 8.0 * gtc_size + sam_size)])
   # due to heavy random access to the reference genome, it is important here that enough memory to cache the reference is provided
   Float memory = select_first([memory_override, 3.5 + 2.0 * csv_size + 2.0 * egt_size + ref_size +
     length(gtc_files) * capacity * 19 / 1024 / 1024 / 1024])
@@ -958,20 +993,25 @@ task gtc2vcf {
   command <<<
     set -euo pipefail
     gtc_files=~{write_lines(gtc_files)}
-    ~{if defined(reheader_map) then "reheader_file=" else ""}~{if defined(reheader_map) then write_map(select_first([reheader_map])) else ""}
     echo "~{sep="\n" select_all([bpm_file, csv_file, egt_file, fasta_ref, fasta_ref_fai, sam_file])}" | \
-      cat - $gtc_files | tr '\n' '\0' | xargs -0 -n 1 ln -s
-    awk -F/ '{print $NF}' $gtc_files > gtc_file.lines
+      cat - $gtc_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $gtc_files
+    ~{if basename(bpm_file) != basename(bpm_file, ".gz") then "gunzip --force \"" + basename(bpm_file) + "\"" else ""}
+    ~{if basename(egt_file) != basename(egt_file, ".gz") then "gunzip --force \"" + basename(egt_file) + "\"" else ""}
+    (grep "\.gz" $gtc_files || if [[ $? -eq 1 ]]; then true; else exit $?; fi) | \
+      tr '\n' '\0' | xargs -0 gunzip --force
+    sed -i 's/.gz$//' $gtc_files
+    ~{if defined(reheader_map) then "reheader_file=" else ""}~{if defined(reheader_map) then write_map(select_first([reheader_map])) else ""}
     bcftools +gtc2vcf \
       --no-version \
       --output-type u \
-      ~{if defined(tags) then "--tags " else ""}~{sep="," tags} \
-      ~{if defined(bpm_file) then "--bpm \"" + basename(select_first([bpm_file])) + "\"" else ""} \
-      ~{if defined(csv_file) then "--csv \"" + basename(select_first([csv_file])) + "\"" else ""} \
-      ~{if defined(egt_file) then "--egt \"" + basename(select_first([egt_file])) + "\"" else ""} \
+      ~{if defined(tags) then "--tags " + tags else ""} \
+      --bpm "~{basename(bpm_file, ".gz")}" \
+      --csv "~{basename(csv_file)}" \
+      --egt "~{basename(egt_file, ".gz")}" \
       --fasta-ref "~{basename(fasta_ref)}" \
       ~{if defined(gc_window_size) then "--gc-window-size " + select_first([gc_window_size]) else ""} \
-      --gtcs gtc_file.lines \
+      --gtcs $gtc_files \
       ~{if capacity != 32768 then "--capacity " + capacity else ""} \
       ~{if use_gtc_sample_names then "--use-gtc-sample-names" else ""} \
       ~{if do_not_check_bpm then "--do-not-check-bpm" else ""} \
@@ -983,9 +1023,10 @@ task gtc2vcf {
       bcftools norm --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.bcf" --check-ref x --fasta-ref "~{basename(fasta_ref)}"~{if cpu > 1 then " --threads " + (cpu - 1) else ""}
     bcftools index --force "~{filebase}.bcf"
     bcftools query --list-samples "~{filebase}.bcf" > "~{filebase}.sample_id.lines"
-    echo "~{sep="\n" select_all([bpm_file, csv_file, egt_file, fasta_ref, fasta_ref_fai, sam_file])}" | \
-      cat - $gtc_files | awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
-    rm gtc_file.lines
+    rm "~{basename(bpm_file, ".gz")}"
+    rm "~{basename(egt_file, ".gz")}"
+    echo "~{sep="\n" select_all([csv_file, fasta_ref, fasta_ref_fai, sam_file])}" | \
+      sed 's/^.*\///' | cat - $gtc_files | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
@@ -1005,19 +1046,15 @@ task gtc2vcf {
   }
 }
 
-# the current sep() syntax is non-compliant and https://github.com/broadinstitute/cromwell/issues/5540
-task affy2vcf {
+task chp2vcf {
   input {
-    Array[String]? tags
+    String? tags
     File csv_file
     File fasta_ref
     File fasta_ref_fai
     Int? gc_window_size
-    File? calls_file
-    File? confidences_file
-    File? summary_file
-    File? snp_file
-    Array[File]? chp_files
+    File snp_file
+    Array[File] chp_files
     File? sam_file
     Map[String, String]? reheader_map
     String filebase
@@ -1027,45 +1064,129 @@ task affy2vcf {
     Int cpu = 1
     Int? disk_size_override
     Float? memory_override
-    Int? preemptible_override
+    Int preemptible = 1
     Int maxRetries = 0
   }
 
-  Float csv_size = size(csv_file, "GiB")
+  Float csv_size = (if basename(csv_file) != basename(csv_file, ".gz") then 4.0 else 1.0) * size(csv_file, "GiB")
   Float ref_size = size(fasta_ref, "GiB")
-  Float calls_size = size(calls_file, "GiB")
-  Float confidences_size = size(confidences_file, "GiB")
-  Float summary_size = size(summary_file, "GiB")
-  Float snp_size = size(snp_file, "GiB")
-  Float chp_size = if defined(chp_files) then length(select_first([chp_files])) * size(select_first([chp_files])[0], "GiB") else 0.0
+  Float snp_size = (if basename(snp_file) != basename(snp_file, ".gz") then 2.0 else 1.0) * size(snp_file, "GiB")
+  Float chp_size = length(chp_files) * size(chp_files[0], "GiB")
 
   Float sam_size = size(sam_file, "GiB")
-  Int disk_size = select_first([disk_size_override, ceil(10.0 + csv_size + ref_size + 4.0 * calls_size + 4.0 * confidences_size + 4.0 * summary_size + snp_size + 4.0 * chp_size + sam_size)])
+  Int disk_size = select_first([disk_size_override, ceil(10.0 + csv_size + ref_size + 8.0 * chp_size + snp_size + sam_size)])
   # due to heavy random access to the reference genome, it is important here that enough memory to cache the reference is provided
   Float memory = select_first([memory_override, 3.5 + 2.0 * csv_size + 2.0 * snp_size + ref_size +
-    (if defined(chp_files) then length(select_first([chp_files])) * 32768 / 1024 / 1024 / 1024 else 0.0)])
-  Int preemptible = select_first([preemptible_override, if defined(chp_files) then 1 else 0])
+    length(chp_files) * 32768 / 1024 / 1024 / 1024])
 
   command <<<
     set -euo pipefail
-    ~{if defined(chp_files) then "chp_files=" else ""}~{if defined(chp_files) then write_lines(select_first([chp_files])) else ""}
+    chp_files=~{write_lines(chp_files)}
+    echo "~{sep="\n" select_all([csv_file, fasta_ref, fasta_ref_fai, snp_file, sam_file])}" | \
+      cat - $chp_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $chp_files
+    (grep "\.gz" $chp_files || if [[ $? -eq 1 ]]; then true; else exit $?; fi) | \
+      tr '\n' '\0' | xargs -0 gunzip --force
+    sed -i 's/.gz$//' $chp_files
     ~{if defined(reheader_map) then "reheader_file=" else ""}~{if defined(reheader_map) then write_map(select_first([reheader_map])) else ""}
-    echo "~{sep="\n" select_all([csv_file, fasta_ref, fasta_ref_fai, calls_file, confidences_file, summary_file, snp_file, sam_file])}" | \
-      ~{if defined(chp_files) then "cat - $chp_files | " else ""}tr '\n' '\0' | xargs -0 -n 1 ln -s
-    ~{if defined(chp_files) then "awk -F/ '{print $NF}' $chp_files > chp_file.lines" else ""}
     bcftools +affy2vcf \
       --no-version \
       --output-type u \
-      ~{if defined(tags) then "--tags " else ""}~{sep="," tags} \
+      ~{if defined(tags) then "--tags " + tags else ""} \
       --csv "~{basename(csv_file)}" \
       --fasta-ref "~{basename(fasta_ref)}" \
       ~{if defined(gc_window_size) then "--gc-window-size " + select_first([gc_window_size]) else ""} \
-      ~{if defined(calls_file) then "--calls \"" + basename(select_first([calls_file])) + "\"" else ""} \
+      --snp "~{basename(snp_file)}" \
+      --chps $chp_files \
+      --extra "~{filebase}.affy.tsv" \
+      ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
+      ~{if defined(sam_file) then "--sam-flank \"" + basename(select_first([sam_file])) + "\"" else ""} | \
+      ~{if defined(reheader_map) then "bcftools reheader --samples $reheader_file |" else ""} \
+      bcftools sort --output-type u --temp-dir ./bcftools-sort.XXXXXX | \
+      bcftools norm --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.bcf" --check-ref x --fasta-ref "~{basename(fasta_ref)}"~{if cpu > 1 then " --threads " + (cpu - 1) else ""}
+    bcftools index --force "~{filebase}.bcf"
+    bcftools query --list-samples "~{filebase}.bcf" > "~{filebase}.sample_id.lines"
+    echo "~{sep="\n" select_all([csv_file, fasta_ref, fasta_ref_fai, snp_file, sam_file])}" | \
+      sed 's/^.*\///' | cat - $chp_files | tr '\n' '\0' | xargs -0 rm
+  >>>
+
+  output {
+    File affy_tsv = filebase + ".affy.tsv"
+    File vcf_file = filebase + ".bcf"
+    File vcf_idx = filebase + ".bcf.csi"
+    File sample_id_lines = filebase + ".sample_id.lines"
+  }
+
+  runtime {
+    docker: docker
+    cpu: cpu
+    disks: "local-disk " + disk_size + " HDD"
+    memory: memory + " GiB"
+    preemptible: preemptible
+    maxRetries: maxRetries
+  }
+}
+
+task txt2vcf {
+  input {
+    String? tags
+    File csv_file
+    File fasta_ref
+    File fasta_ref_fai
+    Int? gc_window_size
+    File calls_file
+    File? confidences_file
+    File summary_file
+    File report_file
+    File snp_file
+    File? sam_file
+    Map[String, String]? reheader_map
+    String filebase
+    Boolean uncompressed = false
+
+    String docker
+    Int cpu = 1
+    Int? disk_size_override
+    Float? memory_override
+    Int preemptible = 1
+    Int maxRetries = 0
+  }
+
+  Float csv_size = (if basename(csv_file) != basename(csv_file, ".gz") then 4.0 else 1.0) * size(csv_file, "GiB")
+  Float ref_size = size(fasta_ref, "GiB")
+  Float calls_size = (if basename(calls_file) != basename(calls_file, ".gz") then 2.0 else 1.0) * size(calls_file, "GiB")
+  Float confidences_size = (if defined(confidences_file) && basename(select_first([confidences_file])) != basename(select_first([confidences_file]), ".gz") then 2.0 else 1.0) * size(confidences_file, "GiB")
+  Float summary_size = (if basename(summary_file) != basename(summary_file, ".gz") then 2.0 else 1.0) * size(summary_file, "GiB")
+  Float report_size = (if basename(report_file) != basename(report_file, ".gz") then 2.0 else 1.0) * size(report_file, "GiB")
+  Float snp_size = (if basename(snp_file) != basename(snp_file, ".gz") then 2.0 else 1.0) * size(snp_file, "GiB")
+
+  Float sam_size = size(sam_file, "GiB")
+  Int disk_size = select_first([disk_size_override, ceil(10.0 + csv_size + ref_size + 8.0 * (calls_size + confidences_size + summary_size) + 2.0 * report_size + snp_size + sam_size)])
+  # due to heavy random access to the reference genome, it is important here that enough memory to cache the reference is provided
+  Float memory = select_first([memory_override, 3.5 + 2.0 * csv_size + 2.0 * snp_size + ref_size])
+
+  command <<<
+    set -euo pipefail
+    ~{if defined(reheader_map) then "reheader_file=" else ""}~{if defined(reheader_map) then write_map(select_first([reheader_map])) else ""}
+    echo "~{sep="\n" select_all([csv_file, fasta_ref, fasta_ref_fai, calls_file, confidences_file, summary_file, report_file, snp_file, sam_file])}" | \
+      tr '\n' '\0' | xargs -0 mv -t .
+    ~{if basename(report_file) != basename(report_file, ".gz") then "gunzip --force \"" + basename(report_file) + "\"" else ""}
+    (~{if basename(calls_file) != basename(calls_file, ".gz") then "z" else ""}grep -v ^# "~{basename(calls_file)}" || if [[ $? -eq 141 ]]; then true; else exit $?; fi) | \
+      head -n1 | tr '\t' '\n' | tail -n+2 | \
+      awk -F"\t" 'NR==FNR {x[NR]=$1} NR>FNR && $0!~"^#" {if ($1=="cel_files") print; else y[$1]=$0} END {for (i in x) print y[x[i]]}' \
+      - "~{basename(report_file, ".gz")}" > ~{filebase}.affy.tsv
+    rm "~{basename(report_file, ".gz")}"
+    bcftools +affy2vcf \
+      --no-version \
+      --output-type u \
+      ~{if defined(tags) then "--tags " + tags else ""} \
+      --csv "~{basename(csv_file)}" \
+      --fasta-ref "~{basename(fasta_ref)}" \
+      ~{if defined(gc_window_size) then "--gc-window-size " + select_first([gc_window_size]) else ""} \
+      --calls "~{basename(calls_file)}" \
       ~{if defined(confidences_file) then "--confidences \"" + basename(select_first([confidences_file])) + "\"" else ""} \
-      ~{if defined(summary_file) then "--summary \"" + basename(select_first([summary_file])) + "\"" else ""} \
-      ~{if defined(snp_file) then "--snp \"" + basename(select_first([snp_file])) + "\"" else ""} \
-      ~{if defined(chp_files) then "--chps chp_file.lines" else ""} \
-      ~{if defined(chp_files) then "--extra " + filebase + ".chp.tsv" else ""} \
+      --summary "~{basename(summary_file)}" \
+      --snp "~{basename(snp_file)}" \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       ~{if defined(sam_file) then "--sam-flank \"" + basename(select_first([sam_file])) + "\"" else ""} | \
       ~{if defined(reheader_map) then "bcftools reheader --samples $reheader_file |" else ""} \
@@ -1074,13 +1195,11 @@ task affy2vcf {
     bcftools index --force "~{filebase}.bcf"
     bcftools query --list-samples "~{filebase}.bcf" > "~{filebase}.sample_id.lines"
     echo "~{sep="\n" select_all([csv_file, fasta_ref, fasta_ref_fai, calls_file, confidences_file, summary_file, snp_file, sam_file])}" | \
-      ~{if defined(chp_files) then "cat - $chp_files | " else ""}awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
-    ~{if defined(chp_files) then "rm chp_file.lines" else ""}
-    touch "~{filebase}.chp.tsv"
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
-    File? chp_tsv = filebase + ".chp.tsv"
+    File affy_tsv = filebase + ".affy.tsv"
     File vcf_file = filebase + ".bcf"
     File vcf_idx = filebase + ".bcf.csi"
     File sample_id_lines = filebase + ".sample_id.lines"
@@ -1115,8 +1234,9 @@ task ref_scatter {
   String filebase = basename(fasta_ref_fai, ".fai")
 
   command <<<
-    ln -s "~{fasta_ref_fai}"
-    ln -s "~{genetic_map_file}"
+    set -euo pipefail
+    mv "~{fasta_ref_fai}" .
+    mv "~{genetic_map_file}" .
     head -n~{n_chrs} "~{basename(fasta_ref_fai)}" | cut -f1,2 > chr2len.tsv
     python3 <<CODE
     import sys, pandas as pd, numpy as np
@@ -1141,10 +1261,8 @@ task ref_scatter {
     df[['CHR', 'BEG', 'END']].to_csv('~{filebase}.bed', sep='\t', header = False, index = False)
     CODE
     rm chr2len.tsv
-    rm "~{fasta_ref_fai}" \
-      "~{basename(fasta_ref_fai)}"
-    rm "~{genetic_map_file}" \
-      "~{basename(genetic_map_file)}"
+    rm "~{basename(fasta_ref_fai)}"
+    rm "~{basename(genetic_map_file)}"
   >>>
 
   output {
@@ -1184,8 +1302,8 @@ task vcf_scatter {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" flatten([[vcf_file, intervals_bed]])}" | \
-      tr '\n' '\0' | xargs -0 -n 1 ln -s
+    mv "~{vcf_file}" .
+    mv "~{intervals_bed}" .
     awk -F"\t" '{print $1":"$2"-"$3"\t"NR-1}' "~{basename(intervals_bed)}" > regions.lines
     bcftools query --list-samples "~{basename(vcf_file)}" > "~{basename(vcf_file, ".bcf")}.sample_id.lines"
     bcftools annotate \
@@ -1202,9 +1320,9 @@ task vcf_scatter {
       --scatter-file regions.lines \
       ~{"--prefix " + filebase} \
       --extra "~{other}"
-    awk -F"\t" '{print "vcfs/~{filebase}"$2".bcf"}' regions.lines
-    echo "~{sep="\n" flatten([[vcf_file, intervals_bed]])}" | \
-      awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
+    cut -f2 regions.lines | sed 's/^/vcfs\/~{filebase}/;s/$/.bcf/'
+    rm "~{basename(vcf_file)}"
+    rm "~{basename(intervals_bed)}"
     rm regions.lines
   >>>
 
@@ -1246,7 +1364,9 @@ task vcf_merge {
   command <<<
     set -euo pipefail
     ~{if length(vcf_files) > 1 then "vcf_files=" else ""}~{if length(vcf_files) > 1 then write_lines(vcf_files) else ""}
-    ~{if length(vcf_files) > 1 then "bcftools merge \\\n" +
+    ~{if length(vcf_files) > 1 then "cat $vcf_files | tr '\\n' '\\0' | xargs -0 mv -t .\n" +
+      "sed -i 's/^.*\\///' $vcf_files\n" +
+      "bcftools merge \\\n" +
       "  --no-version \\\n" +
       "  --output-type " + (if uncompressed then "u" else "b") + " \\\n" +
       "  --output \"" + filebase + ".bcf\" \\\n" +
@@ -1305,7 +1425,7 @@ task vcf_qc {
   command <<<
     set -euo pipefail
     echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_id_file, computed_gender_file, call_rate_file, extra_xcl_vcf_file])}" | \
-      tr '\n' '\0' | xargs -0 -n 1 ln -s
+      tr '\n' '\0' | xargs -0 mv -t .
     mhc_chr=$(echo ~{mhc_reg} | cut -d: -f1)
     mhc_beg=$(echo ~{mhc_reg} | cut -d: -f2 | cut -d- -f1)
     mhc_end=$(echo ~{mhc_reg} | cut -d- -f2)
@@ -1319,7 +1439,8 @@ task vcf_qc {
       bcftools +fill-tags --no-version --output-type u --targets ^Y,MT,chrY,chrM~{if cpu > 1 then " --threads " + (cpu - 1) else ""} -- --tags ExcHet,F_MISSING | \
       bcftools +mochatools --no-version --output-type u~{if cpu > 1 then " --threads " + (cpu - 1) else ""} -- --sex computed_gender.map --drop-genotypes | \
       bcftools annotate --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.xcl.bcf" \
-      --include 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-~{variant_call_rate_thr} || INFO/AC_Sex_Test>6' \
+      --include 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-~{variant_call_rate_thr} ||
+        INFO/AC_Sex_Test>6 && CHROM!="X" && CHROM!="chrX" && CHROM!="Y" && CHROM!="chrY"' \
       --remove ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING,^INFO/AC_Sex_Test~{if cpu > 1 then " --threads " + (cpu - 1) else ""}
     bcftools index --force "~{filebase}.xcl.bcf"
     ~{if defined(extra_xcl_vcf_file) then "mv \"" + filebase + ".xcl.bcf\" \"" + filebase + ".tmp.bcf\"\n" +
@@ -1329,7 +1450,7 @@ task vcf_qc {
       "bcftools index --force \"" + filebase + ".xcl.bcf\"\n" +
       "rm \"" + filebase + ".tmp.bcf\" \"" + filebase + ".tmp.bcf.csi\"" else ""}
     echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_id_file, computed_gender_file, call_rate_file, extra_xcl_vcf_file])}" | \
-      awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
     rm computed_gender.map samples_xcl.lines
   >>>
 
@@ -1349,7 +1470,6 @@ task vcf_qc {
   }
 }
 
-# bcftools query --list-samples / --samples-file /dev/stdin should be removed once https://github.com/samtools/bcftools/issues/1259 is fixed
 task vcf_phase {
   input {
     Int n_vars
@@ -1391,7 +1511,7 @@ task vcf_phase {
   command <<<
     set -euo pipefail
     echo "~{sep="\n" select_all([unphased_vcf_file, unphased_vcf_idx, genetic_map_file, ref_vcf_file, ref_vcf_idx, xcl_vcf_file, xcl_vcf_idx])}" | \
-      tr '\n' '\0' | xargs -0 -n 1 ln -s
+      tr '\n' '\0' | xargs -0 mv -t .
     ~{if eagle then
       "bio-eagle \\\n" +
       "  --geneticMapFile \"" + basename(genetic_map_file) + "\" \\\n" +
@@ -1422,20 +1542,18 @@ task vcf_phase {
       "  --output \"" + filebase + ".shapeit4.bcf\" \\\n" +
       "  1>&2\n" +
       "bcftools index --force \"" + filebase + ".shapeit4.bcf\"\n" +
-      "bcftools query --list-samples \"" + basename(unphased_vcf_file) + "\" | \\\n" +
-      "  bcftools annotate \\\n" +
+      "bcftools annotate \\\n" +
       "  --no-version \\\n" +
       "  --output-type " + (if uncompressed then "u" else "b") + " \\\n" +
       "  --output \"" + filebase + ".phased.bcf\" \\\n" +
       "  --annotations \"" + filebase + ".shapeit4.bcf\" \\\n" +
       "  --columns -FMT/GT \\\n" +
-      "  --samples-file /dev/stdin \\\n" +
       "  \"" + basename(unphased_vcf_file) + "\" \\\n" +
       (if cpu > 1 then "  --threads " + (cpu - 1) + "\n" else "") +
       "rm genetic_map.txt \"" + filebase + ".shapeit4.bcf\" \"" + filebase + ".shapeit4.bcf.csi\"" +
       (if defined(xcl_vcf_file) then " \"" + filebase + ".unphased.bcf\" \"" + filebase + ".unphased.bcf.csi\"" else "")}
     echo "~{sep="\n" select_all([unphased_vcf_file, unphased_vcf_idx, genetic_map_file, ref_vcf_file, ref_vcf_idx, xcl_vcf_file, xcl_vcf_idx])}" | \
-      awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
@@ -1452,7 +1570,6 @@ task vcf_phase {
   }
 }
 
-# once suffix() is implemented the code could be simplified
 # https://support.terra.bio/hc/en-us/community/posts/360071476431-Terra-fails-to-delocalize-files-listed-through-read-lines-
 task vcf_split {
   input {
@@ -1480,22 +1597,25 @@ task vcf_split {
   command <<<
     set -euo pipefail
     filebases=~{write_lines(prefix(filebase + '.', batches))}
-    echo "~{sep="\n" select_all([vcf_file, sample_id_file, ped_file])}" | \
-      tr '\n' '\0' | xargs -0 -n 1 ln -s
-    ~{if defined(ped_file) && defined(rule) then "bcftools +mendelian --output " + filebase + ".mendel.tsv --rules \"" + select_first([rule]) + "\" --ped \"" + basename(select_first([ped_file])) + "\" \"" + basename(vcf_file) + "\"" else ""}
+    mv "~{vcf_file}" .
+    mv "~{sample_id_file}" .
+    ~{if defined(ped_file) then "mv -t . \"" + ped_file + "\"" else ""}
+    mkdir mendel
+    ~{if defined(ped_file) && defined(rule) then "bcftools +mendelian --output \"mendel/" + filebase + ".mendel.tsv\" --rules \"" + select_first([rule]) + "\" --ped \"" + basename(select_first([ped_file])) + "\" \"" + basename(vcf_file) + "\"" else ""}
     sed 's/\t/,/g;s/$/\t-/' "~{basename(sample_id_file)}" | paste -d $'\t' - $filebases > samples_file.txt
     ~{if defined(ped_file) then "bcftools +trio-phase --no-version --output-type u" + (if cpu > 1 then " --threads " + (cpu - 1) else "") + " \"" + basename(vcf_file) + "\" -- --ped \"" + basename(select_first([ped_file])) + "\" | \\\n" +
       "  bcftools +split --output-type " + (if uncompressed then "u" else "b") + " --output vcfs --samples-file samples_file.txt"
       else "bcftools +split --output-type " + (if uncompressed then "u" else "b") + " --output vcfs --samples-file samples_file.txt \"" + basename(vcf_file) + "\""}
-    awk '{print "vcfs/"$1".bcf"}' $filebases
-    echo "~{sep="\n" select_all([vcf_file, sample_id_file, ped_file])}" | \
-      awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
+    cut -f1 $filebases | sed 's/^/vcfs\//;s/$/.bcf/'
+    rm "~{basename(vcf_file)}"
+    rm "~{basename(sample_id_file)}"
+    ~{if defined(ped_file) then "rm \"" + basename(select_first([ped_file])) + "\"" else ""}
     rm samples_file.txt
-    touch "~{filebase}.mendel.tsv"
+    touch "mendel/~{filebase}.mendel.tsv"
   >>>
 
   output {
-    File? mendel_tsv = filebase + ".mendel.tsv"
+    File? mendel_tsv = "mendel/" + filebase + ".mendel.tsv"
     Directory vcfs = "vcfs"
     Array[File] vcf_files = read_lines(stdout())
   }
@@ -1535,6 +1655,8 @@ task vcf_concat {
     set -euo pipefail
     vcf_files=~{write_lines(vcf_files)}
     ~{if defined(other_vcf_file) then "echo \"" + other_vcf_file + "\" >> $vcf_files" else ""}
+    cat $vcf_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $vcf_files
     ~{if ligate then "cat $vcf_files | tr '\\n' '\\0' | xargs -0 -n 1 bcftools index --force" else ""}
     bcftools concat \
       --no-version \
@@ -1544,7 +1666,7 @@ task vcf_concat {
       ~{if ligate then "--ligate" else ""} \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""}
     bcftools index --force "~{filebase}.bcf"
-    ~{if ligate then "cat $vcf_files | tr '\\n' '\\0' | xargs -0 -i rm \"{}.csi\"" else ""}
+    ~{if ligate then "cat $vcf_files | sed 's/$/.csi/' | tr '\\n' '\\0' | xargs -0 rm" else ""}
     cat $vcf_files | tr '\n' '\0' | xargs -0 rm
   >>>
 
@@ -1563,7 +1685,6 @@ task vcf_concat {
   }
 }
 
-# bcftools query --list-samples / --samples-file /dev/stdin should be removed once https://github.com/samtools/bcftools/issues/1259 is fixed
 task vcf_import {
   input {
     File phased_vcf_file
@@ -1589,21 +1710,23 @@ task vcf_import {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" flatten([[phased_vcf_file, phased_vcf_idx, unphased_vcf_file, unphased_vcf_idx]])}" | \
-      tr '\n' '\0' | xargs -0 -n 1 ln -s
-    bcftools query --list-samples "~{basename(unphased_vcf_file)}" | \
-      bcftools annotate \
+    mv "~{phased_vcf_file}" .
+    mv "~{phased_vcf_idx}" .
+    mv "~{unphased_vcf_file}" .
+    mv "~{unphased_vcf_idx}" .
+    bcftools annotate \
       --no-version \
       --output-type ~{if uncompressed then "u" else "b"} \
       --output "~{filebase}.phased.bcf" \
       --annotations "~{basename(phased_vcf_file)}" \
       --columns -FMT/GT \
-      --samples-file /dev/stdin \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       "~{basename(unphased_vcf_file)}"
     bcftools index --force "~{filebase}.phased.bcf"
-    echo "~{sep="\n" flatten([[phased_vcf_file, phased_vcf_idx, unphased_vcf_file, unphased_vcf_idx]])}" | \
-      awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
+    rm "~{basename(phased_vcf_file)}"
+    rm "~{basename(phased_vcf_idx)}"
+    rm "~{basename(unphased_vcf_file)}"
+    rm "~{basename(unphased_vcf_idx)}"
   >>>
 
   output {
@@ -1629,27 +1752,11 @@ task vcf_mocha {
     File vcf_idx
     File? sample_id_file
     File? computed_gender_file
+    File? call_rate_file
     File? xcl_vcf_file
     File? xcl_vcf_idx
     File? cnp_file
-    String? bdev_lrr_baf
-    String? bdev_baf_phase
-    Int? min_dist
-    Int? adjust_baf_lrr
-    Int? regress_baf_lrr
-    Int? lrr_gc_order
-    Float? xy_prob
-    Float? err_prob
-    Float? flip_prob
-    Float? telomere_advantage
-    Float? centromere_penalty
-    String? short_arm_chrs
-    Boolean use_short_arms = false
-    Boolean use_centromeres = false
-    Boolean use_no_rules_chrs = false
-    Float? lrr_weight
-    Float? lrr_hap2dip
-    Float? lrr_cutoff
+    String? mocha_extra_args
     Boolean uncompressed = false
 
     String docker
@@ -1667,53 +1774,120 @@ task vcf_mocha {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" select_all([vcf_file, vcf_idx, sample_id_file, computed_gender_file, xcl_vcf_file, xcl_vcf_idx, cnp_file])}" | \
-      tr '\n' '\0' | xargs -0 -n 1 ln -s
+    ~{if basename(vcf_file) != filebase + ".mocha.bcf" then ""
+      else "echo \"Input and output VCF file have the same name, change the sample_set_id variable\" 1>&2\nexit 1"}
+    echo "~{sep="\n" select_all([vcf_file, vcf_idx, sample_id_file, computed_gender_file, call_rate_file, xcl_vcf_file, xcl_vcf_idx, cnp_file])}" | \
+      tr '\n' '\0' | xargs -0 mv -t .
     ~{if defined(sample_id_file) && defined(computed_gender_file) then "paste -d $'\\t' \"" + basename(select_first([sample_id_file])) + "\" \"" +
       basename(select_first([computed_gender_file])) + "\" > computed_gender.map" else ""}
+    ~{if defined(sample_id_file) && defined(call_rate_file) then "paste -d $'\\t' \"" + basename(select_first([sample_id_file])) + "\" \"" +
+      basename(select_first([call_rate_file])) + "\" > call_rate.map" else ""}
     bcftools +mocha \
       --rules "~{rule}" \
       --no-version \
       ~{if defined(sample_id_file) && defined(computed_gender_file) then "--sex computed_gender.map" else ""} \
+      ~{if defined(sample_id_file) && defined(call_rate_file) then "--call-rate call_rate.map" else ""} \
       ~{if defined(xcl_vcf_file) then "--variants \"^" + basename(select_first([xcl_vcf_file])) + "\"" else ""} \
       ~{if defined(cnp_file) then "--cnp \"" + basename(select_first([cnp_file])) + "\"" else ""} \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       --output-type ~{if uncompressed then "u" else "b"} \
       --output "~{filebase}.mocha.bcf" \
-      --mosaic-calls "~{filebase}.mocha.tsv" \
+      --mosaic-calls "~{filebase}.calls.tsv" \
       --genome-stats "~{filebase}.stats.tsv" \
       --ucsc-bed "~{filebase}.ucsc.bed" \
       "~{basename(vcf_file)}" \
-      ~{"--bdev-LRR-BAF " + bdev_lrr_baf} \
-      ~{"--bdev-BAF-phase " + bdev_baf_phase} \
-      ~{"--min-dist " + min_dist} \
-      ~{"--adjust-BAF-LRR " + adjust_baf_lrr} \
-      ~{"--regress-BAF-LRR " + regress_baf_lrr} \
-      ~{"--LRR-GC-order " + lrr_gc_order} \
-      ~{"--xy-prob " + xy_prob} \
-      ~{"--err-prob " + err_prob} \
-      ~{"--flip-prob " + flip_prob} \
-      ~{"--telomere-advantage " + telomere_advantage} \
-      ~{"--centromere-penalty " + centromere_penalty} \
-      ~{"--short-arm-chrs " + short_arm_chrs} \
-      ~{if use_short_arms then "--use-short-arms" else ""} \
-      ~{if use_centromeres then "--use-centromeres" else ""} \
-      ~{if use_no_rules_chrs then "--use-no-rules-chrs" else ""} \
-      ~{"--LRR-weight " + lrr_weight} \
-      ~{"--LRR-hap2dip " + lrr_hap2dip} \
-      ~{"--LRR-cutoff " + lrr_cutoff}
+      ~{mocha_extra_args}
     bcftools index --force "~{filebase}.mocha.bcf"
-    echo "~{sep="\n" select_all([vcf_file, vcf_idx, sample_id_file, computed_gender_file, xcl_vcf_file, xcl_vcf_idx, cnp_file])}" | \
-      awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
+    echo "~{sep="\n" select_all([vcf_file, vcf_idx, sample_id_file, computed_gender_file, call_rate_file, xcl_vcf_file, xcl_vcf_idx, cnp_file])}" | \
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
     ~{if defined(sample_id_file) && defined(computed_gender_file) then "rm computed_gender.map" else ""}
   >>>
 
   output {
     File mocha_vcf_file = filebase + ".mocha.bcf"
     File mocha_vcf_idx = filebase + ".mocha.bcf.csi"
-    File calls_tsv = filebase + ".mocha.tsv"
+    File calls_tsv = filebase + ".calls.tsv"
     File stats_tsv = filebase + ".stats.tsv"
     File ucsc_bed = filebase + ".ucsc.bed"
+  }
+
+  runtime {
+    docker: docker
+    cpu: cpu
+    disks: "local-disk " + disk_size + " HDD"
+    memory: memory + " GiB"
+    preemptible: preemptible
+    maxRetries: maxRetries
+  }
+}
+
+# https://support.terra.bio/hc/en-us/community/posts/360071476431-Terra-fails-to-delocalize-files-listed-through-read-lines-
+task mocha_plot {
+  input {
+    File vcf_file
+    File vcf_idx
+    File calls_tsv
+    File stats_tsv
+    File cyto_file
+    Float call_rate_thr = 0.97
+    Float baf_auto_thr = 0.03
+
+    String docker
+    Int cpu = 1
+    Int? disk_size_override
+    Float memory = 3.5
+    Int preemptible = 1
+    Int maxRetries = 0
+  }
+
+  Float vcf_size = size(vcf_file, "GiB")
+  Int disk_size = select_first([disk_size_override, ceil(10.0 + vcf_size)])
+
+  command <<<
+    set -euo pipefail
+    mv "~{vcf_file}" .
+    mv "~{vcf_idx}" .
+    mv "~{calls_tsv}" .
+    mv "~{stats_tsv}" .
+    mv "~{cyto_file}" .
+    mkdir pngs
+    beg_pos=$(head -n1 "~{basename(calls_tsv)}" | tr '\t' '\n' | grep ^beg_)
+    end_pos=$(head -n1 "~{basename(calls_tsv)}" | tr '\t' '\n' | grep ^end_)
+    awk -F"\t" -v OFS="\t" -v beg_pos=$beg_pos -v end_pos=$end_pos '
+      NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+      NR==FNR && FNR>1 {sample_id=$(f["sample_id"]); call_rate=$(f["call_rate"]); baf_auto=$(f["baf_auto"])}
+      NR==FNR && FNR>1 && (call_rate<~{call_rate_thr} || baf_auto>~{baf_auto_thr}) {xcl[sample_id]++}
+      NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i}
+      NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); chrom=$(g["chrom"]); beg=$(g[beg_pos]); end=$(g[end_pos]);
+        len=$(g["length"]); p_arm=$(g["p_arm"]); q_arm=$(g["q_arm"]); bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"]);
+        lod_baf_phase=$(g["lod_baf_phase"]); type=$(g["type"]); if (lod_baf_phase=="nan") lod_baf_phase=0}
+      NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&
+        ( len>5e6 + 5e6 * (p_arm!="N" && q_arm!="N") ||
+          len>5e5 && (bdev<1/10 && rel_cov<2.5) && lod_baf_phase>10 ||
+          rel_cov<2.1 && lod_baf_phase>10 ) {print sample_id,chrom,beg,end}' \
+      "~{basename(stats_tsv)}" "~{basename(calls_tsv)}" > "~{basename(calls_tsv, ".tsv")}.coords.tsv"
+    while read sample_id chrom beg_pos end_pos; do
+      mocha_plot.R \
+        --cytoband "~{basename(cyto_file)}" \
+        --mocha \
+        --stats "~{basename(stats_tsv)}" \
+        --png pngs/$sample_id.${chrom}_${beg_pos}_$end_pos.png \
+        --vcf "~{basename(vcf_file)}" \
+        --samples $sample_id \
+        --regions $chrom:$beg_pos-$end_pos
+      echo pngs/$sample_id.${chrom}_${beg_pos}_$end_pos.png
+    done < "~{basename(calls_tsv, ".tsv")}.coords.tsv"
+    rm "~{basename(calls_tsv, ".tsv")}.coords.tsv"
+    rm "~{basename(vcf_file)}"
+    rm "~{basename(vcf_idx)}"
+    rm "~{basename(calls_tsv)}"
+    rm "~{basename(stats_tsv)}"
+    rm "~{basename(cyto_file)}"
+  >>>
+
+  output {
+    Directory pngs = "pngs"
+    Array[File] png_files = read_lines(stdout())
   }
 
   runtime {
@@ -1731,12 +1905,15 @@ task mocha_summary {
     File calls_tsv
     File stats_tsv
     Array[File]+ ucsc_beds
+    File cyto_file
     String filebase
+    Float call_rate_thr = 0.97
+    Float baf_auto_thr = 0.03
 
     String docker
     Int cpu = 1
     Int disk_size = 10
-    Float? memory = 3.5
+    Float memory = 3.5
     Int preemptible = 1
     Int maxRetries = 0
   }
@@ -1744,22 +1921,46 @@ task mocha_summary {
   command <<<
     set -euo pipefail
     ucsc_files=~{write_lines(ucsc_beds)}
-    echo "~{sep="\n" flatten([[calls_tsv, stats_tsv]])}" | \
-      tr '\n' '\0' | xargs -0 -n 1 ln -s
+    mv "~{calls_tsv}" .
+    mv "~{stats_tsv}" .
+    mv "~{cyto_file}" .
+    cat $ucsc_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $ucsc_files
     summary_plot.R \
-      --pdf "~{filebase}.pdf" \
+      --pdf "~{filebase}.summary.pdf" \
       --stats "~{basename(stats_tsv)}" \
       --calls "~{basename(calls_tsv)}"
+    awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+      NR==FNR && FNR>1 {sample_id=$(f["sample_id"]); call_rate=$(f["call_rate"]); baf_auto=$(f["baf_auto"])}
+      NR==FNR && FNR>1 && (call_rate<~{call_rate_thr} || baf_auto>~{baf_auto_thr}) {xcl[sample_id]++}
+      NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i; print}
+      NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); len=$(g["length"]); p_arm=$(g["p_arm"]); q_arm=$(g["q_arm"]);
+        bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"]); lod_baf_phase=$(g["lod_baf_phase"]); type=$(g["type"]);
+        if (lod_baf_phase=="nan") lod_baf_phase=0}
+      NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&
+        ( len>5e6 + 5e6 * (p_arm!="N" && q_arm!="N") ||
+          len>5e5 && (bdev<1/10 && rel_cov<2.5) && lod_baf_phase>10 ||
+          rel_cov<2.1 && lod_baf_phase>10 )' \
+      "~{basename(stats_tsv)}" "~{basename(calls_tsv)}" > "~{basename(calls_tsv, ".tsv")}.filtered.tsv"
+    pileup_plot.R \
+      --cytoband "~{basename(cyto_file)}" \
+      --pdf "~{filebase}.pileup.pdf" \
+      --stats "~{basename(stats_tsv)}" \
+      --calls "~{basename(calls_tsv, ".tsv")}.filtered.tsv"
+    rm "~{basename(calls_tsv, ".tsv")}.filtered.tsv"
     cat $ucsc_files | tr '\n' '\0' | xargs -0 cat | \
       awk '{if ($0~"^track") track=$0; else bed[track]=bed[track]$0"\n"}
       END {for (track in bed) printf track"\n"bed[track]}' > "~{filebase}.ucsc.bed"
-    echo "~{sep="\n" flatten([[calls_tsv, stats_tsv]])}" | \
-      awk -F/ '{print $0"\n"$NF}' | tr '\n' '\0' | xargs -0 rm
+    rm "~{basename(calls_tsv)}"
+    rm "~{basename(stats_tsv)}"
+    rm "~{basename(cyto_file)}"
+    cat $ucsc_files | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
     File ucsc_bed = filebase + ".ucsc.bed"
-    File pdf = filebase + ".pdf"
+    File summary_pdf = filebase + ".summary.pdf"
+    File pileup_pdf = filebase + ".pileup.pdf"
   }
 
   runtime {

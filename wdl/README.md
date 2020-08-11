@@ -9,7 +9,7 @@ This page contains instructions for how to run the <a href="mocha.wdl">MoChA WDL
    * [Primary Options](#primary-options)
    * [Secondary Options](#secondary-options)
    * [Outputs](#outputs)
-   * [Running on Terra](#running-on-terra)
+   * [Running with Cromwell or Terra](#running-with-cromwell-or-terra)
    * [Filtering Output Calls](#filtering-output-calls)
    * [Scattered Tasks](#scattered-tasks)
    * [Troubleshooting](#troubleshooting)
@@ -43,7 +43,7 @@ Notice that if you want to use the **idat** mode, this requires to run either th
 
 You can run the pipeline all the way to the initial conversion to unphased VCF without phasing by setting the flag **do_not_phase** or all the way to phased VCF without running MoChA by setting the flag **do_not_mocha**. You can then input these VCFs back into the pipeline using, respectively, modes **vcf** or **pvcf**, although you will need to provide information about **computed_gender** and **call_rate** that are generated during the conversion to VCF
 
-The pipeline will perform a minimal amount of quality control. It is up to the user to correctly handle failed samples and duplicates. Furthermore, when including the conversion to VCf step, the pipeline will output three files, **sample_id_file**, **computed_gender_file**, and **call_rate_file**. We highly recommend to check for call rate failure rate and for discrepancies between reported gender and computed gender that might be indicative of sample swaps 
+The pipeline will perform a minimal amount of quality control. It is up to the user to correctly handle failed samples and duplicates. Furthermore, when including the conversion to VCF step, the pipeline will output three files, **sample_id_file**, **computed_gender_file**, and **call_rate_file**. We highly recommend to check for call rate failure rate and for discrepancies between reported gender and computed gender that might be indicative of sample swaps
 
 Input Files
 ===========
@@ -62,21 +62,23 @@ The **vcf** and **pvcf** modes require the user to provide a set of VCF files to
 
 Allowed columns in the sample table:
 
-| mode            | idat | gtc  | cel  | chp  | txt  | vcf  | pvcf |
-|-----------------|------|------|------|------|------|------|------|
-| sample_id       | req. | req. | req. | req  | req. | req. | req. |
-| batch_id        | req. | req. | req. | req  | req. |      |      |
-| computed_gender |      |      |      |      |      | req. | req. |
-| call_rate       |      |      |      |      |      | req. |      |
-| green_idat      | req. |      |      |      |      |      |      |
-| red_idat        | req. |      |      |      |      |      |      |
-| gtc             |      | req. |      |      |      |      |      |
-| cel             |      |      | req  |      | req. |      |      |
-| chp             |      |      |      | req. |      |      |      |
+| mode            | gzipped | idat | gtc  | cel  | chp  | txt  | vcf  | pvcf |
+|-----------------|---------|------|------|------|------|------|------|------|
+| sample_id       |         | req. | req. | req. | req  | req. | req. | req. |
+| batch_id        |         | req. | req. | req. | req  | req. |      |      |
+| computed_gender |         |      |      |      |      |      | req. | req. |
+| call_rate       |         |      |      |      |      |      | req. | reg. |
+| green_idat      | allowed | req. |      |      |      |      |      |      |
+| red_idat        | allowed | req. |      |      |      |      |      |      |
+| gtc             | allowed |      | req. |      |      |      |      |      |
+| cel             | allowed |      |      | req  |      | req. |      |      |
+| chp             | allowed |      |      |      | req. |      |      |      |
+
+All files in this table can be provided in gzip format. The pipeline will process these seamlessly
 
 It is extremely important that the **sample_id** column contains unique IDs. Repeated IDs will cause undefined behavior. You can use `awk -F"\t" 'x[$1]++' sample.tsv` to verify that the first column contains unique IDs. If this is not the case, you can use something like
 ```
-awk -F"\t" -v OFS="\t" '{x[$1]++; if (x[$1]>1) $1=$1"-"(x[$1]-1); print} sample.tsv'
+awk -F"\t" -v OFS="\t" '{x[$1]++; if (x[$1]>1) $1=$1"-"(x[$1]-1); print}' sample.tsv
 ```
 to generate a new table with additional suffixes in the sample IDs to make the IDs unique. It is instead allowed to have other columns to have the same file names as long as the **batch_id** is different
 
@@ -85,6 +87,13 @@ When using the pipeline in **idat**, **gtc**, **cel**, or **chp** mode, it is ex
 We further recommend batches of 4000-5000 samples as this is small enough to make most tasks able to run on preemptible computing and large enough to make MoChA able to perform effective within-batch adjustments for BAF and LRR. For DNA microarrays such as the Global Screening Array and the Multi-Ethnic Global Array, this batch sizes will generate VCFs smaller than, respectively, 60GB and 20GB
 
 If using the **idat** mode, the green and red IDAT file names have to match and end, respectively, with suffixes **\_Grn.idat** and **\_Red.idat**. If the file names have been changed and these suffixes have been modified, unfortunately you will have to manually change the names to first satisfy this requirement or else the conversion to GTC will fail as the Illumina software requires this naming standard
+
+When using the **txt** mode, you don't have to provide CEL files, but you have to provide the **cel** column with a list of CEL files names grouped by batch that match the CEL file names present in the calls TXT and summary TXT files. These will be used exclusively to rename the IDs, especially in situations where different batches contain the same CEL files IDs. You will also have to make sure that **calls** and **summary** tables contain the same samples in the same order and that these are indeed present in the **report** table or else the behavior will be undefined. To verify the list of samples in each table, you can use the following commands:
+```
+grep -v ^# AxiomGT1.calls.txt | head -n1 | tr '\t' '\n' | tail -n+2
+grep -v ^# AxiomGT1.summary.txt | head -n1 | tr '\t' '\n' | tail -n+2
+grep -v ^# AxiomGT1.report.txt | cut -f1 | tail -n+2
+```
 
 If you are using the pipeline in **vcf** or **pvcf** mode you have to supply **computed_gender** and **call_rate** information. This can be extracted from a previous run of the pipeline that included the conversion to VCF using a command like the following:
 ```
@@ -95,29 +104,31 @@ paste -d $'\t' - call_rate.lines) > sample.tsv
 
 Allowed columns in the batch table:
 
-| mode          | idat | gtc  | cel  | chp  | txt  | vcf  | pvcf |
-|---------------|------|------|------|------|------|------|------|
-| batch_id      | req. | req. | req. | req. | req. | req. | req. |
-| csv           | req. | req. | req. | req. | req. |      |      |
-| sam           | opt. | opt. | opt. | opt. | opt. |      |      |
-| bpm           | req. | req. |      |      |      |      |      |
-| egt           | req. | req. |      |      |      |      |      |
-| xml           |      |      | req. |      |      |      |      |
-| zip           |      |      | req. |      |      |      |      |
-| path          | opt. | opt. | opt. | opt. | opt. | opt. | opt. |
-| snp           |      |      |      | req. | req. |      |      |
-| calls         |      |      |      |      | req. |      |      |
-| confidences   |      |      |      |      | opt. |      |      |
-| summary       |      |      |      |      | req. |      |      |
-| report        |      |      |      |      | req. |      |      |
-| vcf           |      |      |      |      |      | req. | req. |
-| vcf_index     |      |      |      |      |      | req. | req. |
-| xcl_vcf       |      |      |      |      |      |      | req. |
-| xcl_vcf_index |      |      |      |      |      |      | req. |
+| mode          | gzipped | idat | gtc  | cel  | chp  | txt  | vcf  | pvcf |
+|---------------|---------|------|------|------|------|------|------|------|
+| batch_id      |         | req. | req. | req. | req. | req. | req. | req. |
+| csv           | allowed | req. | req. | req. | req. | req. |      |      |
+| sam           |         | opt. | opt. | opt. | opt. | opt. |      |      |
+| bpm           | allowed | req. | req. |      |      |      |      |      |
+| egt           | allowed | req. | req. |      |      |      |      |      |
+| xml           |         |      |      | req. |      |      |      |      |
+| zip           |         |      |      | req. |      |      |      |      |
+| path          |         | opt. | opt. | opt. | opt. | opt. | opt. | opt. |
+| snp           | allowed |      |      |      | req. | req. |      |      |
+| calls         | allowed |      |      |      |      | req. |      |      |
+| confidences   | allowed |      |      |      |      | opt. |      |      |
+| summary       | allowed |      |      |      |      | req. |      |      |
+| report        | allowed |      |      |      |      | req. |      |      |
+| vcf           |         |      |      |      |      |      | req. | req. |
+| vcf_index     |         |      |      |      |      |      | req. | req. |
+| xcl_vcf       |         |      |      |      |      |      |      | req. |
+| xcl_vcf_index |         |      |      |      |      |      |      | req. |
+
+Some files in this table can be provided in gzip format and the **sam** alignment file can be provided either as a SAM or as a BAM file. The pipeline will process these seamlessly
 
 It is extremely important that the **batch_id** column contains unique IDs. Repeated IDs will cause undefined behavior. It is also equally important that, if the boolean **realign** variable is left to its default **false** value, then the **csv** manifest files must be provided with respect to the same reference genome as the one selected in the **ref_json_file** variable. A mismatch in the two references will cause undefined behavior. For newer DNA microarrays, Illumina follows a convention of providing manifest files ending with the **1** suffix for GRCh37 (e.g\. `Multi-EthnicGlobal_D1.csv`) amd ending with the **2** suffix for GRCh38 (e.g\. `Multi-EthnicGlobal_D2.csv`). We recommend to always use GRCh38 with the latter type of manifest files and, whenever not available from Illumina, to set the boolean **realign** variable to **true**
 
-If you are running the pipeline in **idat** mode, it is important that the **bpm** file name matches the internal descriptor file name or a safety check during the conversion from GTC to VCF will fail. You can verify the internal descriptor file name with the command `bcftools +gtc2vcf -b $bpm_file`. We have observed discrepancies only in old Illumina BPM manifest files. If necessary, you can use set the boolean flag **do_not_check_bpm** to turn off this safety check 
+If you are running the pipeline in **idat** mode, it is important that the **bpm** file name matches the internal descriptor file name or a safety check during the conversion from GTC to VCF will fail. You can verify the internal descriptor file name with the command `bcftools +gtc2vcf -b $bpm_file`. We have observed discrepancies only in old Illumina BPM manifest files. If necessary, you can use set the boolean flag **do_not_check_bpm** to turn off this safety check
 
 The **snp** files are usually the ones generated by the Affymetrix Power Tools as **AxiomGT1.snp-posteriors.txt** files. If the **sam** files are provided then the genome coordinates in the **csv** manifests will be updated during conversion to **vcf** even if the boolean flag **realign** is set to false
 
@@ -156,21 +167,22 @@ The following are the primary options that you can set in the main input json fi
 | batch_tsv_file     | File     | TSV file with batch information                                                                  |
 | ped_file           | File?    | optional PED file for improved phasing with trios                                                |
 | extra_xcl_vcf_file | File?    | optional VCF file with list of additional variants to exclude from analysis, mostly for WGS data |
+| mocha_extra_args   | String   | extra arguments for MoChA                                                                        |
 
-The **docker_json_file** <a href="docker.json">file</a> should contain the list of dockers to use and it should look like this (for running with Terra):
+The **docker_json_file** <a href="docker.json">file</a> should contain the list of dockers to use and it should look like this (for running with Cromwell or Terra):
 ```json
 {
   "ubuntu": "ubuntu:20.10",
   "pandas": "fastgenomics/pandas:0.22-p36-v3",
-  "iaap_cli": "us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-20200720",
-  "autoconvert": "us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-20200720",
-  "apt": "us.gcr.io/mccarroll-mocha/apt:1.10.2-20200720",
-  "gtc2vcf": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
-  "bcftools": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
-  "shapeit4": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
-  "eagle": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
-  "mocha": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200720",
-  "mocha_plot":"us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-20200720"
+  "iaap_cli": "us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-20200811",
+  "autoconvert": "us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-20200811",
+  "apt": "us.gcr.io/mccarroll-mocha/apt:1.10.2-20200811",
+  "gtc2vcf": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
+  "bcftools": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
+  "shapeit4": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
+  "eagle": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
+  "mocha": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
+  "mocha_plot":"us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-20200811"
 }
 ```
 
@@ -182,7 +194,7 @@ The **ref_json_file** file should look either like this for the <a href="GRCh37.
   "name": "GRCh37",
   "fasta_ref": "human_g1k_v37.fasta",
   "n_chrs": 23,
-  "mhc_reg": "6:32443271-32558428",
+  "mhc_reg": "6:29669719-33093965",
   "dup_file": "dup.grch37.bed.gz",
   "genetic_map_file": "genetic_map_hg19_withX.txt.gz",
   "cnp_file": "cnp.grch37.bed",
@@ -198,7 +210,7 @@ Or like this for the <a href="GRCh38.json">GRCh38</a> reference:
   "name": "GRCh38",
   "fasta_ref": "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna",
   "n_chrs": 23,
-  "mhc_reg": "chr6:32475494-32590651",
+  "mhc_reg": "chr6:29701942-33126188",
   "dup_file": "dup.grch38.bed.gz",
   "genetic_map_file": "genetic_map_hg38_withX.txt.gz",
   "cnp_file": "cnp.grch38.bed",
@@ -227,7 +239,7 @@ There are options specific to single tasks in the pipeline that can be used and 
 | eagle                | Boolean       | vcf_phase              | if true uses Eagle rather than SHAPEIT4 to phase [false]                |
 | delim                | String        | {idat,gtc,chp}_scatter | string delimiter used to define IDAT/GTC/CHP sub batches [\"~\"]        |
 | chip_type            | Array[String] | cel2chp                | list of chip types to check library and CEL files against               |
-| tags                 | Array[String] | {gtc,chp,txt}2vcf      | list of FORMAT tags to output in the VCF [\"GT\", \"BAF\", \"LRR\"]     |
+| tags                 | Array[String] | {gtc,chp,txt}2vcf      | list of FORMAT tags to output in the VCF [\"GT,BAF,LRR\"]               |
 | gc_window_size       | Int           | {gtc,chp,txt}2vcf      | window size in bp used to compute the GC content [200]                  |
 
 When using older Illumina arrays IAAP CLI might not work and furthermore the BPM sanity check for consistency between BPM files and GTC files might also fail. In these cases, it is advised to turn the two flags **autoconvert** and **do_not_use_reference** to true. Similarly, when using older Affymetrix arrays, the chip type information in the CEL files might not reflect the chip type information in the XML file. You can include in the **chip_type** array the chip type labels included in the CEL files
@@ -240,11 +252,11 @@ After a pipeline run, assuming the options **do_not_phase** and **do_not_mocha**
 | key                  | type         | idat | gtc  | cel  | chp  | txt  | vcf  | pvcf | description                                         |
 |----------------------|--------------|------|------|------|------|------|------|------|-----------------------------------------------------|
 | ref_intervals_bed    | File?        | yes  | yes  | yes  | yes  | yes  | yes  |      | list of genome segments used to scatter the phasing |
-| idat_tsv_file        | File?        | yes  |      |      |      |      |      |      | summary table for IDAT files                        |
+| green_idat_tsv_file  | File?        | yes  |      |      |      |      |      |      | summary table for green IDAT files                  |
+| red_idat_tsv_file    | File?        | yes  |      |      |      |      |      |      | summary table for red IDAT files                    |
 | gtc_tsv_file         | File?        | yes  | yes  |      |      |      |      |      | summary table for GTC files                         |
 | cel_tsv_file         | File?        |      |      | yes  |      |      |      |      | summary table for CEL files                         |
-| chp_tsv_file         | File?        |      |      | yes  | yes  |      |      |      | summary table for CHP files                         |
-| txt_tsv_file         | File?        |      |      |      |      | yes  |      |      | summary table from report.txt files                 |
+| affy_tsv_file        | File?        |      |      | yes  | yes  | yes  |      |      | summary table for CHP or TXT files                  |
 | sample_id_file       | File         | yes  | yes  | yes  | yes  | yes  | yes  | yes  | sample ID list                                      |
 | computed_gender_file | File         | yes  | yes  | yes  | yes  | yes  | yes  | yes  | sample computed gender list                         |
 | call_rate_file       | File?        | yes  | yes  | yes  | yes  | yes  | yes  |      | sample call rate list                               |
@@ -262,8 +274,8 @@ After a pipeline run, assuming the options **do_not_phase** and **do_not_mocha**
 | xcl_vcf_file         | File?        | yes  | yes  | yes  | yes  | yes  | yes  |      | VCF of variants excluded from analysis              |
 | xcl_vcf_idx          | File?        | yes  | yes  | yes  | yes  | yes  | yes  |      | index for VCF of variants excluded from analysis    |
 
-Running on Terra
-================
+Running with Cromwell or Terra
+==============================
 
 While the pipeline can be run with a Cromwell server alone, even on your laptop, it has been fully tested to work in the <a href="https://terra.bio/">Terra</a> environment developed at the <a href="https://www.broadinstitute.org/data-sciences-platform">Broad Institute</a>. To setup you workspace to work with the MoChA WDL on Terra you will have to:
 
@@ -274,24 +286,26 @@ While the pipeline can be run with a Cromwell server alone, even on your laptop,
 * Have the basic configuration files, <a href="docker.json">docker.json</a>, <a href="GRCh37.json">GRCh37</a>, and <a href="GRCh38.json">GRCh38</a> available in your Google bucket making sure that variables **docker_json_file** and **ref_json_file** point to the Google bucket locations where you have located them
 * Upload your CSV/BPM/EGT/XML/ZIP manifest files in the same location in your Google bucket, such as **gs://your-google-bucket/manifests/** and making sure that the **manifest_path** variable points to that path including the trailing **/**. Alternatively you can leave the **manifest_path** variable empty and include the full paths in the **batch_tsv_file** table
 * Upload your IDAT/GTC/CEL/CHP/TXT/VCF files to your Google bucket, if you have uploaded CHP/TXT files, make sure you upload also the corresponding SNP **AxiomGT1.snp-posteriors.txt** and report **AxiomGT1.report.txt** files
-* Format two TSV tables describing samples and batches as explained in the inputs section, upload them to your Google bucket, and make sure variables **sample_tsv_file** and **batch_tsv_file** are set to their location. If you include the file names without their absolute paths, you can include the path including the trailing **/** in the **path** column but you have to make sure all data files from the same batch are in the same directory. See below for examples for Illumina and Affymetrix arrays  
+* Format two TSV tables describing samples and batches as explained in the inputs section, upload them to your Google bucket, and make sure variables **sample_tsv_file** and **batch_tsv_file** are set to their location. If you include the file names without their absolute paths, you can include the path including the trailing **/** in the **path** column but you have to make sure all data files from the same batch are in the same directory. See below for examples for Illumina and Affymetrix arrays
 * Create a JSON file with all the variables including the cohort ID (**sample_set_id**), the **mode** of the analysis, the location of your tables and resource files, parameters to select the amount of desired parallelization. See below for examples for Illumina and Affymetrix arrays
 * From your workspace, go to your WORKSPACE tab, select the MoChA workflow that you had previously imported from the Broad Methods Repository
 * Select option \"Run workflow with inputs defined by file paths\" and we further recommend to select options \"Use call caching\" and \"Delete intermediate outputs\" (as these can increase 4-5x the storage footprint)
 * Click the on \"upload json\" and select the JSON files with the variable defining your run. Then click on \"SAVE\" and then click on \"RUN ANALYSIS\"
-* A job will have spawned that you will be able to monitor through the Job Manager to check the pipeline progress. While monitoring the progress, you will be able to open some summary outputs that are generated before the pipeline fully completes 
+* A job will have spawned that you will be able to monitor through the Job Manager to check the pipeline progress. While monitoring the progress, you will be able to open some summary outputs that are generated before the pipeline fully completes
+
+If you would rather run the pipeline without Terra, you can set up your own Cromwell server instead. Notice that Cromwell will need to load some input files to properly organize the batching and to do so it will need the <a href="https://cromwell.readthedocs.io/en/stable/filesystems/Filesystems/#engine-filesystems">engine filesystem</a> activated for reading files. Due to the many steps involved, there are many temporary files that will be generated that can be safely removed. If you are running Cromwell with a Google backend, we recommend to use the `"delete_intermediate_output_files": true` as a <a href="https://cromwell.readthedocs.io/en/stable/wf_options/Google/">workflow option</a>
 
 Filtering Output Calls
 ======================
 
-Once you have completed a full run of the MoChA pipeline, you will receive two tables, **mocha_stats_tsv** and **mocha_calls_tsv**, the first one with overall statistics about the samples, and the second one with the list of chromosomal alterations calls made by the MoChA software. The columns in the table are described in the software <a href="../mocha#chromosomal-alterations-pipeline">documentation</a>
+Once you have completed a full run of the MoChA pipeline, you will receive two tables, **mocha_stats_tsv** and **mocha_calls_tsv**, the first one with overall statistics about the samples, and the second one with the list of chromosomal alterations calls made by the MoChA software. The columns and suggestions for filtering in the table are described in the software <a href="../mocha#chromosomal-alterations-pipeline">documentation</a>
 
 Not all calls made by MoChA will be mosaic chromosomal alterations. These are some suggestions for how to think about filtering the calls:
 
 * Calls with **type** CNP are inherited copy number polymorphism. To clean the data, MoChA attempts to call common deletions and duplications during the first pass through the data. These can be safely removed from your callset
-* Calls with **lod_baf_phase** less than 10. Mosaic chromosomal alterations always have an allelic imbalance signal as opposed to germline deletions that might have no allelic imbalance as no heterozygous sites will be called in a segment that is haploid
-* Calls with **length** less than 2Mbp and **rel_cov** greater than 2.5 are likely germline duplications that can easily have a strong allelic imbalance signal. It might be difficult to distinguish these alterations from genuine somatic amplifications but to edge on the side of caution it is recommended to filter these out if you do not know any better
-* Calls from samples that have high **baf_conc** and **baf_auto** values, the second one being a slightly better predictor, as these might indicate samples contaminated with resulting widespread allelic imbalance all around the genome. There is not an agreed threshold you should follow. Plotting the values for these two statistics can easily help identify obvious outliers
+* Calls with **lod_baf_phase** less than 10 are often constitutional rather than mosaic events. Constitutional events are more likely to be germline rather than somatic
+* Calls with **length** less than 500 kbp and **rel_cov** greater than 2.5 are often germline duplications that can have a strong allelic imbalance signal. It might be difficult to distinguish these alterations from genuine somatic amplifications but to edge on the conservative side we recommend to filter these out unless in loci with strong prior evidence for mosaicism
+* Samples that have low **call_rate** (by default Illumina and Affymetrix recommend less than 0.97) or high **baf_auto** values (by default we recommend a 0.03 threshold, although the correct threshold could depend on DNA microarray type) could be low quality or contaminated samples with widespread allelic imbalance across the genome. Plotting the values for these two statistics can help identify outliers and select the correct thresholds
 
 After filtering out your callset, plotting the prevalence of the number of samples with mosaic chromosomal alterations as a function of age might provide the best evidence for an acceptable filtering strategy if young individuals have little to no evidence for mosaicism. Notice that there is not one unique strategy that works across all datasets. Chromosome X and 15q11 might require special care. If your samples are from cell lines for example, the inactive X and the paternal region in 15q11 tend to replicate later than their active counterparts due to epigenetic mechanisms and this can cause both regions to exhibit significant amounts of allelic imbalance that is of replication timing origin
 
@@ -300,20 +314,21 @@ Scattered Tasks
 
 The workflow consists of the following tasks that will be scattered:
 
-| task                        | description                                                              |
-|-----------------------------|--------------------------------------------------------------------------|
-| csv2bam                     | realigns the sequences in the manifest files to the reference genome     |
-| idat2gtc/cel2chp            | converts raw intensity IDAT/CEL files to GTC/CHP files with genotypes    |
-| gtc2vcf/chp2vcf/txt2vcf     | imports genotypes and intensities to a compliant set of VCF files        |
-| gtc2vcf_merge/chp2vcf_merge | merges previous outputs across sub bactches to make single batch VCFs    |
-| vcf_scatter                 | extracts genotypes and scatter the VCF files across the genome windows   |
-| vcf_merge                   | joins the VCF files into VCF slices including all samples across batches |
-| vcf_qc                      | identifies a subset of variants that performed poorly                    |
-| vcf_phase                   | phases each genome window across the whole cohort                        |
-| vcf_split                   | splits the phased VCF slices back into VCF shards                        |
-| vcf_concat                  | concatenates the VCF shards back into VCF files for each batch           |
-| vcf_import                  | imports the phased genotypes back into the original VCFs                 |
-| vcf_mocha                   | runs the MoChA framework across batches                                  |
+| task                | description                                                              |
+|---------------------|--------------------------------------------------------------------------|
+| csv2bam             | realigns the sequences in the manifest files to the reference genome     |
+| idat2gtc/cel2chp    | converts raw intensity IDAT/CEL files to GTC/CHP files with genotypes    |
+| {gtc,chp,txt}2vcf   | imports genotypes and intensities to a compliant set of VCF files        |
+| {gtc,chp}2vcf_merge | merges previous outputs across sub bactches to make single batch VCFs    |
+| vcf_scatter         | extracts genotypes and scatter the VCF files across the genome windows   |
+| vcf_merge           | joins the VCF files into VCF slices including all samples across batches |
+| vcf_qc              | identifies a subset of variants that performed poorly                    |
+| vcf_phase           | phases each genome window across the whole cohort                        |
+| vcf_split           | splits the phased VCF slices back into VCF shards                        |
+| vcf_concat          | concatenates the VCF shards back into VCF files for each batch           |
+| vcf_import          | imports the phased genotypes back into the original VCFs                 |
+| vcf_mocha           | runs the MoChA framework across batches                                  |
+| mocha_plot          | plots the most confident events called by MoChA across batches           |
 
 ![](mocha_scatter.png)
 
@@ -325,22 +340,25 @@ To make best use of the elasticity of cloud computing, the pipeline attempts to 
 * by splitting the genome in overlapping windows each phased independently (controlled by **max_win_size_cm** and **overlap_size_cm**)
 * by allowing multi-threading of SHAPEIT4/Eagle phasing software (controlled by **phase_threads**)
 
-All tasks but the phasing task are set by default to run on a single CPU. All tasks but cel2chp and txt2vcf are set by default to run on preemptible computing on the first run, and to then proceed to run as non-preemptible is they are preempted
+All tasks but the phasing tasks are set by default to run on a single CPU. All tasks but cel2chp and txt2vcf are set by default to run on preemptible computing on the first run, and to then proceed to run as non-preemptible is they are preempted
 
-Terra has a 2300 task limit per project (called \"Hog Limits\") but a single job should work well within this limit. Tasks idat2gtc/cel2chp will output tables with metadata about IDAT/CEL files which will be aggregated across batches by the **intensity_tbl_concat** task. Similarly tasks gtc2vcf/chp2vcf/txt2vcf will output tables with metadata about GTC/CHP files which will be aggregated across batches by the **genotype_tbl_concat** task
+Terra has a 2300 task limit per project (called \"Hog Limits\") but a single job should work well within this limit. Tasks idat2gtc/cel2chp and tasks {gtc,chp,txt}2vcf will output tables with metadata about their input files which will be aggregated across batches
 
 Troubleshooting
 ===============
 
 These are some of the messages that you might receive when something goes wrong:
 
+* If you run the pipeline on Terra with the `Delete intermediate options` flag selected and your workflow keeps showing as Running even after the final outputs have been generated, it is possible that the Cromwell server behind Terra might have failed while deleting the intermediate outputs. This is an <a href="https://support.terra.bio/hc/en-us/community/posts/360071861791-Job-seems-stuck-indefinitely-at-the-delete-intermediate-files-step-and-does-not-complete">issue</a> that is being patched
 * `Failed to evaluate input 'disk_size' (reason 1 of 1): ValueEvaluator[IdentifierLookup]: No suitable input for ...`: this indicates that Cromwell was unable to find the size of one of the input files for a task, most likely because the file does not exist where indicate by the user
 * `The job was stopped before the command finished. PAPI error code 2. Execution failed: generic::unknown: pulling image: docker pull: running ["docker" "pull" "###"]: exit status 1 (standard error: "Error response from daemon: Get https://###: unknown: Project 'project:###' not found or deleted.\n")`: this means that one of the docker images provided in the **docker_json_file** does not exist
 * `Job exit code 255. Check gs://###/stderr for more information. PAPI error code 9. Please check the log file for more details:`: if this is an error provided by the task cel2chp, it means that the `apt-probeset-genotype` command has encountered an error. Reading the `stderr` file should easily provide an explanation
 * `The job was stopped before the command finished. PAPI error code 10. The assigned worker has failed to complete the operation`: this could mean that the job was preempted despite the fact that it was not running in preemptible computing (see <a href="https://support.terra.bio/hc/en-us/community/posts/360046714292-Are-you-experiencing-PAPI-error-code-10-Read-this-for-a-workaround-">here</a>)
 * `The job was aborted from outside Cromwell`: this could be an indication that a task was killed as it requested too much memory
 * idat2gtc task fails with internal `stderr` message `Normalization failed! Unable to normalize!`: this means that either the IDAT sample is of very poor quality and it cannot be processed by the GenCall algorithm or that you have matched the IDAT with the wrong Illumina BPM manifest file
-* idat2gtc task fails with internall `stderr` message `System.Exception: Unrecoverable Error...Exiting! Unable to find manifest entry ######## in the cluster file!`: this means that you are using the incorrect Illumina EGT cluster file 
+* idat2gtc task fails with internall `stderr` message `System.Exception: Unrecoverable Error...Exiting! Unable to find manifest entry ######## in the cluster file!`: this means that you are using the incorrect Illumina EGT cluster file
+* If when monitor the status of the job you get the error: `Job Manager is running but encountered a problem getting data from its workflow server. Click here to start over. 500: Internal Server Error` then it means that there is too much metadata input and output into the tasks for the Job Manager to handle te request. This metadata limit is a known issue currently being worked on
+* When you mismatch a BPM manifest file with an IDAT in task idat2gtc, iaap-cli, while outputting an error message such as `Normalization failed for sample: ########! This is likely a BPM and IDAT mismatch. ERROR: Index was outside the bounds of the array.` will not return an error code, causing the pipeline to fail at the next task
 
 If you receive an error that you do not understand, feel free contact the <a href="mailto:giulio.genovese@gmail.com">author</a> for troubleshooting
 
@@ -366,12 +384,15 @@ The following softwares are used by the various steps of the pipeline:
 For users and developers that want to understand the logic and ideas behind the pipeline, here is a list of important aspects:
 
 * The WDL is written according to the version development specification as it requires grouping by batch and sub batch through the <a href="https://github.com/openwdl/wdl/blob/main/versions/development/SPEC.md#mapxarrayy-collect_by_keyarraypairxy">collect_bt_key()</a> function together with the <a href="https://github.com/openwdl/wdl/blob/main/versions/development/SPEC.md#mapxy-as_maparraypairxy">as_map()</a> and <a href="https://github.com/openwdl/wdl/blob/main/versions/development/SPEC.md#arrayx-keysmapxy">keys()</a> functions
-* To minimize memory load on Cromwell, computed gender and call rate maps are passed to tasks **vcf_qc** and **vcf_mocha** as files rather than WDL maps, and similarly sample IDs are passed to tasks **vcf_merge** as a file rather than WDL arrays. However, since Cromwell on Terra is unable to serialize files, these objects are specialized with dedicated tasks whose input and output can be monitored during the running of the pipeline
-* As Cromwell v52 does not accept optional output in tasks dispatched to Google Cloud, we have to **touch** optional output files in tasks **cel2affy**, **affy2vcf**, and **vcf_split**
+* To achieve parallelization both across batches and across genome windows, the <a href="https://github.com/openwdl/wdl/blob/main/versions/development/SPEC.md#arrayarrayx-transposearrayarrayx">transpose()</a> is used to move from one model to the other
+* To minimize memory load on Cromwell, computed gender and call rate maps are passed to tasks **vcf_qc** and **vcf_mocha** as files rather than WDL maps, and similarly sample IDs are passed to tasks **vcf_merge** as a file rather than WDL arrays. However, since Cromwell on Terra is unable to serialize files, these objects are serialized with dedicated tasks whose input and output can be monitored during the running of the pipeline
+* As Cromwell v52 does not accept optional output in tasks dispatched to Google Cloud, we have to **touch** optional output files in tasks **cel2affy** and **vcf_split**
 * As Cromwell v52 does not delocalize on Google Cloud list of output files whose names are determined during runtime, we use the trick of delocalizing a **Directory** for tasks **idat2gtc**, **cel2affy**, **vcf_scatter**, and **vcf_split**
 * As estimating the sizes of a large array of files is extremely time consuming in Google Cloud, causing tasks to spend a long time in PreparingJob state before starting to localize the files, for array of IDAT, GTC, CEL, and CHP files we estimate the size of the first file in an array and assume all the other files have similar sizes
 * As the Terra job manager crashes if too much metadata is transferred between the workflow and the tasks, we try to transfer metadata to tasks through files wherever possible
-* To avoid SIGPIPE error 141 when piping a stream to the UNIX command head, we use the `|| if [[ $? -eq 141 ]]; then true; else exit $?; fi` trick
+* To avoid SIGPIPE error 141 when piping a stream to the UNIX command `head`, we use the `|| if [[ $? -eq 141 ]]; then true; else exit $?; fi` trick
+* To avoid error 1 when grep returns no matches, we use the `|| if [[ $? -eq 1 ]]; then true; else exit $?; fi` trick
+* To avoid error 2 when gunzip is used on a file localized as a hard link, we use `gunzip --force`
 * From personal experience, even running a small cohort takes a minimum of ~1 hour on Terra, as there are enough overhead tasks that need to be run
 * Conversion from IDAT to GTC for some arrays might fail to infer gender when using IAAP CLI. For this reason, we use by default the IAAP CLI flag **\--gender-estimate-call-rate-threshold -0.1** (similarly to how it is done by the Broad Genomics platform)
 * Conversion from IDAT to GTC using IAAP CLI is 2-3x faster when run on multiple IDATs at once than when run individually on each IDAT (the latter being how the Broad Genomics platform runs it)
@@ -381,12 +402,13 @@ For users and developers that want to understand the logic and ideas behind the 
 * Genotyping using the Affymetrix Power Tools is best run on many samples at once. Affymetrix recommends, in their <a href="https://assets.thermofisher.com/TFS-Assets/LSG/manuals/axiom_genotyping_solution_analysis_guide.pdf">data analysis guide</a>, to batch as large a batch size as computationally feasible, or up to 4800 samples. However, this can take up to 16 hours to execute, it is not parallelizable, and the genotyping software from Affymetrix is not multi-threaded. For this reason task **cel2chp** is set to run on non-preemptible computing by default
 * Conversion to VCF for Affymetrix data can be done either from AGCC CHP files or from  matrices of tab delimited genotype calls and confidences. We recommend the former as it can be more easily parallelizable by splitting the conversion into sub batches. When converting the latter, the whole batch will need to be converted into VCF in one single task. For this reason task **txt2vcf** is set to run on non-preemptible computing by default
 * All tasks that output a VCF can, if requested, output either in compressed or uncompressed format. For VCFs with BAF and LRR intensities, we observed a modest ~25% space saving, most likely due to the high entropy in the intensity measurements. For VCF files with exclusively the GT format field, we observed around ~75% space saving
-* Due to residual correlation between the BAF and LRR, observed both for Illumina arrays (<a href="http://doi.org/10.1101/gr.5686107">Oosting et al\. 2007</a> and <a href="http://doi.org/10.1101/gr.5686107">Staaf et al\. 2008</a>) and Affymetrix arrays (<a href="http://doi.org/10.1038/srep36158">Mayrhofer et al\. 2016</a>), MoChA performs a BAF correction by regressing BAF values against the LRR. This improves detectiong of mosaic chromosomal alterations at low cell fractions. However, for this correction to be effective, batches need to include 100s of samples
-* While Illumina internally computes BAF and LRR and stores these values in the GTC files, we instead recompute these values from normalized intensities and genotype cluster centers following the method first described by Illumina in <a href="http://doi.org/10.1101/gr.5402306">Peiffer et al\. 2006</a> but we do non truncate the BAF values between 0 and 1 like Illumina does. This allows to better estimate the residual correlation between the BAF and the LRR for homozygous calls 
+* Due to high sequence divergence between HLA class I and II genes in the MHC (<a href="http://doi.org/10.1101/gr.213538.116">Norman et al. 2017</a>), heterozygous variants from HLA-F to HLA-DPB1 show unusual degrees of allelic imbalance. To avoid false positive mosaic chromosomal alteration in the MHC region, we mask, both for phasing and for mosaic chromosomal alterations detection, the ~3.5Mbp segment starting at the midpoint between genes <i>ZFP57</i> and <i>HLA-F</i> and ending at the midpoint between genes <i>HLA-DPB1</i> and <i>COL11A2</i>
+* Due to residual correlation between the BAF and LRR, observed both for Illumina arrays (<a href="http://doi.org/10.1101/gr.5686107">Oosting et al\. 2007</a> and <a href="http://doi.org/10.1101/gr.5686107">Staaf et al\. 2008</a>) and Affymetrix arrays (<a href="http://doi.org/10.1038/srep36158">Mayrhofer et al\. 2016</a>), MoChA performs a BAF correction by regressing BAF values against the LRR. This improves detection of mosaic chromosomal alterations at low cell fractions. However, for this correction to be effective, batches need to include 100s of samples
+* While Illumina internally computes BAF and LRR and stores these values in the GTC files, we instead recompute these values from normalized intensities and genotype cluster centers following the method first described by Illumina in <a href="http://doi.org/10.1101/gr.5402306">Peiffer et al\. 2006</a> but we do non truncate the BAF values between 0 and 1 like Illumina does. This allows to better estimate the residual correlation between the BAF and the LRR for homozygous calls
 * When phasing a dataset with a reference panel only the variants present both in the reference panel and the dataset will be phased. As the 1000 Genomes project reference panel for <a href="https://www.internationalgenome.org/announcements/updated-GRCh38-liftover/">GRCh38</a> is missing the chromosome X PAR1/PAR2 regions and these are exactly the regions that need to be phased to detect mosaic loss of chromosome Y, the most common chromosomal alteration in clonal hematopoiesis, we recommend using SHAPEIT4 without a reference panel to detect mosaic loss of chromosome Y at low cell fractions. This is the default behavior for cohorts whose sample size is more than twice the size of the 1000 Genomes reference panel (2,504 samples)
 * SHAPEIT4 does not have an option to disable imputation of missing target genotypes, like Eagle does. This is problematic as homozygous variants improperly imputed as heterozygous can be interpreted as huge BAF imbalances. To overcome this limitation of SHAPEIT4, we use BCFtools annotate to import the genotypes back in the target VCF using the **\--columns -FMT/GT** option to replace only existing unphased genotype values without modifying missing genotypes. Notice that when phasing with Eagle rather than SHAPEIT4, phasing without a reference panel is not possible
 * SHAPEIT4 is used to phase genotypes across genome windows with overlapping ends. To avoid phase switch errors across windows which would negatively affect the ability to detect large mosaic chromosomal alterations at low cell fractions, we use BCFtools concat with the option **\--ligate** to ligate phased VCFs by matching phase at phased haplotypes over overlapping windows
-* Genotype data is transmitted across tasks in binary VCF format (BCF) rather than plain text VCF format as this is much efficient to process especially for many samples. The relationship between BCF and VCF is similar to that between BAM and SAM. The whole pipeline, both for Illumina and Affymetrix data, can completely avoid any intermediate conversion to non-binary format, providing significant time and cost savings (though notice that in **txt** mode the data provided by the user is not in binary format)
+* Genotype data is transmitted across tasks in binary VCF format (BCF) rather than plain text VCF format as this is much more efficient to process especially for many samples. The relationship between BCF and VCF is similar to the one between BAM and SAM. The whole pipeline, both for Illumina and Affymetrix data, can completely avoid any intermediate conversion to non-binary format, providing significant time and cost savings (though notice that in **txt** mode the data provided by the user is not in binary format)
 * Many large biobanks perform their genotyping across a span of several years. This causes sometimes to have to switch from one DNA microarray version to a newer version of the same DNA microarray (e.g\. the Global Screening Array v1.0 vs\. the Global Screening Array v2.0). While it is not possible to process samples on different arrays in the same batch, the batched design of the pipeline allows to include samples on separate arrays in the same workflow as long as they are assigned to different batches. One small drawback is that, when the whole cohort is phased across batches, only variants that are shared across all batches will be phased. Therefore we recommend to only process samples genotyped on the same array or on fairly similar arrays. As an example, we absolutely recommend to not process samples from the Global Screening Array and the Multi-Ethnic Global Array in the same workflow, although the user will not be prevented from doing so
 * Several features not available in BCFtools 1.10.2 are needed to run this pipeline, so currently BCFtools needs to be manually compiled
 * The pipeline is designed to be minimalistic and require the user to provide the minimal amount of information necessary to run
@@ -414,9 +436,9 @@ tar xzvf hapmap370k_1.0.1.tar.gz --strip-components=3 hapmap370k/inst/idatFiles
 Define options to run the WDL:
 ```json
 {
+  "mocha.sample_set": "hapmap370k",
   "mocha.mode": "idat",
   "mocha.realign": true,
-  "mocha.filebase": "hapmap370k",
   "mocha.max_win_size_cm": 300.0,
   "mocha.overlap_size_cm": 5.0,
   "mocha.docker_json_file": "gs://your-google-bucket/docker.json",
@@ -426,11 +448,10 @@ Define options to run the WDL:
   "mocha.batch_tsv_file": "gs://your-google-bucket/hapmap370k.batch.tsv",
   "mocha.sample_tsv_file": "gs://your-google-bucket/hapmap370k.sample.tsv",
   "mocha.ped_file": "gs://your-google-bucket/hapmap370k.ped",
-  "mocha.autoconvert": true,
   "mocha.do_not_check_bpm": true
 }
 ```
-Notice that for this example we need both the **autoconvert** and the **do_not_check_bpm** secondary options due to the Illumina manifest and IDAT files being in an old format (without **autoconvert** sample gender is not inferred)
+Notice that for this example we need the secondary boolean flag **do_not_check_bpm** checked as true due to the Illumina manifest being in an old format
 
 The **hapmap370k.batch.tsv** table could look like this:
 
@@ -484,7 +505,7 @@ The **hapmap370k.sample.tsv** table could look like this:
 | NA06993   | A        | 4031058132_A_Grn.idat | 4031058132_A_Red.idat |
 | NA06993-1 | B        | 4031058211_B_Grn.idat | 4031058211_B_Red.idat |
 
-And the **hapmap370k.ped** file could look like this:
+And the **hapmap370k.ped** file could look like this (only the first four columns are required):
 
 |      |         |           |           |   |   |     |
 |------|---------|-----------|-----------|---|---|-----|
@@ -544,9 +565,9 @@ Define options to run the WDL:
 
 ```json
 {
+  "mocha.sample_set": "hapmapSNP6",
   "mocha.mode": "cel",
   "mocha.realign": true,
-  "mocha.filebase": "hapmapSNP6",
   "mocha.max_win_size_cm": 100.0,
   "mocha.overlap_size_cm": 5.0,
   "mocha.docker_json_file": "gs://your-google-bucket/docker.json",
@@ -598,8 +619,8 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev \
                  libmono-system-windows-forms4.0-cil && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200720.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200720.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200811.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200811.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -626,7 +647,7 @@ RUN apt-get -qqy update --fix-missing && \
                  libc6-dev && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200720.deb \
+    rm -rf gtc2vcf_1.10.2-20200811.deb \
            autoconvert-software-v2-0-1-installer.zip \
            AutoConvertInstaller.msi \
            genomestudio-software-v2-0-4-5-installer.zip \
@@ -647,8 +668,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  bcftools \
                  icu-devtools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200720.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200720.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200811.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200811.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -663,7 +684,7 @@ RUN apt-get -qqy update --fix-missing && \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200720.deb \
+    rm -rf gtc2vcf_1.10.2-20200811.deb \
            iaap-cli-linux-x64-1.1.0.tar.gz \
            /var/lib/apt/lists/*
 ```
@@ -677,8 +698,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  bcftools \
                  unzip && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200720.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200720.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200811.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200811.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -691,7 +712,7 @@ RUN apt-get -qqy update --fix-missing && \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200720.deb \
+    rm -rf gtc2vcf_1.10.2-20200811.deb \
            apt_2.11.3_linux_64_bit_x86_binaries.zip \
            /var/lib/apt/lists/*
 ```
@@ -708,10 +729,10 @@ RUN apt-get -qqy update --fix-missing && \
                  bcftools \
                  bio-eagle \
                  shapeit4 && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200720.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200720.deb && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200720.deb && \
-    dpkg -i bio-mocha_1.10.2-20200720.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200811.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200811.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200811.deb && \
+    dpkg -i bio-mocha_1.10.2-20200811.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -727,8 +748,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200720.deb \
-           bio-mocha_1.10.2-20200720.deb \
+    rm -rf gtc2vcf_1.10.2-20200811.deb \
+           bio-mocha_1.10.2-20200811.deb \
            /var/lib/apt/lists/*
 ```
 
@@ -743,13 +764,13 @@ RUN apt-get -qqy update --fix-missing && \
                  r-cran-optparse \
                  r-cran-ggplot2 \
                  r-cran-data.table && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200720.deb && \
-    dpkg -i bio-mocha_1.10.2-20200720.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200811.deb && \
+    dpkg -i bio-mocha_1.10.2-20200811.deb && \
     apt-get -qqy purge \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf bio-mocha_1.10.2-20200720.deb \
+    rm -rf bio-mocha_1.10.2-20200811.deb \
            /var/lib/apt/lists/*
 ```
 

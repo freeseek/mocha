@@ -40,7 +40,7 @@
 // float ks_ksmall_float(size_t n, float arr[], size_t kk);
 KSORT_INIT_GENERIC(float)
 
-static inline int *parse_gender(bcf_hdr_t *hdr, char *fname) {
+static inline int *mocha_parse_gender(bcf_hdr_t *hdr, char *fname) {
     htsFile *fp = hts_open(fname, "r");
     if (!fp) error("Could not read: %s\n", fname);
 
@@ -48,13 +48,11 @@ static inline int *parse_gender(bcf_hdr_t *hdr, char *fname) {
     if (hts_getline(fp, KS_SEP_LINE, &str) <= 0) error("Empty file: %s\n", fname);
 
     int *gender = (int *)calloc((size_t)bcf_hdr_nsamples(hdr), sizeof(int));
-
     int moff = 0, *off = NULL;
     char *tmp = NULL;
     do {
         int ncols = ksplit_core(str.s, 0, &moff, &off);
-        if (ncols < 2) error("Could not parse the gender file: %s\n", str.s);
-
+        if (ncols < 2) error("Could not parse gender file %s: %s\n", fname, str.s);
         int sample = bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, &str.s[off[0]]);
         if (sample >= 0) {
             if (toupper(str.s[off[1]]) == 'M') {
@@ -65,7 +63,7 @@ static inline int *parse_gender(bcf_hdr_t *hdr, char *fname) {
                 gender[sample] = 0;
             } else {
                 gender[sample] = (int)strtol(&str.s[off[1]], &tmp, 0);
-                if (*tmp) error("Could not parse gender %s from file %s\n", &str.s[off[1]], fname);
+                if (*tmp) error("Could not parse gender from file %s: %s\n", fname, &str.s[off[1]]);
             }
         }
     } while (hts_getline(fp, KS_SEP_LINE, &str) >= 0);
@@ -74,6 +72,32 @@ static inline int *parse_gender(bcf_hdr_t *hdr, char *fname) {
     free(off);
     hts_close(fp);
     return gender;
+}
+
+static inline float *mocha_parse_float(bcf_hdr_t *hdr, char *fname) {
+    htsFile *fp = hts_open(fname, "r");
+    if (!fp) error("Could not read: %s\n", fname);
+
+    kstring_t str = {0, 0, NULL};
+    if (hts_getline(fp, KS_SEP_LINE, &str) <= 0) error("Empty file: %s\n", fname);
+
+    float *float_arr = (float *)calloc((size_t)bcf_hdr_nsamples(hdr), sizeof(float));
+    int moff = 0, *off = NULL;
+    char *tmp = NULL;
+    do {
+        int ncols = ksplit_core(str.s, 0, &moff, &off);
+        if (ncols < 2) error("Could not parse file %s: %s\n", fname, str.s);
+        int sample = bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, &str.s[off[0]]);
+        if (sample >= 0) {
+            float_arr[sample] = (float)strtof(&str.s[off[1]], &tmp);
+            if (*tmp) error("Could not parse float from file %s: %s\n", fname, &str.s[off[1]]);
+        }
+    } while (hts_getline(fp, KS_SEP_LINE, &str) >= 0);
+
+    free(str.s);
+    free(off);
+    hts_close(fp);
+    return float_arr;
 }
 
 // compute the median of a vector using the ksort library (with iterator)
@@ -161,7 +185,8 @@ int bcf_get_genotype_alleles(const bcf_fmt_t *fmt, int16_t *gt0_arr, int16_t *gt
 }
 
 // retrieve phase information from BCF record
-// bcf_int8_missing if phase does not apply
+// bcf_int8_missing if genotype is missing
+// bcf_int8_vector_end if phase does not apply
 // 0 if phase is not available
 // 1 if higher number allele received from the mother
 // -1 if higher number allele received from the father
@@ -181,7 +206,7 @@ int bcf_get_genotype_phase(const bcf_fmt_t *fmt, int8_t *gt_phase_arr, int nsmpl
                 type_t gt0 = bcf_gt_allele(p[0]) > 0;                                                                  \
                 type_t gt1 = bcf_gt_allele(p[1]) > 0;                                                                  \
                 if (gt0 == gt1)                                                                                        \
-                    gt_phase_arr[i] = bcf_int8_missing;                                                                \
+                    gt_phase_arr[i] = bcf_int8_vector_end;                                                             \
                 else if (!bcf_gt_is_phased(p[1]))                                                                      \
                     gt_phase_arr[i] = 0;                                                                               \
                 else if (gt1 > gt0)                                                                                    \
@@ -222,10 +247,8 @@ int bcf_get_allelic_depth(const bcf_fmt_t *fmt, const int16_t *gt0_arr, const in
         for (int i = 0; i < nsmpl; i++, p += nalleles) {                                                               \
             if ((gt0_arr[i] != bcf_int16_missing && (int)gt0_arr[i] >= nalleles)                                       \
                 || (gt1_arr[i] != bcf_int16_missing && (int)gt1_arr[i] >= nalleles))                                   \
-                error(                                                                                                 \
-                    "Error: found VCF record with GT alleles %d and %d and %d number of "                              \
-                    "alleles\n",                                                                                       \
-                    gt0_arr[i], gt1_arr[i], nalleles);                                                                 \
+                error("Error: found VCF record with GT alleles %d and %d and %d number of alleles\n", gt0_arr[i],      \
+                      gt1_arr[i], nalleles);                                                                           \
             if (gt0_arr[i] == bcf_int16_missing || gt1_arr[i] == bcf_int16_missing                                     \
                 || p[gt0_arr[i]] == bcf_type_vector_end || p[gt0_arr[i]] == bcf_type_missing                           \
                 || p[gt1_arr[i]] == bcf_type_vector_end || p[gt1_arr[i]] == bcf_type_missing) {                        \

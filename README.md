@@ -32,53 +32,56 @@ NOTICE: Starting from July 2020 a <a href="wdl">WDL</a> pipeline is available to
 Usage:   bcftools +mocha [OPTIONS] <in.vcf>
 
 Required options:
-    -r, --rules <assembly>[?]         predefined genome reference rules, 'list' to print available settings, append '?' for details
-    -R, --rules-file <file>           genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE
+    -r, --rules <assembly>[?]      predefined genome reference rules, 'list' to print available settings, append '?' for details
+    -R, --rules-file <file>        genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE
 
 General Options:
-    -x, --sex <file>                  file including information about the gender of the samples
-    -s, --samples [^]<list>           comma separated list of samples to include (or exclude with "^" prefix)
-    -S, --samples-file [^]<file>      file of samples to include (or exclude with "^" prefix)
-        --force-samples               only warn about unknown subset samples
-    -v, --variants [^]<file>          tabix-indexed [compressed] VCF/BCF file containing variants
-    -t, --targets [^]<region>         restrict to comma-separated list of regions. Exclude regions with "^" prefix
-    -T, --targets-file [^]<file>      restrict to regions listed in a file. Exclude regions with "^" prefix
-    -f, --apply-filters <list>        require at least one of the listed FILTER strings (e.g. "PASS,.")
-                                      to include (or exclude with "^" prefix) in the analysis
-    -p  --cnp <file>                  list of regions to genotype in BED format
-        --threads <int>               number of extra output compression threads [0]
+    -x, --sex <file>               file including information about the gender of the samples
+        --call-rate <file>         file including information about the call_rate of the samples
+    -s, --samples [^]<list>        comma separated list of samples to include (or exclude with "^" prefix)
+    -S, --samples-file [^]<file>   file of samples to include (or exclude with "^" prefix)
+        --force-samples            only warn about unknown subset samples
+    -v, --variants [^]<file>       tabix-indexed [compressed] VCF/BCF file containing variants
+    -t, --targets [^]<region>      restrict to comma-separated list of regions. Exclude regions with "^" prefix
+    -T, --targets-file [^]<file>   restrict to regions listed in a file. Exclude regions with "^" prefix
+    -f, --apply-filters <list>     require at least one of the listed FILTER strings (e.g. "PASS,.")
+                                   to include (or exclude with "^" prefix) in the analysis
+    -p  --cnp <file>               list of regions to genotype in BED format
+        --threads <int>            number of extra output compression threads [0]
 
 Output Options:
-    -o, --output <file>               write output to a file [no output]
-    -O, --output-type <b|u|z|v>       b: compressed BCF, u: uncompressed BCF, z: compressed VCF, v: uncompressed VCF [v]
-        --no-version                  do not append version and command line to the header
-    -a  --no-annotations              omit Ldev and Bdev FORMAT from output VCF (requires --output)
-        --no-log                      suppress progress report on standard error
-    -l  --log <file>                  write log to file [standard error]
-    -m, --mosaic-calls <file>         write mosaic chromosomal alterations to a file [standard output]
-    -g, --genome-stats <file>         write sample genome-wide statistics to a file [no output]
-    -u, --ucsc-bed <file>             write UCSC bed track to a file [no output]
+    -o, --output <file>            write output to a file [no output]
+    -O, --output-type <b|u|z|v>    b: compressed BCF, u: uncompressed BCF, z: compressed VCF, v: uncompressed VCF [v]
+        --no-version               do not append version and command line to the header
+    -a  --no-annotations           omit Ldev and Bdev FORMAT from output VCF (requires --output)
+        --no-log                   suppress progress report on standard error
+    -l  --log <file>               write log to file [standard error]
+    -m, --mosaic-calls <file>      write mosaic chromosomal alterations to a file [standard output]
+    -g, --genome-stats <file>      write sample genome-wide statistics to a file [no output]
+    -u, --ucsc-bed <file>          write UCSC bed track to a file [no output]
 
 HMM Options:
-        --bdev-LRR-BAF <list>         comma separated list of inverse BAF deviations for LRR+BAF model without phase [-2.0,-4.0,-6.0,10.0,6.0,4.0]
-        --bdev-BAF-phase <list>       comma separated list of inverse BAF deviations for BAF+phase model
-                                      [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
-        --min-dist <int>              minimum base pair distance between consecutive sites for WGS data [400]
-        --adjust-BAF-LRR <int>        minimum number of genotypes for a cluster to median adjust BAF and LRR (-1 for no adjustment) [5]
-        --regress-BAF-LRR <int>       minimum number of genotypes for a cluster to regress BAF against LRR (-1 for no regression) [15]
-        --LRR-GC-order <int>          order of polynomial to regress LRR against local GC content (-1 for no regression) [2]
-        --xy-prob <float>             transition probability [1e-09]
-        --err-prob <float>            uniform error probability [1e-04]
-        --flip-prob <float>           phase flip probability [1e-02]
-        --telomere-advantage <float>  telomere advantage [1e-02]
-        --centromere-penalty <float>  centromere penalty [1e-04]
-        --short-arm-chrs <list>       list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
-        --use-short-arms              use variants in short arms [FALSE]
-        --use-centromeres             use variants in centromeres [FALSE]
-        --use-no-rules-chrs           use chromosomes without centromere rules [FALSE]
-        --LRR-weight <float>          relative contribution from LRR for LRR+BAF model [0.2]
-        --LRR-hap2dip <float>         difference between LRR for haploid and diploid [0.45]
-        --LRR-cutoff <float>          cutoff between LRR for haploid and diploid used to infer gender [estimated from X nonPAR]
+        --bdev-LRR-BAF <list>      comma separated list of inverse BAF deviations for LRR+BAF model [-2.0,-4.0,-6.0,10.0,6.0,4.0]
+        --bdev-BAF-phase <list>    comma separated list of inverse BAF deviations for BAF+phase model
+                                   [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
+        --min-dist <int>           minimum base pair distance between consecutive sites for WGS data [400]
+        --adjust-BAF-LRR <int>     minimum number of genotypes for a cluster to median adjust BAF and LRR (-1 for no adjustment) [5]
+        --regress-BAF-LRR <int>    minimum number of genotypes for a cluster to regress BAF against LRR (-1 for no regression) [15]
+        --LRR-GC-order <int>       order of polynomial to regress LRR against local GC content (-1 for no regression) [2]
+        --xy-prob <float>          transition probability [1e-06]
+        --err-prob <float>         uniform error probability [1e-02]
+        --flip-prob <float>        phase flip probability [1e-02]
+        --centromere-loss <float>  penalty to avoid calls spanning centromeres [1e-04]
+        --telomere-gain <float>    telomere advantage to prioritize CN-LOHs [1e-02]
+        --x-telomere-gain <float>  X telomere advantage to prioritize mLOX [1e-03]
+        --y-telomere-gain <float>  Y telomere advantage to prioritize mLOY [1e-04]
+        --short-arm-chrs <list>    list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
+        --use-short-arms           use variants in short arms [FALSE]
+        --use-centromeres          use variants in centromeres [FALSE]
+        --use-no-rules-chrs        use chromosomes without centromere rules  [FALSE]
+        --LRR-weight <float>       relative contribution from LRR for LRR+BAF  model [0.2]
+        --LRR-hap2dip <float>      difference between LRR for haploid and diploid [0.45]
+        --LRR-cutoff <float>       cutoff between LRR for haploid and diploid used to infer gender [estimated from X nonPAR]
 
 Examples:
     bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed
@@ -228,7 +231,7 @@ wget -O $HOME/res/cytoBand.hg19.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath
 Setup variables
 ```
 ref="$HOME/res/human_g1k_v37.fasta"
-mhc="6:32443271-32558428"
+mhc="6:29669719-33093965"
 map="$HOME/res/genetic_map_hg19_withX.txt.gz"
 kgp_pfx="$HOME/res/ALL.chr"
 kgp_sfx=".phase3_integrated.20130502.genotypes"
@@ -324,7 +327,7 @@ wget -O $HOME/res/cytoBand.hg38.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath
 Setup variables
 ```
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
-mhc="chr6:32475494-32590651"
+mhc="chr6:29701942-33126188"
 map="$HOME/res/genetic_map_hg38_withX.txt.gz"
 kgp_pfx="$HOME/res/ALL.chr"
 kgp_sfx="_GRCh38.genotypes.20170504"
@@ -343,7 +346,7 @@ vcf="..." # input VCF file with phased GT, LRR, and BAF
 pfx="..." # output prefix
 thr="..." # number of threads to use
 crt="..." # file with call rate information (first column sample ID, second column call rate)
-sex="..." # file with gender information (first column sample ID, second column gender: 1=male; 2=female)
+sex="..." # file with computed gender information (first column sample ID, second column gender: 1=male; 2=female)
 xcl="..." # VCF file with additional list of variants to exclude (optional)
 ped="..." # pedigree file to use if parent child duos are present
 dir="..." # directory where output files will be generated
@@ -372,7 +375,7 @@ If you do not already have a VCF file but you have Illumina or Affymetrix genoty
 Create a minimal binary VCF
 ```
 bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf $vcf \
-  -x ID,QUAL,^INFO/ALLELE_A,^INFO/ALLELE_B,^FMT/GT,^FMT/BAF,^FMT/LRR && \
+  -x ID,QUAL,^INFO/ALLELE_A,^INFO/ALLELE_B,^INFO/GC,^FMT/GT,^FMT/BAF,^FMT/LRR && \
   bcftools index -f $dir/$pfx.unphased.bcf
 ```
 
@@ -395,7 +398,7 @@ Create a minimal binary VCF (notice that you will need a version newer than BCFt
 bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/' | \
   bcftools reheader -h /dev/stdin $vcf | \
   bcftools filter --no-version -Ou -e "FMT/DP<10 | FMT/GQ<20" --set-GT . | \
-  bcftools annotate --no-version -Ou -x ID,QUAL,INFO,^FMT/GT,^FMT/AD | \
+  bcftools annotate --no-version -Ou -x ID,QUAL,^INFO/GC,^FMT/GT,^FMT/AD | \
   bcftools norm --no-version -Ou -m -any --keep-sum AD | \
   bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
   bcftools index $dir/$pfx.unphased.bcf
@@ -414,7 +417,8 @@ echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
   bcftools +fill-tags --no-version -Ou -t ^Y,MT,chrY,chrM -- -t ExcHet,F_MISSING | \
   bcftools +mochatools --no-version -Ou -- -x $sex -G | \
   bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
-    -i 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-.97 || INFO/AC_Sex_Test>6' \
+    -i 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-.97 ||
+    INFO/AC_Sex_Test>6 && CHROM!="X" && CHROM!="chrX" && CHROM!="Y" && CHROM!="chrY"' \
     -x ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING,^INFO/AC_Sex_Test && \
   bcftools index -f $dir/$pfx.xcl.bcf;
 /bin/rm samples_xcl_list.txt
@@ -463,15 +467,15 @@ bcftools index -f $dir/$pfx.other.bcf
 
 Concatenate eagle output into a single VCF file and add GC/CpG content information
 ```
-bcftools concat --no-version -Ob -o $dir/$pfx.bcf --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf && \
+bcftools concat --no-version -Ob -o $dir/$pfx.bcf $dir/$pfx.{chr{{1..22},X},other}.bcf && \
 bcftools index -f $dir/$pfx.bcf
 ```
 Notice that if the phasing was made in overlapping windows rather than chromosomes, the overlapping windows should be concatenated using the --ligate option in bcftools concat
 
 If pedigree information with duos or trios is available, you can improve the phased haplotypes from `eagle` by running the following command instead of the previous one:
 ```
-bcftools concat --no-version -Ou --threads $thr $dir/$pfx.{chr{{1..22},X},other}.bcf | \
-bcftools +trio-phase --no-version -Ob -o $dir/$pfx.bcf --threads $thr -- -p $ped && \
+bcftools concat --no-version -Ou $dir/$pfx.{chr{{1..22},X},other}.bcf | \
+bcftools +trio-phase --no-version -Ob -o $dir/$pfx.bcf -- -p $ped && \
 bcftools index -f $dir/$pfx.bcf
 ```
 (it requires a ped file)
@@ -497,7 +501,7 @@ done
 
 Concatenate imputed genotypes into a single VCF file (optional for array data)
 ```
-bcftools concat --no-version -Ob -o $dir/$pfx.dose.bcf --threads $thr $dir/$pfx.chr{{1..22},X}.dose.vcf.gz && \
+bcftools concat --no-version -Ob -o $dir/$pfx.dose.bcf $dir/$pfx.chr{{1..22},X}.dose.vcf.gz && \
 bcftools index -f $dir/$pfx.dose.bcf
 ```
 
@@ -512,8 +516,8 @@ Chromosomal alterations pipeline
 Preparation steps
 ```
 pfx="..." # output prefix
-sex="..." # file with gender information (first column sample ID, second column gender: 1=male; 2=female)
-thr="..." # number of extra threads to use
+sex="..." # file with computed gender information (first column sample ID, second column gender: 1=male; 2=female)
+crt="..." # file with call rate information (first column sample ID, second column call rate)
 lst="..." # file with list of samples to analyze for asymmetries (e.g. samples with 1p CN-LOH)
 ```
 
@@ -522,64 +526,65 @@ Call mosaic chromosomal alterations with MoChA
 bcftools +mocha \
   --rules $rule \
   --sex $sex \
+  --call-rate $crt \
   --no-version \
   --output-type b \
   --output $dir/$pfx.mocha.bcf \
-  --threads $thr \
   --variants ^$dir/$pfx.xcl.bcf \
-  --mosaic-calls $dir/$pfx.mocha.tsv \
+  --mosaic-calls $dir/$pfx.calls.tsv \
   --genome-stats $dir/$pfx.stats.tsv \
   --ucsc-bed $dir/$pfx.ucsc.bed \
   --cnp $cnp \
   $dir/$pfx.bcf && \
 bcftools index -f $dir/$pfx.mocha.bcf
 ```
+Notice that MoChA will read input computed gender and call rate if provided, otherwise these will be estimated from the VCF. For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms 
 
 The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns:
 ```
             sample_id - sample ID
+      computed_gender - estimated sample gender from X nonPAR region (not heterozygous sites count)
            XXX_median - median LRR or sequencing coverage across autosomes
                XXX_sd - standard deviation for LRR or sequencing coverage
              XXX_auto - auto correlation across consecutive sites for LRR or sequencing coverage (after GC correction)
           baf_sd/_cor - BAF standard deviation or beta-binomial overdispersion for read counts
              baf_conc - BAF phase concordance across phased heterozygous sites (see Vattathil et al. 2012)
              baf_auto - phased BAF auto correlation across consecutive phased heterozygous sites
-               nsites - number of sites across the genome for model based on LRR and BAF
-                nhets - number of heterozygous sites across the genome for model based on BAF and genotype phase
-       x_nonpar_nhets - number of heterozygous sites in the X nonPAR region
+              n_sites - number of sites across the genome for model based on LRR and BAF
+               n_hets - number of heterozygous sites across the genome for model based on BAF and genotype phase
+      x_nonpar_n_hets - number of heterozygous sites in the X nonPAR region
 x_nonpar_baf_sd/_corr - BAF standard deviation or beta-binomial overdispersion for read counts in the X nonPAR region
   x_nonpar_XXX_median - median LRR or sequencing coverage over the X nonPAR region
   y_nonpar_XXX_median - median LRR or sequencing coverage over the Y nonPAR region
         mt_XXX_median - median LRR or sequencing coverage over the mitochondrial genome
-         mocha_gender - estimated sample gender from X nonPAR region (not heterozygous sites count)
        lrr_gc_rel_ess - LRR or sequencing coverage explained sum of squares fraction using local GC content
              lrr_gc_X - coefficient X for polynomial in GC content fitting LRR estimates
 ```
 
 The mosaic calls file contains information about each mosaic and germline chromosomal alteration called and it includes the following columns:
 ```
-    sample_id - sample ID
- mocha_gender - inferred sample gender
-        chrom - chromosome
-   beg_XXXXXX - beginning base pair position for the call (according to XXXXXX genome reference)
-   end_XXXXXX - end base pair position for the call (according to XXXXXX genome reference)
-       length - base pair length of the call
-        p_arm - whether the call extends to the small arm and whether it reaches the telomere
-        q_arm - whether the call extends to the long arm and whether it reaches the telomere
-       nsites - number of sites used for the call
-        nhets - number of heterozygous sites used for the call
-     n50_gets - N50 value for consecutive heterozygous sites distances
-         bdev - BAF deviation estimate from 0.5
-      bdev_se - standard deviation estimate for BAF deviation
-      rel_cov - relative coverage estimate from LRR or sequencing coverage
-   rel_cov_se - standard deviation estimate for relative coverage
-  lod_lrr_baf - LOD score for model based on LRR and BAF
-lod_baf_phase - LOD score for model based on BAF and genotype phase
-       nflips - number of phase flips for calls based on BAF and genotype phase model (-1 if LRR and BAF model used)
-     baf_conc - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
- lod_baf_conc - LOD score for model based on BAF phase concordance (genome-wide corrected)
-         type - Type of call based on LRR / relative coverage
-           cf - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
+      sample_id - sample ID
+computed_gender - inferred sample gender
+          chrom - chromosome
+     beg_XXXXXX - beginning base pair position for the call (according to XXXXXX genome reference)
+     end_XXXXXX - end base pair position for the call (according to XXXXXX genome reference)
+         length - base pair length of the call
+          p_arm - whether the call extends to the small arm and whether it reaches the telomere
+          q_arm - whether the call extends to the long arm and whether it reaches the telomere
+        n_sites - number of sites used for the call
+         n_hets - number of heterozygous sites used for the call
+       n50_gets - N50 value for consecutive heterozygous sites distances
+           bdev - BAF deviation estimate from 0.5
+        bdev_se - standard deviation estimate for BAF deviation
+        rel_cov - relative coverage estimate from LRR or sequencing coverage
+     rel_cov_se - standard deviation estimate for relative coverage
+    lod_lrr_baf - LOD score for model based on LRR and BAF
+  lod_baf_phase - LOD score for model based on BAF and genotype phase
+        n_flips - number of phase flips for calls based on BAF and genotype phase model (-1 if LRR and BAF model used)
+       baf_conc - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
+   lod_baf_conc - LOD score for model based on BAF phase concordance (genome-wide corrected)
+           type - Type of call based on LRR / relative coverage
+             cf - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
 ```
 
 The output VCF will contain the following extra FORMAT fields:
@@ -593,11 +598,19 @@ For array data, MoChA's memory requirements will depend on the number of samples
 
 Depending on your application, you might want to filter the calls from MoChA. For example, the following code:
 ```
-awk 'NR==FNR && FNR>1 && $6>.51 {x[$1]++}
-  NR>FNR && (FNR==1 || !($1 in x) && $6>1e5 && $17>10 && $21!~"CNP" && $22<.5) {print}' \
-  $pfx.stats.tsv $pfx.mocha.tsv > $pfx.mocha.filter.tsv
+awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR==FNR && FNR>1 {sample_id=$(f["sample_id"]); call_rate=$(f["call_rate"]); baf_auto=$(f["baf_auto"])}
+  NR==FNR && FNR>1 && (call_rate<.97 || baf_auto>.03) {xcl[sample_id]++}
+  NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i; print}
+  NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); len=$(g["length"]); p_arm=$(g["p_arm"]); q_arm=$(g["q_arm"]);
+    bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"]); lod_baf_phase=$(g["lod_baf_phase"]); type=$(g["type"]);
+    if (lod_baf_phase=="nan") lod_baf_phase=0}
+  NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&
+    ( len>5e6 + 5e6 * (p_arm!="N" && q_arm!="N") ||
+      len>5e5 && (bdev<1/10 && rel_cov<2.5) && lod_baf_phase>10 ||
+      rel_cov<2.1 && lod_baf_phase>10 )' $pfx.stats.tsv $pfx.calls.tsv
 ```
-will generate a new table after removing samples with BAF_CONC greater than 0.51, removing calls smaller than 100kbp, removing calls with less than a LOD score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls with an estimated cell fraction larger than 50%
+will generate a new table after removing samples with `baf_conc` greater than 0.51, removing calls with less than a `lod_baf_phase` score of 10 unless they are larger than 5Mbp (or 10Mbp if they span the centromere) for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UKBB</a>
 
 Allelic imbalance pipeline
 ==========================
@@ -656,9 +669,9 @@ sudo apt install r-cran-optparse r-cran-ggplot2 r-cran-data.table
 
 Download R scripts
 ```
-/bin/rm -f $HOME/bin/{summary,mocha}_plot.R
-wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/{summary,mocha}_plot.R
-chmod a+x $HOME/bin/{summary,mocha}_plot.R
+/bin/rm -f $HOME/bin/{summary,pileup,mocha}_plot.R
+wget -P $HOME/bin https://raw.githubusercontent.com/freeseek/mocha/master/{summary,pileup,mocha}_plot.R
+chmod a+x $HOME/bin/{summary,pileup,mocha}_plot.R
 ```
 
 Generate summary plot
@@ -666,7 +679,16 @@ Generate summary plot
 summary_plot.R \
   --pdf $dir/$pfx.pdf \
   --stats $dir/$pfx.stats.tsv \
-  --calls $dir/$pfx.mocha.tsv
+  --calls $dir/$pfx.calls.tsv
+```
+
+Generate pileup plot
+```
+pileup_plot.R \
+  --pdf $dir/$pfx.pdf \
+  --stats $dir/$pfx.stats.tsv \
+  --calls $dir/$pfx.calls.tsv \
+  --cytoband $HOME/res/cytoBand.hg19.txt.gz
 ```
 
 Plot mosaic chromosomal alterations (for array data)
