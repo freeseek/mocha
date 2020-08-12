@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2020 Giulio Genovese
 ##
-## Version 2020-08-11
+## Version 2020-08-12
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -147,8 +147,8 @@ workflow mocha {
       call batch_scatter as gtc_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = gtc_batch_size, delim = delim, docker = docker["ubuntu"] }
       Array[String]+ input_gtc_files = if mode == "idat" then flatten(select_first([idat2gtc.gtc_files])) else read_lines(select_first([gtc_lines.file]))
       Map[String, Array[String]] gtc_batch2gtc_files = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), input_gtc_files))
-      scatter (file in input_gtc_files) { String gtc_barcode = basename(basename(file, ".gz"), ".gtc") }
-      Map[String, Array[String]] gtc_batch2barcode = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), gtc_barcode))
+      call get_barcodes as gtc_barcodes { input: lst_files = select_first([green_idat_lines.file, gtc_lines.file]), docker = docker["ubuntu"] }
+      Map[String, Array[String]] gtc_batch2barcode = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), read_lines(gtc_barcodes.file)))
       Map[String, Array[String]] gtc_batch2sample_id = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), read_lines(sample_id_lines.file)))
       Map[String, Int] gtc_batch2idx = as_map(zip(gtc_scatter.sub_batches, gtc_scatter.idxs))
       scatter (gtc_batch in gtc_scatter.sub_batches) {
@@ -220,8 +220,8 @@ workflow mocha {
       call batch_scatter as chp_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = chp_batch_size, delim = delim, docker = docker["ubuntu"] }
       Array[String]+ input_chp_files = if mode == "cel" then flatten(select_first([cel2chp.chp_files])) else read_lines(select_first([chp_lines.file]))
       Map[String, Array[String]] chp_batch2chp_files = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), input_chp_files))
-      scatter (file in input_chp_files) { String chp_barcode = basename(basename(basename(file, ".gz"), ".AxiomGT1.chp"), ".birdseed-v2.chp") }
-      Map[String, Array[String]] chp_batch2barcode = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), chp_barcode))
+      call get_barcodes as chp_barcodes { input: lst_files = select_first([cel_lines.file, chp_lines.file]), docker = docker["ubuntu"] }
+      Map[String, Array[String]] chp_batch2barcode = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), read_lines(chp_barcodes.file)))
       Map[String, Array[String]] chp_batch2sample_id = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), read_lines(sample_id_lines.file)))
       Map[String, Int] chp_batch2idx = as_map(zip(chp_scatter.sub_batches, chp_scatter.idxs))
       scatter (chp_batch in chp_scatter.sub_batches) {
@@ -261,8 +261,8 @@ workflow mocha {
 
     if (mode == "txt") {
       scatter (key in keys(batch_tbl)) { Boolean? is_key_equal_confidences = if key == "confidences" then true else None }
-      scatter (file in read_lines(select_first([cel_lines.file]))) { String cel_barcode = basename(basename(file, ".gz"), ".CEL") }
-      Map[String, Array[String]] batch2barcode = collect_by_key(zip(read_lines(batch_id_lines.file), cel_barcode))
+      call get_barcodes as txt_barcodes { input: lst_files = select_first([cel_lines.file]), docker = docker["ubuntu"] }
+      Map[String, Array[String]] batch2barcode = collect_by_key(zip(read_lines(batch_id_lines.file), read_lines(txt_barcodes.file)))
       Map[String, Array[String]] batch2sample_id = collect_by_key(zip(read_lines(batch_id_lines.file), read_lines(sample_id_lines.file)))
       scatter (idx in range(n_batches)) {
         # this job can be long, so it is better to run as non-preemptible
@@ -667,7 +667,7 @@ task lst_concat {
   }
 }
 
-# this task generates batches from batchs and then returns them in the same order as batches
+# this task generates sub batches from batches and then returns them in the same order as batches
 task batch_scatter {
   input {
     File batch_id_file
@@ -696,6 +696,39 @@ task batch_scatter {
     File sub_batch_id = "sub_batch_ids.lines"
     Array[String] sub_batches = read_lines(stdout())
     Array[Int] idxs = read_lines(stderr())
+  }
+
+  runtime {
+    docker: docker
+    cpu: cpu
+    disks: "local-disk " + disk_size + " HDD"
+    memory: memory + " GiB"
+    preemptible: preemptible
+    maxRetries: maxRetries
+  }
+}
+
+task get_barcodes {
+  input {
+    File lst_files
+
+    String docker
+    Int cpu = 1
+    Int disk_size = 10
+    Float memory = 3.5
+    Int preemptible = 1
+    Int maxRetries = 0
+  }
+
+  command <<<
+    set -euo pipefail
+    mv "~{lst_files}" .
+    sed 's/^.*\///;s/.gz$//;s/_Grn.idat$//;s/.gtc$//;s/.CEL$//;s/.AxiomGT1.chp$//;s/.birdseed-v2.chp$//' "~{basename(lst_files)}" > barcodes.lines
+    rm "~{basename(lst_files)}"
+  >>>
+
+  output {
+    File file = "barcodes.lines"
   }
 
   runtime {
@@ -738,13 +771,13 @@ task csv2bam {
       --csv "~{basename(csv_file)}" \
       --fasta-flank | \
       bwa mem~{if cpu > 1 then " -t " + cpu else ""} -M "~{basename(fasta_ref)}" - | \
-      samtools view -bS -o "~{basename(csv_file, ".csv")}.bam"
+      samtools view -bS -o "~{basename(basename(csv_file, ".gz"), ".csv")}.bam"
     echo "~{sep="\n" flatten([[csv_file, fasta_ref], fasta_ref_idxs])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
-    File bam_file = basename(csv_file, ".csv") + ".bam"
+    File bam_file = basename(basename(csv_file, ".gz"), ".csv") + ".bam"
   }
 
   runtime {
