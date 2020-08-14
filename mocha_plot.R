@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-mocha_plot_version <- '2020-08-11'
+mocha_plot_version <- '2020-08-13'
 
 library(optparse)
 library(data.table)
@@ -334,7 +334,7 @@ if (length(regions)>0) {
       bottom <- floor(min(0.35, df_melt$value[df_melt$variable == 'pBAF'], na.rm = TRUE) * 20) / 20
       p <- p  +
         geom_rect(data = df_cyto[df_cyto$chrom == chroms[i] & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = bottom -0.05, ymax = bottom, color = 'black', size = 1/4, show.legend = FALSE) +
-        geom_polygon(data = df_cen[df_cen$chrom == chroms[i],], aes(x = y/1e6, y = bottom + 0.05 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8) +
+        geom_polygon(data = df_cen[df_cen$chrom == chroms[i],], aes(x = x/1e6, y = bottom + 0.05 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8) +
         scale_fill_manual(values = c('gneg' = 'white', 'gpos25' = 'lightgray', 'gpos50' = 'gray50', 'gpos75' = 'darkgray', 'gpos100' = 'black', 'gvar' = 'lightblue', 'stalk' = 'slategrey'))
     }
     print(p)

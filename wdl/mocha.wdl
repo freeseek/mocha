@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2020 Giulio Genovese
 ##
-## Version 2020-08-12
+## Version 2020-08-13
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -36,6 +36,7 @@ workflow mocha {
     Boolean chp_output = false # only for cel
     Boolean do_not_phase = false # only for idat gtc cel chp txt mode
     Boolean do_not_mocha = false # only for idat gtc cel chp txt vcf mode
+    Boolean do_not_plot = false
     Boolean sequencing = false
     Int idat_batch_size = 48
     Int gtc_batch_size = 1024
@@ -426,14 +427,16 @@ workflow mocha {
           mocha_extra_args = mocha_extra_args,
           docker = docker["mocha"]
       }
-      call mocha_plot {
-        input:
-          vcf_file = vcf_mocha.mocha_vcf_file,
-          vcf_idx = vcf_mocha.mocha_vcf_idx,
-          stats_tsv = vcf_mocha.stats_tsv,
-          calls_tsv = vcf_mocha.calls_tsv,
-          cyto_file = ref_path + ref["cyto_file"],
-          docker = docker["mocha_plot"]
+      if (!do_not_plot) {
+        call mocha_plot {
+          input:
+            vcf_file = vcf_mocha.mocha_vcf_file,
+            vcf_idx = vcf_mocha.mocha_vcf_idx,
+            stats_tsv = vcf_mocha.stats_tsv,
+            calls_tsv = vcf_mocha.calls_tsv,
+            cyto_file = ref_path + ref["cyto_file"],
+            docker = docker["mocha_plot"]
+        }
       }
     }
     call tsv_concat as mocha_stats_tsv { input: tsv_files = vcf_mocha.stats_tsv, filebase = sample_set_id + ".stats", docker = docker["ubuntu"] }
@@ -456,7 +459,7 @@ workflow mocha {
     File? mocha_ucsc_bed = mocha_summary.ucsc_bed
     File? mocha_summary_pdf = mocha_summary.summary_pdf
     File? mocha_pileup_pdf = mocha_summary.pileup_pdf
-    Array[File]? pngs = if !do_not_phase && !do_not_mocha then flatten(select_first([mocha_plot.png_files])) else None
+    Array[File]? pngs = if !do_not_phase && !do_not_mocha && !do_not_plot then flatten(select_all(select_first([mocha_plot.png_files]))) else None
     Array[File]? bam_files = csv2bam.bam_file
     Array[File]? mendel_files = if mode != "pvcf" && !do_not_phase && defined(ped_file) then select_all(select_first([vcf_split.mendel_tsv])) else None
     Array[File]? gtc_files = if mode == "idat" && gtc_output then flatten(select_first([idat2gtc.gtc_files])) else None
@@ -807,6 +810,8 @@ task idat2gtc {
     Float? memory_override
     Int preemptible = 1
     Int maxRetries = 0
+
+    Float mult = 6.0 # to estimate the amount of memory required given the size of the manifest files
   }
 
   Float bpm_size = (if basename(bpm_file) != basename(bpm_file, ".gz") then 4.0 else 1.0) * size(bpm_file, "GiB")
@@ -814,7 +819,7 @@ task idat2gtc {
   Float green_idat_size = length(green_idat_files) * size(green_idat_files[0], "GiB")
   Float red_idat_size = length(red_idat_files) * size(red_idat_files[0], "GiB")
   Int disk_size = select_first([disk_size_override, ceil(10.0 + bpm_size + egt_size + 4.0 * (green_idat_size + red_idat_size))])
-  Float memory = select_first([memory_override, 3.5 + 5.0 * bpm_size + 5.0 * egt_size]) # will request more than 8GB for Omni5
+  Float memory = select_first([memory_override, 3.5 + mult * (bpm_size + egt_size)]) # will request more than 8GB for Omni5
 
   command <<<
     set -euo pipefail
@@ -1528,7 +1533,7 @@ task vcf_phase {
     Int preemptible = 1
     Int maxRetries = 0
 
-    Int mult = 4 # how much more memory does SHAPEIT4 consume compared to Eagle
+    Float mult = 4.0 # how much more memory does SHAPEIT4 consume compared to Eagle
   }
 
   Float vcf_size = size(unphased_vcf_file, "GiB")
@@ -1864,6 +1869,7 @@ task mocha_plot {
     File cyto_file
     Float call_rate_thr = 0.97
     Float baf_auto_thr = 0.03
+    Boolean do_not_plot_sex_chromosomes = false
 
     String docker
     Int cpu = 1
@@ -1894,7 +1900,8 @@ task mocha_plot {
       NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); chrom=$(g["chrom"]); beg=$(g[beg_pos]); end=$(g[end_pos]);
         len=$(g["length"]); p_arm=$(g["p_arm"]); q_arm=$(g["q_arm"]); bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"]);
         lod_baf_phase=$(g["lod_baf_phase"]); type=$(g["type"]); if (lod_baf_phase=="nan") lod_baf_phase=0}
-      NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&
+      NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&~{if do_not_plot_sex_chromosomes
+        then "\n    chrom!=\"X\" && chrom!=\"chrX\" && chrom!=\"Y\" && chrom!=\"chrY\" &&" else ""}
         ( len>5e6 + 5e6 * (p_arm!="N" && q_arm!="N") ||
           len>5e5 && (bdev<1/10 && rel_cov<2.5) && lod_baf_phase>10 ||
           rel_cov<2.1 && lod_baf_phase>10 ) {print sample_id,chrom,beg,end}' \

@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-pileup_plot_version <- '2020-08-11'
+pileup_plot_version <- '2020-08-13'
 
 library(optparse)
 library(ggplot2)
@@ -84,7 +84,7 @@ for (chr in c(1:22, 'X')) {
     idx <- !(df_calls$sample_id %in% xcl_smpls) & df_calls$chrom == chr & df_calls$type %in% c('Undetermined', 'CN-LOH', 'Loss', 'Gain')
   }
   if ( sum(idx) == 0 ) next
-  df_calls$index[idx] <- rank(df_calls[idx, beg_pos] + 1e9 * (3 * (df_calls$type[idx]=='Loss') + 2 * (df_calls$type[idx]=='CN-LOH') + (df_calls$type[idx]=='Gain')) , ties.method = 'first')
+  df_calls$index[idx] <- rank(df_calls[idx, beg_pos] + 1e9 * (3 * (df_calls$type[idx]=='Loss') + 2 * (df_calls$type[idx]=='CN-LOH') + (df_calls$type[idx]=='Gain')) , ties.method = 'first') - .5
   p <- ggplot(data=df_calls[idx,], aes_string(x=paste0(beg_pos, '/1e6'), y='index', color='type')) +
     geom_segment(aes_string(x=paste0(beg_pos, '/1e6'), xend=paste0(end_pos, '/1e6'), y='index', yend='index')) +
     theme_bw() +

@@ -608,9 +608,9 @@ awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
   NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&
     ( len>5e6 + 5e6 * (p_arm!="N" && q_arm!="N") ||
       len>5e5 && (bdev<1/10 && rel_cov<2.5) && lod_baf_phase>10 ||
-      rel_cov<2.1 && lod_baf_phase>10 )' $pfx.stats.tsv $pfx.calls.tsv
+      rel_cov<2.1 && lod_baf_phase>10 )' $pfx.stats.tsv $pfx.calls.tsv > $pfx.filtered.calls.tsv
 ```
-will generate a new table after removing samples with `baf_conc` greater than 0.51, removing calls with less than a `lod_baf_phase` score of 10 unless they are larger than 5Mbp (or 10Mbp if they span the centromere) for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UKBB</a>
+will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls with less than a `lod_baf_phase` score of 10 unless they are larger than 5Mbp (or 10Mbp if they span the centromere) for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UKBB</a>
 
 Allelic imbalance pipeline
 ==========================
@@ -633,13 +633,15 @@ bcftools +extendFMT \
   --format Bdev_Phase \
   --phase \
   --dist 500000 \
-  -r $reg \
-  -s $lst \
+  --regions $reg \
+  --samples $lst \
   $dir/$pfx.dose.mocha.bcf | \
 bcftools +mochatools \
-  --no-version -Ob \
-  -o $dir/$pfx.bal.bcf \
-  -- -b Bdev_Phase -G && \
+  --no-version \
+  --output-type b \
+  --output $dir/$pfx.bal.bcf \
+  -- --balance Bdev_Phase \
+  --drop-genotypes && \
 bcftools index -f $dir/$pfx.bal.bcf
 ```
 
@@ -647,16 +649,10 @@ Observe results for asymmetry analyses in table format
 ```
 fmt="%CHROM\t%POS\t%ID\t%Bal{0}\t%Bal{1}\t%Bal_Test\n"
 bcftools query \
-  -i "Bal_Test>6" \
-  -f "$fmt" \
+  --include "Bal_Test>6" \
+  --format "$fmt" \
   $dir/$pfx.bal.bcf | \
   column -ts $'\t'
-```
-
-Split output VCF file by samples (optional)
-```
-bcftools annotate --no-version -Ou -x INFO $dir/$pfx.mocha.bcf | \
-  bcftools +split -Ob -o $dir/
 ```
 
 Plot results

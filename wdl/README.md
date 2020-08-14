@@ -174,15 +174,15 @@ The **docker_json_file** <a href="docker.json">file</a> should contain the list 
 {
   "ubuntu": "ubuntu:20.10",
   "pandas": "fastgenomics/pandas:0.22-p36-v3",
-  "iaap_cli": "us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-20200811",
-  "autoconvert": "us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-20200811",
-  "apt": "us.gcr.io/mccarroll-mocha/apt:1.10.2-20200811",
-  "gtc2vcf": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
-  "bcftools": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
-  "shapeit4": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
-  "eagle": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
-  "mocha": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200811",
-  "mocha_plot":"us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-20200811"
+  "iaap_cli": "us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-20200813",
+  "autoconvert": "us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-20200813",
+  "apt": "us.gcr.io/mccarroll-mocha/apt:1.10.2-20200813",
+  "gtc2vcf": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
+  "bcftools": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
+  "shapeit4": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
+  "eagle": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
+  "mocha": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
+  "mocha_plot":"us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-20200813"
 }
 ```
 
@@ -342,7 +342,7 @@ To make best use of the elasticity of cloud computing, the pipeline attempts to 
 
 All tasks but the phasing tasks are set by default to run on a single CPU. All tasks but cel2chp and txt2vcf are set by default to run on preemptible computing on the first run, and to then proceed to run as non-preemptible is they are preempted
 
-Terra has a 2300 task limit per project (called \"Hog Limits\") but a single job should work well within this limit. Tasks idat2gtc/cel2chp and tasks {gtc,chp,txt}2vcf will output tables with metadata about their input files which will be aggregated across batches
+Terra has a 2,300 task limit per project (called \"Hog Limits\") but a single job should work well within this limit. Tasks idat2gtc/cel2chp and tasks {gtc,chp,txt}2vcf will output tables with metadata about their input files which will be aggregated across batches
 
 Troubleshooting
 ===============
@@ -350,10 +350,11 @@ Troubleshooting
 These are some of the messages that you might receive when something goes wrong:
 
 * If you run the pipeline on Terra with the `Delete intermediate options` flag selected and your workflow keeps showing as Running even after the final outputs have been generated, it is possible that the Cromwell server behind Terra might have failed while deleting the intermediate outputs. This is an <a href="https://support.terra.bio/hc/en-us/community/posts/360071861791-Job-seems-stuck-indefinitely-at-the-delete-intermediate-files-step-and-does-not-complete">issue</a> that is being patched
-* `Failed to evaluate input 'disk_size' (reason 1 of 1): ValueEvaluator[IdentifierLookup]: No suitable input for ...`: this indicates that Cromwell was unable to find the size of one of the input files for a task, most likely because the file does not exist where indicate by the user
+* `Failed to evaluate input 'disk_size' (reason 1 of 1): ValueEvaluator[IdentifierLookup]: No suitable input for ...`: this indicates that Cromwell was unable to find the size of one of the input files for a task, most likely because the file does not exist where indicated by the user
 * `The job was stopped before the command finished. PAPI error code 2. Execution failed: generic::unknown: pulling image: docker pull: running ["docker" "pull" "###"]: exit status 1 (standard error: "Error response from daemon: Get https://###: unknown: Project 'project:###' not found or deleted.\n")`: this means that one of the docker images provided in the **docker_json_file** does not exist
 * `Job exit code 255. Check gs://###/stderr for more information. PAPI error code 9. Please check the log file for more details:`: if this is an error provided by the task cel2chp, it means that the `apt-probeset-genotype` command has encountered an error. Reading the `stderr` file should easily provide an explanation
 * `The job was stopped before the command finished. PAPI error code 10. The assigned worker has failed to complete the operation`: this could mean that the job was preempted despite the fact that it was not running in preemptible computing (see <a href="https://support.terra.bio/hc/en-us/community/posts/360046714292-Are-you-experiencing-PAPI-error-code-10-Read-this-for-a-workaround-">here</a>)
+* `The compute backend terminated the job. If this termination is unexpected, examine likely causes such as preemption, running out of disk or memory on the compute instance, or exceeding the backend's maximum job duration`: this could be an indication that a task was killed as it requested too much memory
 * `The job was aborted from outside Cromwell`: this could be an indication that a task was killed as it requested too much memory
 * idat2gtc task fails with internal `stderr` message `Normalization failed! Unable to normalize!`: this means that either the IDAT sample is of very poor quality and it cannot be processed by the GenCall algorithm or that you have matched the IDAT with the wrong Illumina BPM manifest file
 * idat2gtc task fails with internall `stderr` message `System.Exception: Unrecoverable Error...Exiting! Unable to find manifest entry ######## in the cluster file!`: this means that you are using the incorrect Illumina EGT cluster file
@@ -388,6 +389,7 @@ For users and developers that want to understand the logic and ideas behind the 
 * To minimize memory load on Cromwell, computed gender and call rate maps are passed to tasks **vcf_qc** and **vcf_mocha** as files rather than WDL maps, and similarly sample IDs are passed to tasks **vcf_merge** as a file rather than WDL arrays. However, since Cromwell on Terra is unable to serialize files, these objects are serialized with dedicated tasks whose input and output can be monitored during the running of the pipeline
 * As Cromwell v52 does not accept optional output in tasks dispatched to Google Cloud, we have to **touch** optional output files in tasks **cel2affy** and **vcf_split**
 * As Cromwell v52 does not delocalize on Google Cloud list of output files whose names are determined during runtime, we use the trick of delocalizing a **Directory** for tasks **idat2gtc**, **cel2affy**, **vcf_scatter**, and **vcf_split**
+* Terra does not allow scatters with width larger than 35,000 (although Cromwell by default allows width up to 1,000,000), so to allow cohorts with more than 35,000 samples to be able to run on Terra we avoid scattering over each sample in the cohort
 * As estimating the sizes of a large array of files is extremely time consuming in Google Cloud, causing tasks to spend a long time in PreparingJob state before starting to localize the files, for array of IDAT, GTC, CEL, and CHP files we estimate the size of the first file in an array and assume all the other files have similar sizes
 * As the Terra job manager crashes if too much metadata is transferred between the workflow and the tasks, we try to transfer metadata to tasks through files wherever possible
 * To avoid SIGPIPE error 141 when piping a stream to the UNIX command `head`, we use the `|| if [[ $? -eq 141 ]]; then true; else exit $?; fi` trick
@@ -619,8 +621,8 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev \
                  libmono-system-windows-forms4.0-cil && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200811.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200811.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200813.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200813.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -647,7 +649,7 @@ RUN apt-get -qqy update --fix-missing && \
                  libc6-dev && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200811.deb \
+    rm -rf gtc2vcf_1.10.2-20200813.deb \
            autoconvert-software-v2-0-1-installer.zip \
            AutoConvertInstaller.msi \
            genomestudio-software-v2-0-4-5-installer.zip \
@@ -668,8 +670,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  bcftools \
                  icu-devtools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200811.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200811.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200813.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200813.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -684,7 +686,7 @@ RUN apt-get -qqy update --fix-missing && \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200811.deb \
+    rm -rf gtc2vcf_1.10.2-20200813.deb \
            iaap-cli-linux-x64-1.1.0.tar.gz \
            /var/lib/apt/lists/*
 ```
@@ -698,8 +700,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  bcftools \
                  unzip && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200811.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200811.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200813.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200813.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -712,7 +714,7 @@ RUN apt-get -qqy update --fix-missing && \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200811.deb \
+    rm -rf gtc2vcf_1.10.2-20200813.deb \
            apt_2.11.3_linux_64_bit_x86_binaries.zip \
            /var/lib/apt/lists/*
 ```
@@ -729,10 +731,10 @@ RUN apt-get -qqy update --fix-missing && \
                  bcftools \
                  bio-eagle \
                  shapeit4 && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200811.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200811.deb && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200811.deb && \
-    dpkg -i bio-mocha_1.10.2-20200811.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200813.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200813.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200813.deb && \
+    dpkg -i bio-mocha_1.10.2-20200813.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -748,8 +750,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200811.deb \
-           bio-mocha_1.10.2-20200811.deb \
+    rm -rf gtc2vcf_1.10.2-20200813.deb \
+           bio-mocha_1.10.2-20200813.deb \
            /var/lib/apt/lists/*
 ```
 
@@ -764,13 +766,13 @@ RUN apt-get -qqy update --fix-missing && \
                  r-cran-optparse \
                  r-cran-ggplot2 \
                  r-cran-data.table && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200811.deb && \
-    dpkg -i bio-mocha_1.10.2-20200811.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200813.deb && \
+    dpkg -i bio-mocha_1.10.2-20200813.deb && \
     apt-get -qqy purge \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf bio-mocha_1.10.2-20200811.deb \
+    rm -rf bio-mocha_1.10.2-20200813.deb \
            /var/lib/apt/lists/*
 ```
 

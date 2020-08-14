@@ -41,7 +41,7 @@
 #include "beta_binom.h"
 #include "bcftools.h"
 
-#define MOCHA_VERSION "2020-08-11"
+#define MOCHA_VERSION "2020-08-13"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *

@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-summary_plot_version <- '2020-08-11'
+summary_plot_version <- '2020-08-13'
 
 library(optparse)
 library(ggplot2)
