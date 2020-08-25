@@ -47,6 +47,8 @@ General Options:
     -f, --apply-filters <list>     require at least one of the listed FILTER strings (e.g. "PASS,.")
                                    to include (or exclude with "^" prefix) in the analysis
     -p  --cnp <file>               list of regions to genotype in BED format
+        --mhc <region>             MHC region to exclude from analysis (will be retained in the output)
+        --kir <region>             KIR region to exclude from analysis (will be retained in the output)
         --threads <int>            number of extra output compression threads [0]
 
 Output Options:
@@ -231,7 +233,8 @@ wget -O $HOME/res/cytoBand.hg19.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath
 Setup variables
 ```
 ref="$HOME/res/human_g1k_v37.fasta"
-mhc="6:29669719-33093965"
+mhc_reg="6:28542424-33448264"
+kir_reg="19:54574747-55504099"
 map="$HOME/res/genetic_map_hg19_withX.txt.gz"
 kgp_pfx="$HOME/res/ALL.chr"
 kgp_sfx=".phase3_integrated.20130502.genotypes"
@@ -327,7 +330,8 @@ wget -O $HOME/res/cytoBand.hg38.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath
 Setup variables
 ```
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
-mhc="chr6:29701942-33126188"
+mhc_reg="chr6:28574647-33480487"
+kir_reg="chr19:54071493-54992731"
 map="$HOME/res/genetic_map_hg38_withX.txt.gz"
 kgp_pfx="$HOME/res/ALL.chr"
 kgp_sfx="_GRCh38.genotypes.20170504"
@@ -407,18 +411,14 @@ This will set to missing all genotypes that have low coverage or low genotyping 
 
 Generate a list of variants that will be excluded from modeling by both eagle and mocha (notice that you will need a version newer than BCFtools 1.10.2 with implemented the F_MISSING option, or else you should drop that filter)
 ```
-mhc_chr=$(echo $mhc | cut -d: -f1)
-mhc_beg=$(echo $mhc | cut -d: -f2 | cut -d- -f1)
-mhc_end=$(echo $mhc | cut -d- -f2)
 awk -F"\t" '$2<.97 {print $1}' $crt > samples_xcl_list.txt; \
 echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
-  bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin -x ^samples_xcl_list.txt $dir/$pfx.unphased.bcf | \
-  bcftools filter --no-version -Ou -e "CHROM==\"$mhc_chr\" && POS>$mhc_beg && POS<$mhc_end" --soft-filter MHC | \
+  bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin -S ^samples_xcl_list.txt $dir/$pfx.unphased.bcf | \
   bcftools +fill-tags --no-version -Ou -t ^Y,MT,chrY,chrM -- -t ExcHet,F_MISSING | \
   bcftools +mochatools --no-version -Ou -- -x $sex -G | \
   bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
     -i 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-.97 ||
-    INFO/AC_Sex_Test>6 && CHROM!="X" && CHROM!="chrX" && CHROM!="Y" && CHROM!="chrY"' \
+    INFO/AC_Sex_Test<1e-6 && CHROM!="X" && CHROM!="chrX" && CHROM!="Y" && CHROM!="chrY"' \
     -x ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING,^INFO/AC_Sex_Test && \
   bcftools index -f $dir/$pfx.xcl.bcf;
 /bin/rm samples_xcl_list.txt
@@ -519,6 +519,9 @@ pfx="..." # output prefix
 sex="..." # file with computed gender information (first column sample ID, second column gender: 1=male; 2=female)
 crt="..." # file with call rate information (first column sample ID, second column call rate)
 lst="..." # file with list of samples to analyze for asymmetries (e.g. samples with 1p CN-LOH)
+cnp="..." # file with list of regions to genotype in BED format
+mhc_reg="..." # MHC region to skip
+kir_reg="..." # KIR region to skip
 ```
 
 Call mosaic chromosomal alterations with MoChA
@@ -535,6 +538,8 @@ bcftools +mocha \
   --genome-stats $dir/$pfx.stats.tsv \
   --ucsc-bed $dir/$pfx.ucsc.bed \
   --cnp $cnp \
+  --mhc $mhc_reg \
+  --kir $kir_reg \
   $dir/$pfx.bcf && \
 bcftools index -f $dir/$pfx.mocha.bcf
 ```
@@ -607,8 +612,11 @@ awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
     if (lod_baf_phase=="nan") lod_baf_phase=0}
   NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&
     ( len>5e6 + 5e6 * (p_arm!="N" && q_arm!="N") ||
-      len>5e5 && (bdev<1/10 && rel_cov<2.5) && lod_baf_phase>10 ||
-      rel_cov<2.1 && lod_baf_phase>10 )' $pfx.stats.tsv $pfx.calls.tsv > $pfx.filtered.calls.tsv
+      len>5e5 && bdev<1/10 && rel_cov<2.5 && lod_baf_phase>10 ||
+      rel_cov<2.1 && lod_baf_phase>10 )' $pfx.stats.tsv $pfx.calls.tsv > $pfx.calls.filtered.tsv
+
+awk 'NR==FNR {x[$1"_"$3"_"$4"_"$5]++} NR>FNR && ($0~"^track" || $4"_"$1"_"$2"_"$3 in x)' \
+  $pfx.calls.filtered.tsv $pfx.ucsc.bed > $pfx.ucsc.filtered.bed
 ```
 will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls with less than a `lod_baf_phase` score of 10 unless they are larger than 5Mbp (or 10Mbp if they span the centromere) for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UKBB</a>
 
