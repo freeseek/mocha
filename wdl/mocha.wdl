@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2020 Giulio Genovese
 ##
-## Version 2020-08-13
+## Version 2020-08-25
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -18,6 +18,7 @@ struct Reference {
   String fasta_ref
   Int n_chrs
   String mhc_reg
+  String kir_reg
   String dup_file
   String genetic_map_file
   String cnp_file
@@ -46,13 +47,23 @@ workflow mocha {
     Float overlap_size_cm = 5.0
     String ref_path = ""
     String manifest_path = ""
-    File docker_json_file # ubuntu pandas iaap_cli autoconvert apt gtc2vcf bcftools shapeit4 eagle mocha mocha_plot
-    File ref_json_file # name fasta_ref n_chrs mhc_reg dup_file genetic_map_file cnp_file cyto_file kgp_pfx kgp_sfx n_smpls
+    File ref_json_file # name fasta_ref n_chrs mhc_reg kir_reg dup_file genetic_map_file cnp_file cyto_file kgp_pfx kgp_sfx n_smpls
     File sample_tsv_file # sample_id batch_id green_idat red_idat gtc cel chp computed_gender call_rate
-    File batch_tsv_file # batch_id path bpm csv egt sam xml zip snp report calls confidences summary vcf vcf_index xcl_vcf xcl_vcf_index
+    File batch_tsv_file # batch_id path bpm csv egt sam xml zip probeset_ids snp report calls confidences summary vcf vcf_index xcl_vcf xcl_vcf_index
     File? ped_file
     File? extra_xcl_vcf_file
     String? mocha_extra_args
+    String basic_bash_docker = "ubuntu:latest"
+    String pandas_docker = "amancevice/pandas:slim"
+    String iaap_cli_docker = "us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-20200825"
+    String autoconvert_docker = "us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-20200825"
+    String apt_docker = "us.gcr.io/mccarroll-mocha/apt:1.10.2-20200825"
+    String gtc2vcf_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
+    String bcftools_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
+    String shapeit4_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
+    String eagle_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
+    String mocha_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
+    String mocha_plot_docker = "us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-20200825"
     Boolean autoconvert = false
     Boolean? table_output
     Boolean? do_not_check_bpm
@@ -66,14 +77,12 @@ workflow mocha {
 
   Boolean mode_is_vcf = mode == "vcf" || mode == "pvcf"
 
-  # read table with genome reference resources and compute scatter intervals
-  Map[String, String] docker = read_json(docker_json_file)
 
   # read table with genome reference resources and compute scatter intervals
   Reference ref = read_json(ref_json_file)
 
   # read table with batchs information (scatter could be avoided if there was a tail() function)
-  call tsv_sorted as batch_sorted_tsv { input: tsv_file = batch_tsv_file, column = "batch_id", docker = docker["ubuntu"] }
+  call tsv_sorted as batch_sorted_tsv { input: tsv_file = batch_tsv_file, column = "batch_id", docker = basic_bash_docker }
   Array[Array[String]] batch_tsv = read_tsv(batch_sorted_tsv.file)
   Int n_batches = length(batch_tsv)-1
   scatter (idx in range(n_batches)) { Array[String] batch_tsv_rows = batch_tsv[(idx+1)] }
@@ -95,7 +104,7 @@ workflow mocha {
           csv_file = manifest_path + csv_file,
           fasta_ref = ref_path + ref["fasta_ref"],
           fasta_ref_idxs = prefix(ref_path + ref["fasta_ref"] + ".", ["amb", "ann", "bwt", "pac", "sa"]),
-          docker = docker["gtc2vcf"],
+          docker = gtc2vcf_docker,
       }
     }
     Map[String, File] csv2sam = as_map(zip(csv_files, csv2bam.bam_file))
@@ -109,16 +118,16 @@ workflow mocha {
 
   if (!mode_is_vcf) {
     # resort table with sample information and extract sample_id column
-    call tsv_sorted as sample_sorted_tsv { input: tsv_file = sample_tsv_file, column = "batch_id", docker = docker["ubuntu"] }
-    call tsv_column as sample_id_lines { input: tsv_file = sample_sorted_tsv.file, column = "sample_id", docker = docker["ubuntu"] }
-    call tsv_column as batch_id_lines { input: tsv_file = sample_sorted_tsv.file, column = "batch_id", docker = docker["ubuntu"] }
+    call tsv_sorted as sample_sorted_tsv { input: tsv_file = sample_tsv_file, column = "batch_id", docker = basic_bash_docker }
+    call tsv_column as sample_id_lines { input: tsv_file = sample_sorted_tsv.file, column = "sample_id", docker = basic_bash_docker }
+    call tsv_column as batch_id_lines { input: tsv_file = sample_sorted_tsv.file, column = "batch_id", docker = basic_bash_docker }
 
     # process Illumina data
     if (mode == "idat") {
-      call tsv_column as green_idat_lines { input: tsv_file = sample_sorted_tsv.file, column = "green_idat", docker = docker["ubuntu"] }
-      call tsv_column as red_idat_lines { input: tsv_file = sample_sorted_tsv.file, column = "red_idat", docker = docker["ubuntu"] }
+      call tsv_column as green_idat_lines { input: tsv_file = sample_sorted_tsv.file, column = "green_idat", docker = basic_bash_docker }
+      call tsv_column as red_idat_lines { input: tsv_file = sample_sorted_tsv.file, column = "red_idat", docker = basic_bash_docker }
       # group samples by IDAT batches
-      call batch_scatter as idat_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = idat_batch_size, delim = delim, docker = docker["ubuntu"] }
+      call batch_scatter as idat_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = idat_batch_size, delim = delim, docker = basic_bash_docker }
       Map[String, Array[String]] idat_batch2green_idat_files = collect_by_key(zip(read_lines(idat_scatter.sub_batch_id), read_lines(green_idat_lines.file)))
       Map[String, Array[String]] idat_batch2red_idat_files = collect_by_key(zip(read_lines(idat_scatter.sub_batch_id), read_lines(red_idat_lines.file)))
       Map[String, Int] idat_batch2idx = as_map(zip(idat_scatter.sub_batches, idat_scatter.idxs))
@@ -132,23 +141,23 @@ workflow mocha {
             red_idat_files = prefix(data_paths[idat_idx], idat_batch2red_idat_files[idat_batch]),
             autoconvert = autoconvert,
             filebase = sample_set_id + "." + idat_batch,
-            docker = docker[if autoconvert then "autoconvert" else "iaap_cli"],
+            docker = if autoconvert then autoconvert_docker else iaap_cli_docker,
         }
       }
-      call tsv_concat as green_idat_tsv { input: tsv_files = idat2gtc.green_idat_tsv, filebase = sample_set_id + ".green_idat", docker = docker["ubuntu"] }
-      call tsv_concat as red_idat_tsv { input: tsv_files = idat2gtc.red_idat_tsv, filebase = sample_set_id + ".red_idat", docker = docker["ubuntu"] }
+      call tsv_concat as green_idat_tsv { input: tsv_files = idat2gtc.green_idat_tsv, filebase = sample_set_id + ".green_idat", docker = basic_bash_docker }
+      call tsv_concat as red_idat_tsv { input: tsv_files = idat2gtc.red_idat_tsv, filebase = sample_set_id + ".red_idat", docker = basic_bash_docker }
     }
 
     if (mode == "gtc") {
-      call tsv_column as gtc_lines { input: tsv_file = sample_sorted_tsv.file, column = "gtc", docker = docker["ubuntu"] }
+      call tsv_column as gtc_lines { input: tsv_file = sample_sorted_tsv.file, column = "gtc", docker = basic_bash_docker }
     }
 
     if (mode == "idat" || mode == "gtc") {
       # group samples by GTC batches
-      call batch_scatter as gtc_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = gtc_batch_size, delim = delim, docker = docker["ubuntu"] }
+      call batch_scatter as gtc_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = gtc_batch_size, delim = delim, docker = basic_bash_docker }
       Array[String]+ input_gtc_files = if mode == "idat" then flatten(select_first([idat2gtc.gtc_files])) else read_lines(select_first([gtc_lines.file]))
       Map[String, Array[String]] gtc_batch2gtc_files = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), input_gtc_files))
-      call get_barcodes as gtc_barcodes { input: lst_files = select_first([green_idat_lines.file, gtc_lines.file]), docker = docker["ubuntu"] }
+      call get_barcodes as gtc_barcodes { input: lst_files = select_first([green_idat_lines.file, gtc_lines.file]), docker = basic_bash_docker }
       Map[String, Array[String]] gtc_batch2barcode = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), read_lines(gtc_barcodes.file)))
       Map[String, Array[String]] gtc_batch2sample_id = collect_by_key(zip(read_lines(gtc_scatter.sub_batch_id), read_lines(sample_id_lines.file)))
       Map[String, Int] gtc_batch2idx = as_map(zip(gtc_scatter.sub_batches, gtc_scatter.idxs))
@@ -168,10 +177,10 @@ workflow mocha {
             sam_file = sams[gtc_idx],
             reheader_map = as_map(zip(gtc_batch2barcode[gtc_batch], gtc_batch2sample_id[gtc_batch])),
             filebase = sample_set_id + "." + gtc_batch,
-            docker = docker["gtc2vcf"],
+            docker = gtc2vcf_docker,
         }
       }
-      call tsv_concat as gtc_tsv { input: tsv_files = gtc2vcf.gtc_tsv, filebase = sample_set_id + ".gtc", docker = docker["ubuntu"] }
+      call tsv_concat as gtc_tsv { input: tsv_files = gtc2vcf.gtc_tsv, filebase = sample_set_id + ".gtc", docker = basic_bash_docker }
 
       # this job can be long, so it is better to run as non-preemptible
       Map[Int, Array[String]] idx2gtc2vcf_files = collect_by_key(zip(gtc_scatter.idxs, gtc2vcf.vcf_file))
@@ -182,7 +191,7 @@ workflow mocha {
             input:
               vcf_files = idx2gtc2vcf_files[idx],
               filebase = sample_set_id + "." + batches[idx],
-              docker = docker["gtc2vcf"]
+              docker = bcftools_docker
           }
         }
         File gtc2vcf_files = select_first([gtc2vcf_merge.vcf_file, idx2gtc2vcf_files[idx][0]])
@@ -190,8 +199,12 @@ workflow mocha {
       }
     }
 
+    if (mode == "cel" || mode == "chp" || mode == "txt") {
+      scatter (key in keys(batch_tbl)) { Boolean? is_key_equal_probeset = if key == "probeset_ids" then true else None }
+    }
+
     if (mode == "cel" || mode == "txt") {
-      call tsv_column as cel_lines { input: tsv_file = sample_sorted_tsv.file, column = "cel", docker = docker["ubuntu"] }
+      call tsv_column as cel_lines { input: tsv_file = sample_sorted_tsv.file, column = "cel", docker = basic_bash_docker }
     }
 
     # process Affymetrix data
@@ -203,25 +216,27 @@ workflow mocha {
             xml_file = manifest_path + batch_tbl["xml"][idx],
             zip_file = manifest_path + batch_tbl["zip"][idx],
             cel_files = prefix(data_paths[idx], batch2cel_files[(batches[idx])]),
+            probeset_file = if length(select_all(select_first([is_key_equal_probeset])))>0 && batch_tbl["probeset_ids"][idx] != ""
+              then manifest_path + batch_tbl["probeset_ids"][idx] else None,
             chip_type = chip_type,
             table_output = table_output,
             filebase = sample_set_id + "." + batches[idx],
-            docker = docker["apt"]
+            docker = apt_docker
         }
       }
-      call tsv_concat as cel_tsv { input: tsv_files = cel2chp.cel_tsv, filebase = sample_set_id + ".cel", docker = docker["ubuntu"] }
+      call tsv_concat as cel_tsv { input: tsv_files = cel2chp.cel_tsv, filebase = sample_set_id + ".cel", docker = basic_bash_docker }
     }
 
     if (mode == "chp") {
-      call tsv_column as chp_lines { input: tsv_file = sample_sorted_tsv.file, column = "chp", docker = docker["ubuntu"] }
+      call tsv_column as chp_lines { input: tsv_file = sample_sorted_tsv.file, column = "chp", docker = basic_bash_docker }
     }
 
     if (mode == "cel" || mode == "chp") {
       # group samples by CHP batches
-      call batch_scatter as chp_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = chp_batch_size, delim = delim, docker = docker["ubuntu"] }
+      call batch_scatter as chp_scatter { input: batch_id_file = batch_id_lines.file, sub_batch_size = chp_batch_size, delim = delim, docker = basic_bash_docker }
       Array[String]+ input_chp_files = if mode == "cel" then flatten(select_first([cel2chp.chp_files])) else read_lines(select_first([chp_lines.file]))
       Map[String, Array[String]] chp_batch2chp_files = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), input_chp_files))
-      call get_barcodes as chp_barcodes { input: lst_files = select_first([cel_lines.file, chp_lines.file]), docker = docker["ubuntu"] }
+      call get_barcodes as chp_barcodes { input: lst_files = select_first([cel_lines.file, chp_lines.file]), docker = basic_bash_docker }
       Map[String, Array[String]] chp_batch2barcode = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), read_lines(chp_barcodes.file)))
       Map[String, Array[String]] chp_batch2sample_id = collect_by_key(zip(read_lines(chp_scatter.sub_batch_id), read_lines(sample_id_lines.file)))
       Map[String, Int] chp_batch2idx = as_map(zip(chp_scatter.sub_batches, chp_scatter.idxs))
@@ -234,12 +249,14 @@ workflow mocha {
             fasta_ref = ref_path + ref["fasta_ref"],
             fasta_ref_fai = ref_path + ref["fasta_ref"] + ".fai",
             gc_window_size = gc_window_size,
+            probeset_file = if length(select_all(select_first([is_key_equal_probeset])))>0 && batch_tbl["probeset_ids"][chp_idx] != ""
+              then manifest_path + batch_tbl["probeset_ids"][chp_idx] else None,
             snp_file = if mode == "cel" then select_first([cel2chp.snp_file])[chp_idx] else data_paths[chp_idx] + batch_tbl["snp"][chp_idx],
             chp_files = if mode == "cel" then chp_batch2chp_files[chp_batch] else prefix(data_paths[chp_idx], chp_batch2chp_files[chp_batch]),
             sam_file = sams[chp_idx],
             reheader_map = as_map(zip(chp_batch2barcode[chp_batch], chp_batch2sample_id[chp_batch])),
             filebase = sample_set_id + "." + chp_batch,
-            docker = docker["gtc2vcf"]
+            docker = gtc2vcf_docker
         }
       }
 
@@ -252,7 +269,7 @@ workflow mocha {
             input:
               vcf_files = idx2chp2vcf_files[idx],
               filebase = sample_set_id + "." + batches[idx],
-              docker = docker["gtc2vcf"]
+              docker = bcftools_docker
           }
         }
         File chp2vcf_files = select_first([chp2vcf_merge.vcf_file, idx2chp2vcf_files[idx][0]])
@@ -262,7 +279,7 @@ workflow mocha {
 
     if (mode == "txt") {
       scatter (key in keys(batch_tbl)) { Boolean? is_key_equal_confidences = if key == "confidences" then true else None }
-      call get_barcodes as txt_barcodes { input: lst_files = select_first([cel_lines.file]), docker = docker["ubuntu"] }
+      call get_barcodes as txt_barcodes { input: lst_files = select_first([cel_lines.file]), docker = basic_bash_docker }
       Map[String, Array[String]] batch2barcode = collect_by_key(zip(read_lines(batch_id_lines.file), read_lines(txt_barcodes.file)))
       Map[String, Array[String]] batch2sample_id = collect_by_key(zip(read_lines(batch_id_lines.file), read_lines(sample_id_lines.file)))
       scatter (idx in range(n_batches)) {
@@ -274,6 +291,8 @@ workflow mocha {
             fasta_ref = ref_path + ref["fasta_ref"],
             fasta_ref_fai = ref_path + ref["fasta_ref"] + ".fai",
             gc_window_size = gc_window_size,
+            probeset_file = if length(select_all(select_first([is_key_equal_probeset])))>0 && batch_tbl["probeset_ids"][idx] != ""
+              then manifest_path + batch_tbl["probeset_ids"][idx] else None,
             calls_file = data_paths[idx] + batch_tbl["calls"][idx],
             confidences_file = if length(select_all(is_key_equal_confidences))>0 then data_paths[idx] + batch_tbl["confidences"][idx] else None,
             summary_file = data_paths[idx] + batch_tbl["summary"][idx],
@@ -282,26 +301,26 @@ workflow mocha {
             sam_file = sams[idx],
             reheader_map = as_map(zip(batch2barcode[(batches[idx])], batch2sample_id[(batches[idx])])),
             filebase = sample_set_id + "." + batches[idx],
-            docker = docker["gtc2vcf"]
+            docker = gtc2vcf_docker
         }
       }
     }
 
     if (mode == "cel" || mode == "chp" || mode == "txt") {
-      call tsv_concat as affy_tsv { input: tsv_files = select_first([chp2vcf.affy_tsv, txt2vcf.affy_tsv]), filebase = sample_set_id + ".affy", docker = docker["ubuntu"] }
+      call tsv_concat as affy_tsv { input: tsv_files = select_first([chp2vcf.affy_tsv, txt2vcf.affy_tsv]), filebase = sample_set_id + ".affy", docker = basic_bash_docker }
     }
 
     Array[File] unphased_vcf_files = select_first([gtc2vcf_files, chp2vcf_files, txt2vcf.vcf_file])
     Array[File] unphased_vcf_idxs = select_first([gtc2vcf_idxs, chp2vcf_idxs, txt2vcf.vcf_idx])
-    call lst_flatten as flatten_sample_id_lines { input: lst_files = select_first([gtc2vcf.sample_id_lines, chp2vcf.sample_id_lines, txt2vcf.sample_id_lines]), filebase = "sample_id", docker = docker["ubuntu"] }
+    call lst_flatten as flatten_sample_id_lines { input: lst_files = select_first([gtc2vcf.sample_id_lines, chp2vcf.sample_id_lines, txt2vcf.sample_id_lines]), filebase = "sample_id", docker = basic_bash_docker }
   }
 
   if (mode_is_vcf) {
-    call tsv_column as vcf_sample_id_lines { input: tsv_file = sample_tsv_file, column = "sample_id", docker = docker["ubuntu"] }
+    call tsv_column as vcf_sample_id_lines { input: tsv_file = sample_tsv_file, column = "sample_id", docker = basic_bash_docker }
   }
 
-  call tsv_column as computed_gender_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "computed_gender", docker = docker["ubuntu"] }
-  call tsv_column as call_rate_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "call_rate", docker = docker["ubuntu"] }
+  call tsv_column as computed_gender_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "computed_gender", docker = basic_bash_docker }
+  call tsv_column as call_rate_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "call_rate", docker = basic_bash_docker }
   if (mode != "pvcf" && !do_not_phase) {
     call ref_scatter {
       input:
@@ -310,7 +329,7 @@ workflow mocha {
         genetic_map_file = ref_path + ref["genetic_map_file"],
         max_win_size_cm = max_win_size_cm,
         overlap_size_cm = overlap_size_cm,
-        docker = docker["pandas"]
+        docker = pandas_docker
     }
     scatter (idx in range(n_batches)) {
       call vcf_scatter {
@@ -318,7 +337,7 @@ workflow mocha {
           vcf_file = if mode_is_vcf then data_paths[idx] + batch_tbl["vcf"][idx] else select_first([unphased_vcf_files])[idx],
           intervals_bed = ref_scatter.intervals_bed,
           filebase = sample_set_id + "." + batches[idx] + ".",
-          docker = docker["bcftools"]
+          docker = bcftools_docker
       }
     }
     if (defined(extra_xcl_vcf_file)) {
@@ -327,11 +346,11 @@ workflow mocha {
           vcf_file = select_first([extra_xcl_vcf_file]),
           intervals_bed = ref_scatter.intervals_bed,
           filebase = basename(select_first([extra_xcl_vcf_file]), ".bcf") + ".",
-          docker = docker["bcftools"]
+          docker = bcftools_docker
       }
     }
 
-    call lst_concat as sample_id_split_tsv { input: lst_files = vcf_scatter.sample_id_lines, filebase = "split_sample_id", docker = docker["ubuntu"] }
+    call lst_concat as sample_id_split_tsv { input: lst_files = vcf_scatter.sample_id_lines, filebase = "split_sample_id", docker = basic_bash_docker }
     Int n_smpls = length(flatten(read_tsv(sample_id_split_tsv.file)))
     Boolean use_reference = !select_first([do_not_use_reference, !eagle && n_smpls > 2 * ref["n_smpls"]])
     Array[Array[File]] interval_slices = transpose(vcf_scatter.vcf_files)
@@ -341,19 +360,18 @@ workflow mocha {
         input:
           vcf_files = interval_slices[idx],
           filebase = sample_set_id + "." + idx,
-          docker = docker["bcftools"]
+          docker = bcftools_docker
       }
       call vcf_qc {
         input:
           vcf_file = vcf_merge.vcf_file,
           vcf_idx = vcf_merge.vcf_idx,
-          mhc_reg = ref["mhc_reg"],
           dup_file = ref_path + ref["dup_file"],
           sample_id_file = select_first([flatten_sample_id_lines.file, vcf_sample_id_lines.file]),
           computed_gender_file = computed_gender_lines.file,
           call_rate_file = call_rate_lines.file,
           extra_xcl_vcf_file = if defined(extra_xcl_vcf_file) then select_first([xcl_vcf_scatter.vcf_files])[idx] else None,
-          docker = docker["bcftools"]
+          docker = bcftools_docker
       }
       call vcf_phase {
         input:
@@ -370,7 +388,7 @@ workflow mocha {
           chr = if eagle then None else chrs[idx],
           sequencing = sequencing,
           eagle = eagle,
-          docker = docker[if eagle then "eagle" else "shapeit4"],
+          docker = if eagle then eagle_docker else shapeit4_docker,
           cpu = phase_threads
       }
       call vcf_split {
@@ -380,7 +398,7 @@ workflow mocha {
           sample_id_file = sample_id_split_tsv.file,
           ped_file = ped_file,
           rule = if defined(ped_file) then ref["name"] else None,
-          docker = docker["bcftools"]
+          docker = bcftools_docker
       }
     }
 
@@ -388,7 +406,7 @@ workflow mocha {
       input:
         vcf_files = vcf_qc.xcl_vcf_file,
         filebase = sample_set_id + ".xcl",
-        docker = docker["bcftools"]
+        docker = bcftools_docker
     }
 
     Array[Array[File]] batch_slices = transpose(vcf_split.vcf_files)
@@ -397,7 +415,7 @@ workflow mocha {
         input:
           vcf_files = batch_slices[idx],
           filebase = sample_set_id + "." + batches[idx] + ".GT",
-          docker = docker["bcftools"]
+          docker = bcftools_docker
       }
       call vcf_import {
         input:
@@ -405,7 +423,7 @@ workflow mocha {
           phased_vcf_idx = vcf_concat.vcf_idx,
           unphased_vcf_file = if mode_is_vcf then data_paths[idx] + batch_tbl["vcf"][idx] else select_first([unphased_vcf_files])[idx],
           unphased_vcf_idx = if mode_is_vcf then data_paths[idx] + batch_tbl["vcf_index"][idx] else select_first([unphased_vcf_idxs])[idx],
-          docker = docker["bcftools"]
+          docker = bcftools_docker
       }
     }
   }
@@ -424,8 +442,10 @@ workflow mocha {
           xcl_vcf_file = if mode == "pvcf" then data_paths[idx] + batch_tbl["xcl_vcf"][idx] else xcl_vcf_concat.vcf_file,
           xcl_vcf_idx = if mode == "pvcf" then data_paths[idx] + batch_tbl["xcl_vcf_index"][idx] else xcl_vcf_concat.vcf_idx,
           cnp_file = ref_path + ref["cnp_file"],
+          mhc_reg = if ref["mhc_reg"] != "" then ref["mhc_reg"] else None,
+          kir_reg = if ref["kir_reg"] != "" then ref["kir_reg"] else None,
           mocha_extra_args = mocha_extra_args,
-          docker = docker["mocha"]
+          docker = mocha_docker
       }
       if (!do_not_plot) {
         call mocha_plot {
@@ -435,13 +455,13 @@ workflow mocha {
             stats_tsv = vcf_mocha.stats_tsv,
             calls_tsv = vcf_mocha.calls_tsv,
             cyto_file = ref_path + ref["cyto_file"],
-            docker = docker["mocha_plot"]
+            docker = mocha_plot_docker
         }
       }
     }
-    call tsv_concat as mocha_stats_tsv { input: tsv_files = vcf_mocha.stats_tsv, filebase = sample_set_id + ".stats", docker = docker["ubuntu"] }
-    call tsv_concat as mocha_calls_tsv { input: tsv_files = vcf_mocha.calls_tsv, filebase = sample_set_id + ".calls", docker = docker["ubuntu"] }
-    call mocha_summary { input: calls_tsv = mocha_calls_tsv.file, stats_tsv = mocha_stats_tsv.file, ucsc_beds = vcf_mocha.ucsc_bed, cyto_file = ref_path + ref["cyto_file"], filebase = sample_set_id, docker = docker["mocha_plot"] }
+    call tsv_concat as mocha_stats_tsv { input: tsv_files = vcf_mocha.stats_tsv, filebase = sample_set_id + ".stats", docker = basic_bash_docker }
+    call tsv_concat as mocha_calls_tsv { input: tsv_files = vcf_mocha.calls_tsv, filebase = sample_set_id + ".calls", docker = basic_bash_docker }
+    call mocha_summary { input: calls_tsv = mocha_calls_tsv.file, stats_tsv = mocha_stats_tsv.file, ucsc_beds = vcf_mocha.ucsc_bed, cyto_file = ref_path + ref["cyto_file"], filebase = sample_set_id, docker = mocha_plot_docker }
   }
 
   output {
@@ -459,7 +479,7 @@ workflow mocha {
     File? mocha_ucsc_bed = mocha_summary.ucsc_bed
     File? mocha_summary_pdf = mocha_summary.summary_pdf
     File? mocha_pileup_pdf = mocha_summary.pileup_pdf
-    Array[File]? pngs = if !do_not_phase && !do_not_mocha && !do_not_plot then flatten(select_all(select_first([mocha_plot.png_files]))) else None
+    Array[File]? png_files = if !do_not_phase && !do_not_mocha && !do_not_plot then flatten(select_all(select_first([mocha_plot.png_files]))) else None
     Array[File]? bam_files = csv2bam.bam_file
     Array[File]? mendel_files = if mode != "pvcf" && !do_not_phase && defined(ped_file) then select_all(select_first([vcf_split.mendel_tsv])) else None
     Array[File]? gtc_files = if mode == "idat" && gtc_output then flatten(select_first([idat2gtc.gtc_files])) else None
@@ -891,6 +911,7 @@ task cel2affy {
     File? special_snps
     File? chrX_probes
     File? chrY_probes
+    File? probeset_file
     Array[String]? chip_type
     Boolean table_output = false
     String? qmethod_spec
@@ -941,6 +962,7 @@ task cel2affy {
       ~{if defined(special_snps) then "--special-snps \"" + basename(select_first([special_snps])) + "\"" else ""} \
       ~{if defined(chrX_probes) then "--chrX-probes \"" + basename(select_first([chrX_probes])) + "\"" else ""} \
       ~{if defined(chrY_probes) then "--chrY-probes \"" + basename(select_first([chrY_probes])) + "\"" else ""} \
+      ~{if defined(probeset_file) then "--probeset-ids \"" + select_first([probeset_file]) + "\"" else ""} \
       ~{if defined(chip_type) then "--chip-type " else ""}~{sep=" --chip-type " chip_type} \
       --table-output ~{table_output} \
       --cc-chp-output \
@@ -1091,6 +1113,7 @@ task chp2vcf {
     File fasta_ref
     File fasta_ref_fai
     Int? gc_window_size
+    File? probeset_file
     File snp_file
     Array[File] chp_files
     File? sam_file
@@ -1134,6 +1157,7 @@ task chp2vcf {
       --csv "~{basename(csv_file)}" \
       --fasta-ref "~{basename(fasta_ref)}" \
       ~{if defined(gc_window_size) then "--gc-window-size " + select_first([gc_window_size]) else ""} \
+      ~{if defined(probeset_file) then "--probeset-ids \"" + select_first([probeset_file]) + "\"" else ""} \
       --snp "~{basename(snp_file)}" \
       --chps $chp_files \
       --extra "~{filebase}.affy.tsv" \
@@ -1172,6 +1196,7 @@ task txt2vcf {
     File fasta_ref
     File fasta_ref_fai
     Int? gc_window_size
+    File? probeset_file
     File calls_file
     File? confidences_file
     File summary_file
@@ -1211,8 +1236,8 @@ task txt2vcf {
     ~{if basename(report_file) != basename(report_file, ".gz") then "gunzip --force \"" + basename(report_file) + "\"" else ""}
     (~{if basename(calls_file) != basename(calls_file, ".gz") then "z" else ""}grep -v ^# "~{basename(calls_file)}" || if [[ $? -eq 141 ]]; then true; else exit $?; fi) | \
       head -n1 | tr '\t' '\n' | tail -n+2 | \
-      awk -F"\t" 'NR==FNR {x[NR]=$1} NR>FNR && $0!~"^#" {if ($1=="cel_files") print; else y[$1]=$0} END {for (i in x) print y[x[i]]}' \
-      - "~{basename(report_file, ".gz")}" > ~{filebase}.affy.tsv
+      awk -F"\t" 'NR==FNR && $0!~"^#" {if ($1=="cel_files") print; else x[$1]=$0} NR>FNR {print x[$1]}' \
+      "~{basename(report_file, ".gz")}" - > ~{filebase}.affy.tsv
     rm "~{basename(report_file, ".gz")}"
     bcftools +affy2vcf \
       --no-version \
@@ -1221,6 +1246,7 @@ task txt2vcf {
       --csv "~{basename(csv_file)}" \
       --fasta-ref "~{basename(fasta_ref)}" \
       ~{if defined(gc_window_size) then "--gc-window-size " + select_first([gc_window_size]) else ""} \
+      ~{if defined(probeset_file) then "--probeset-ids \"" + select_first([probeset_file]) + "\"" else ""} \
       --calls "~{basename(calls_file)}" \
       ~{if defined(confidences_file) then "--confidences \"" + basename(select_first([confidences_file])) + "\"" else ""} \
       --summary "~{basename(summary_file)}" \
@@ -1436,13 +1462,15 @@ task vcf_qc {
   input {
     File vcf_file
     File vcf_idx
-    String mhc_reg
     File dup_file
     File sample_id_file
     File computed_gender_file
     File call_rate_file
     Float sample_call_rate_thr = 0.97
     Float variant_call_rate_thr = 0.97
+    Float dup_divergence_thr = 0.02
+    Float genotype_exc_het_thr = 0.000001
+    Float genotype_sex_cor_thr = 0.000001
     File? extra_xcl_vcf_file
     Boolean uncompressed = false
 
@@ -1464,21 +1492,17 @@ task vcf_qc {
     set -euo pipefail
     echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_id_file, computed_gender_file, call_rate_file, extra_xcl_vcf_file])}" | \
       tr '\n' '\0' | xargs -0 mv -t .
-    mhc_chr=$(echo ~{mhc_reg} | cut -d: -f1)
-    mhc_beg=$(echo ~{mhc_reg} | cut -d: -f2 | cut -d- -f1)
-    mhc_end=$(echo ~{mhc_reg} | cut -d- -f2)
     paste -d $'\t' "~{basename(sample_id_file)}" "~{basename(computed_gender_file)}" > computed_gender.map
     paste -d $'\t' "~{basename(sample_id_file)}" "~{basename(call_rate_file)}" | \
       awk -F"\t" '$2<~{sample_call_rate_thr} {print $1}' > samples_xcl.lines
     bcftools query --format "\n" "~{basename(vcf_file)}" | wc -l
     echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
       bcftools annotate --no-version --output-type u --annotations "~{basename(dup_file)}" --columns CHROM,FROM,TO,JK --header-lines /dev/stdin --samples-file ^samples_xcl.lines~{if cpu > 1 then " --threads " + (cpu - 1) else ""} "~{basename(vcf_file)}" | \
-      bcftools filter --no-version --output-type u --exclude "CHROM==\"$mhc_chr\" && POS>$mhc_beg && POS<$mhc_end" --soft-filter MHC | \
       bcftools +fill-tags --no-version --output-type u --targets ^Y,MT,chrY,chrM~{if cpu > 1 then " --threads " + (cpu - 1) else ""} -- --tags ExcHet,F_MISSING | \
       bcftools +mochatools --no-version --output-type u~{if cpu > 1 then " --threads " + (cpu - 1) else ""} -- --sex computed_gender.map --drop-genotypes | \
       bcftools annotate --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.xcl.bcf" \
-      --include 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-~{variant_call_rate_thr} ||
-        INFO/AC_Sex_Test>6 && CHROM!="X" && CHROM!="chrX" && CHROM!="Y" && CHROM!="chrY"' \
+      --include 'FILTER!="." && FILTER!="PASS" || INFO/JK<~{dup_divergence_thr} || INFO/ExcHet<~{genotype_exc_het_thr} || INFO/F_MISSING>1-~{variant_call_rate_thr} ||
+        INFO/AC_Sex_Test<~{genotype_sex_cor_thr} && CHROM!="X" && CHROM!="chrX" && CHROM!="Y" && CHROM!="chrY"' \
       --remove ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING,^INFO/AC_Sex_Test~{if cpu > 1 then " --threads " + (cpu - 1) else ""}
     bcftools index --force "~{filebase}.xcl.bcf"
     ~{if defined(extra_xcl_vcf_file) then "mv \"" + filebase + ".xcl.bcf\" \"" + filebase + ".tmp.bcf\"\n" +
@@ -1794,6 +1818,8 @@ task vcf_mocha {
     File? xcl_vcf_file
     File? xcl_vcf_idx
     File? cnp_file
+    String? mhc_reg
+    String? kir_reg
     String? mocha_extra_args
     Boolean uncompressed = false
 
@@ -1827,6 +1853,8 @@ task vcf_mocha {
       ~{if defined(sample_id_file) && defined(call_rate_file) then "--call-rate call_rate.map" else ""} \
       ~{if defined(xcl_vcf_file) then "--variants \"^" + basename(select_first([xcl_vcf_file])) + "\"" else ""} \
       ~{if defined(cnp_file) then "--cnp \"" + basename(select_first([cnp_file])) + "\"" else ""} \
+      ~{if defined(mhc_reg) then "--mhc \"" + mhc_reg + "\"" else ""} \
+      ~{if defined(kir_reg) then "--kir \"" + kir_reg + "\"" else ""} \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       --output-type ~{if uncompressed then "u" else "b"} \
       --output "~{filebase}.mocha.bcf" \

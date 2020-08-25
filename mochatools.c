@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2020-08-13"
+#define MOCHATOOLS_VERSION "2020-08-25"
 
 #define GC_WIN_DFLT "200"
 
@@ -229,68 +229,61 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     if (args->format && args->fmt_id < 0)
         error("Error: %s format field is not present, cannot perform --balance analysis\n", args->format);
     if (args->ad && (args->gt_id < 0 || args->ad_id < 0))
-        error(
-            "Error: Either GT or AD format fields are not present, cannot perform --ad-het "
-            "analysis\n");
+        error("Error: Either GT or AD format fields are not present, cannot perform --ad-het analysis\n");
     if (args->phase && (args->gt_id < 0 || (args->ad_id < 0 && args->baf_id < 0 && args->fmt_id < 0)))
-        error(
-            "Error: Either GT or AD/BAF/%s format fields are not present, cannot perform "
-            "--phase analysis\n",
-            args->format);
+        error("Error: Either GT or AD/BAF/%s format fields are not present, cannot perform --phase analysis\n",
+              args->format);
     if (args->infer_baf_alleles && (args->gt_id < 0 || args->baf_id < 0))
-        error(
-            "Error: Either GT or BAF format fields are not present, cannot perform "
-            "--infer-baf-alleles analysis\n");
+        error("Error: Either GT or BAF format fields are not present, cannot perform --infer-baf-alleles analysis\n");
 
     if (args->format) {
+        bcf_hdr_append(
+            args->out_hdr,
+            "##INFO=<ID=Bal,Number=2,Type=Integer,Description=\"Reference alternate allelic shift counts\">");
         bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=Bal,Number=2,Type=Integer,Description=\"Reference alternate "
-                       "allelic shift counts\">");
-        bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=Bal_Test,Number=1,Type=Float,Description=\"Reference "
-                       "alternate allelic shift binomial test -log10(P)\">");
+                       "##INFO=<ID=Bal_Test,Number=1,Type=Float,Description=\"Binomial test for reference alternate "
+                       "allelic shift\">");
         if (args->phase) {
+            bcf_hdr_append(
+                args->out_hdr,
+                "##INFO=<ID=Bal_Phase,Number=2,Type=Integer,Description=\"Paternal maternal allelic shift counts\">");
             bcf_hdr_append(args->out_hdr,
-                           "##INFO=<ID=Bal_Phase,Number=2,Type=Integer,Description=\"Paternal "
-                           "maternal allelic shift counts\">");
-            bcf_hdr_append(args->out_hdr,
-                           "##INFO=<ID=Bal_Phase_Test,Number=1,Type=Float,Description="
-                           "\"Paternal maternal allelic shift binomial test -log10(P)\">");
+                           "##INFO=<ID=Bal_Phase_Test,Number=1,Type=Float,Description=\"Binomial test for paternal "
+                           "maternal allelic shift\">");
         }
     }
 
     bcf_hdr_append(args->out_hdr,
-                   "##INFO=<ID=AC_Het,Number=1,Type=Integer,Description=\"Number of "
-                   "heterozygous genotypes\">");
+                   "##INFO=<ID=AC_Het,Number=1,Type=Integer,Description=\"Number of heterozygous genotypes\">");
     if (args->gender) {
+        bcf_hdr_append(
+            args->out_hdr,
+            "##INFO=<ID=AC_Het_Sex,Number=2,Type=Integer,Description=\"Number of heterozygous genotypes by gender\">");
         bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AC_Het_Sex,Number=2,Type=Integer,Description=\"Number of "
-                       "heterozygous genotypes by gender\">");
-        bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AC_Sex_Test,Number=1,Type=Float,Description=\"Fisher's "
-                       "exact test for alternate alleles and gender\">");
+                       "##INFO=<ID=AC_Sex_Test,Number=1,Type=Float,Description=\"Fisher's exact test for alternate "
+                       "alleles and gender\">");
     }
 
     if (args->ad && args->ad_id >= 0) {
         bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AD_Het,Number=2,Type=Integer,Description=\"Allelic depths for the "
-                       "reference and alternate alleles across heterozygous genotypes\">");
+                       "##INFO=<ID=AD_Het,Number=2,Type=Integer,Description=\"Allelic depths for the reference and "
+                       "alternate alleles across heterozygous genotypes\">");
         bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AD_Het_Test,Number=1,Type=Float,Description=\"Binomial test for "
-                       "reference and alternate allelic depth across heterozygous genotypes -log10(P)\">");
+                       "##INFO=<ID=AD_Het_Test,Number=1,Type=Float,Description=\"Binomial test for reference and "
+                       "alternate allelic depth across heterozygous genotypes\">");
     }
     if (args->phase) {
         bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AC_Het_Phase,Number=2,Type=Integer,Description=\"Number of "
-                       "heterozygous genotypes by transmission type\">");
+                       "##INFO=<ID=AC_Het_Phase,Number=2,Type=Integer,Description=\"Number of heterozygous genotypes "
+                       "by transmission type\">");
         bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AC_Het_Phase_Test,Number=1,Type=Float,Description=\"Binomial test for "
-                       "allelic transmission bias across heterozygous genotypes -log10(P)\">");
+                       "##INFO=<ID=AC_Het_Phase_Test,Number=1,Type=Float,Description=\"Binomial test for allelic "
+                       "transmission bias across heterozygous genotypes\">");
         if (args->ad_id >= 0 || args->baf_id >= 0)
-            bcf_hdr_append(args->out_hdr,
-                           "##INFO=<ID=BAF_Phase_Test,Number=4,Type=Float,Description=\"Welch'"
-                           "s t-test and Mann-Whitney U test for allelic transmission ratios "
-                           "across heterozygous genotypes\">");
+            bcf_hdr_append(
+                args->out_hdr,
+                "##INFO=<ID=BAF_Phase_Test,Number=4,Type=Float,Description=\"Welch'"
+                "s t-test and Mann-Whitney U test for allelic transmission ratios across heterozygous genotypes\">");
     }
 
     if (args->infer_baf_alleles) {
@@ -304,13 +297,9 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
 
     if (args->cor_baf_lrr) {
         if (args->allele_a_id < 0)
-            error(
-                "Error: ALLELE_A field is not present, cannot perform --cor-BAF-LRR "
-                "analysis\n");
+            error("Error: ALLELE_A field is not present, cannot perform --cor-BAF-LRR analysis\n");
         if (args->allele_b_id < 0)
-            error(
-                "Error: ALLELE_B field is not present, cannot perform --cor-BAF-LRR "
-                "analysis\n");
+            error("Error: ALLELE_B field is not present, cannot perform --cor-BAF-LRR analysis\n");
         if (args->baf_id < 0) error("Error: BAF format is not present, cannot perform --cor-BAF-LRR analysis\n");
         if (args->lrr_id < 0) error("Error: LRR format is not present, cannot perform --cor-BAF-LRR analysis\n");
         bcf_hdr_append(args->out_hdr,
@@ -595,37 +584,34 @@ bcf1_t *process(bcf1_t *rec) {
     if (args->gender) {
         bcf_update_info_int32(args->out_hdr, rec, "AC_Het_Sex", &ac_het_sex, 2);
         double left, right, fisher;
-        ret[0] =
-            0.0f - (float)log10(kt_fisher_exact(ac_sex[0], ac_sex[1], ac_sex[2], ac_sex[3], &left, &right, &fisher));
+        ret[0] = kt_fisher_exact(ac_sex[0], ac_sex[1], ac_sex[2], ac_sex[3], &left, &right, &fisher);
         bcf_update_info_float(args->out_hdr, rec, "AC_Sex_Test", &ret, 1);
     }
     if (args->phase) {
         bcf_update_info_int32(args->out_hdr, rec, "AC_Het_Phase", &ac_het_phase, 2);
-        ret[0] = 0.0f - (float)log10(binom_exact(ac_het_phase[0], ac_het_phase[0] + ac_het_phase[1]));
+        ret[0] = binom_exact(ac_het_phase[0], ac_het_phase[0] + ac_het_phase[1]);
         bcf_update_info_float(args->out_hdr, rec, "AC_Het_Phase_Test", &ret, 1);
     }
     if (args->format) {
         bcf_update_info_int32(args->out_hdr, rec, "Bal", &fmt_bal, 2);
-        ret[0] = 0.0f - (float)log10(binom_exact(fmt_bal[0], fmt_bal[0] + fmt_bal[1]));
+        ret[0] = binom_exact(fmt_bal[0], fmt_bal[0] + fmt_bal[1]);
         bcf_update_info_float(args->out_hdr, rec, "Bal_Test", &ret, 1);
         if (args->phase) {
             bcf_update_info_int32(args->out_hdr, rec, "Bal_Phase", &fmt_bal_phase, 2);
-            ret[0] = 0.0f - (float)log10(binom_exact(fmt_bal_phase[0], fmt_bal_phase[0] + fmt_bal_phase[1]));
+            ret[0] = binom_exact(fmt_bal_phase[0], fmt_bal_phase[0] + fmt_bal_phase[1]);
             bcf_update_info_float(args->out_hdr, rec, "Bal_Phase_Test", &ret, 1);
         }
     }
     if (args->ad) {
         bcf_update_info_int32(args->out_hdr, rec, "AD_Het", &ad_het, 2);
-        ret[0] = 0.0f - (float)log10(binom_exact(ad_het[0], ad_het[0] + ad_het[1]));
+        ret[0] = binom_exact(ad_het[0], ad_het[0] + ad_het[1]);
         bcf_update_info_float(args->out_hdr, rec, "AD_Het_Test", &ret, 1);
     }
     if (args->phase && ac_het_phase[0] && ac_het_phase[1]) {
         ret[0] = get_median(args->baf_arr[0], ac_het_phase[0], NULL);
         ret[1] = get_median(args->baf_arr[1], ac_het_phase[1], NULL);
-        ret[2] =
-            0.0f - (float)log10(welch_t_test(args->baf_arr[0], args->baf_arr[1], ac_het_phase[0], ac_het_phase[1]));
-        ret[3] =
-            0.0f - (float)log10(mann_whitney_u(args->baf_arr[0], args->baf_arr[1], ac_het_phase[0], ac_het_phase[1]));
+        ret[2] = welch_t_test(args->baf_arr[0], args->baf_arr[1], ac_het_phase[0], ac_het_phase[1]);
+        ret[3] = mann_whitney_u(args->baf_arr[0], args->baf_arr[1], ac_het_phase[0], ac_het_phase[1]);
         bcf_update_info_float(args->out_hdr, rec, "BAF_Phase_Test", &ret, 4);
     }
 

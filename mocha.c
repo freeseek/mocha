@@ -41,7 +41,7 @@
 #include "beta_binom.h"
 #include "bcftools.h"
 
-#define MOCHA_VERSION "2020-08-13"
+#define MOCHA_VERSION "2020-08-25"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -140,6 +140,8 @@ typedef struct {
     genome_rules_t *genome_rules;
     regidx_t *cnp_idx;
     regitr_t *cnp_itr;
+    regidx_t *mhc_idx;
+    regidx_t *kir_idx;
 
     int rid;
     int n;
@@ -2310,6 +2312,13 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
             && pos < model->genome_rules->cen_end[rid])
             continue;
 
+        if (model->mhc_idx
+            && regidx_overlap(model->mhc_idx, bcf_hdr_id2name(hdr, line->rid), line->pos, line->pos + 1, NULL))
+            continue;
+        if (model->kir_idx
+            && regidx_overlap(model->kir_idx, bcf_hdr_id2name(hdr, line->rid), line->pos, line->pos + 1, NULL))
+            continue;
+
         bcf_fmt_t *gt_fmt = bcf_get_fmt_id(line, gt_id);
         if (!bcf_get_genotype_phase(gt_fmt, phase_arr, nsmpl)) continue;
 
@@ -2497,6 +2506,8 @@ static const char *usage_text(void) {
            "    -f, --apply-filters <list>     require at least one of the listed FILTER strings (e.g. \"PASS,.\")\n"
            "                                   to include (or exclude with \"^\" prefix) in the analysis\n"
            "    -p  --cnp <file>               list of regions to genotype in BED format\n"
+           "        --mhc <region>             MHC region to exclude from analysis (will be retained in the output)\n"
+           "        --kir <region>             KIR region to exclude from analysis (will be retained in the output)\n"
            "        --threads <int>            number of extra output compression threads [0]\n"
            "\n"
            "Output Options:\n"
@@ -2640,6 +2651,8 @@ int run(int argc, char *argv[]) {
     char *targets_list = NULL;
     char *output_fname = NULL;
     char *cnp_fname = NULL;
+    char *mhc_reg = NULL;
+    char *kir_reg = NULL;
     char *rules = NULL;
     sample_t *sample = NULL;
     FILE *log_file = stderr;
@@ -2690,6 +2703,8 @@ int run(int argc, char *argv[]) {
                                        {"targets-file", required_argument, NULL, 'T'},
                                        {"apply-filters", required_argument, NULL, 'f'},
                                        {"cnp", required_argument, NULL, 'p'},
+                                       {"mhc", required_argument, NULL, 3},
+                                       {"kir", required_argument, NULL, 4},
                                        {"threads", required_argument, NULL, 9},
                                        {"output", required_argument, NULL, 'o'},
                                        {"output-type", required_argument, NULL, 'O'},
@@ -2766,6 +2781,15 @@ int run(int argc, char *argv[]) {
         case 'f':
             sr->apply_filters = optarg;
             break;
+        case 'p':
+            cnp_fname = optarg;
+            break;
+        case 3:
+            mhc_reg = optarg;
+            break;
+        case 4:
+            kir_reg = optarg;
+            break;
         case 9:
             n_threads = (int)strtol(optarg, &tmp, 0);
             if (*tmp) error("Could not parse: --threads %s\n", optarg);
@@ -2811,9 +2835,6 @@ int run(int argc, char *argv[]) {
             break;
         case 'u':
             out_fu = get_file_handle(optarg);
-            break;
-        case 'p':
-            cnp_fname = optarg;
             break;
         case 11:
             bdev_lrr_baf = optarg;
@@ -2932,6 +2953,8 @@ int run(int argc, char *argv[]) {
         if (!model.cnp_idx) error("Error: failed to initialize CNP regions: --cnp %s\n", cnp_fname);
         model.cnp_itr = regitr_init(model.cnp_idx);
     }
+    if (mhc_reg) model.mhc_idx = regidx_init_string(mhc_reg, regidx_parse_reg, NULL, 0, NULL);
+    if (kir_reg) model.kir_idx = regidx_init_string(kir_reg, regidx_parse_reg, NULL, 0, NULL);
 
     // input VCF
     char *input_fname = NULL;
@@ -2986,6 +3009,8 @@ int run(int argc, char *argv[]) {
     if (sr->apply_filters) fprintf(log_file, "Filters: %s\n", sr->apply_filters);
     if (filter_fname) fprintf(log_file, "Variants: %s\n", filter_fname);
     if (cnp_fname) fprintf(log_file, "Regions to genotype: %s\n", cnp_fname);
+    if (mhc_reg) fprintf(log_file, "MHC region to exclude from analysis: %s\n", mhc_reg);
+    if (kir_reg) fprintf(log_file, "KIR region to exclude from analysis: %s\n", kir_reg);
     fprintf(log_file, "BAF deviations for LRR+BAF model: %s\n", bdev_lrr_baf);
     fprintf(log_file, "BAF deviations for BAF+phase model: %s\n", bdev_baf_phase);
     if (model.flags & WGS_DATA) {

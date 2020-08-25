@@ -9,7 +9,8 @@ This page contains instructions for how to run the <a href="mocha.wdl">MoChA WDL
    * [Primary Options](#primary-options)
    * [Secondary Options](#secondary-options)
    * [Outputs](#outputs)
-   * [Running with Cromwell or Terra](#running-with-cromwell-or-terra)
+   * [Running with Terra](#running-with-terra)
+   * [Running with Cromwell on Google Cloud Platform](#running-with-cromwell-on-google-cloud-platform)
    * [Filtering Output Calls](#filtering-output-calls)
    * [Scattered Tasks](#scattered-tasks)
    * [Troubleshooting](#troubleshooting)
@@ -44,6 +45,8 @@ Notice that if you want to use the **idat** mode, this requires to run either th
 You can run the pipeline all the way to the initial conversion to unphased VCF without phasing by setting the flag **do_not_phase** or all the way to phased VCF without running MoChA by setting the flag **do_not_mocha**. You can then input these VCFs back into the pipeline using, respectively, modes **vcf** or **pvcf**, although you will need to provide information about **computed_gender** and **call_rate** that are generated during the conversion to VCF
 
 The pipeline will perform a minimal amount of quality control. It is up to the user to correctly handle failed samples and duplicates. Furthermore, when including the conversion to VCF step, the pipeline will output three files, **sample_id_file**, **computed_gender_file**, and **call_rate_file**. We highly recommend to check for call rate failure rate and for discrepancies between reported gender and computed gender that might be indicative of sample swaps
+
+Currently no arrays other than the Affymetrix Genome-Wide Human SNP Array 6.0 are supported in **cel** mode. Newer Axiom arrays used in biobanks have less uniform ways to run the genotype clustering algorithms that are difficult to package into a pipeline. In these scenarios we recommend to perform the conversion from CEL files to table output separately and then use the pipeline in **txt** mode
 
 Input Files
 ===========
@@ -84,7 +87,7 @@ to generate a new table with additional suffixes in the sample IDs to make the I
 
 When using the pipeline in **idat**, **gtc**, **cel**, or **chp** mode, it is extremely important that IDAT, GTC, CEL, or CHP files within the same batch come from the same DNA microarray model. Discrepancies across the input files within the same batch will cause undefined behavior. It is okay to use files from different DNA microarrays across batches but we highly recommend that these being different versions of the same array (e.g\. Global Screening Array v1.0 vs\. the Global Screening Array v2.0)
 
-We further recommend batches of 4000-5000 samples as this is small enough to make most tasks able to run on preemptible computing and large enough to make MoChA able to perform effective within-batch adjustments for BAF and LRR. For DNA microarrays such as the Global Screening Array and the Multi-Ethnic Global Array, this batch sizes will generate VCFs smaller than, respectively, 60GB and 20GB
+We further recommend batches of 4,000-5,000 samples as this is small enough to make most tasks able to run on preemptible computing and large enough to make MoChA able to perform effective within-batch adjustments for BAF and LRR. For DNA microarrays such as the Global Screening Array and the Multi-Ethnic Global Array, this batch sizes will generate VCFs smaller than, respectively, 60GB and 20GB
 
 If using the **idat** mode, the green and red IDAT file names have to match and end, respectively, with suffixes **\_Grn.idat** and **\_Red.idat**. If the file names have been changed and these suffixes have been modified, unfortunately you will have to manually change the names to first satisfy this requirement or else the conversion to GTC will fail as the Illumina software requires this naming standard
 
@@ -115,6 +118,7 @@ Allowed columns in the batch table:
 | zip           |         |      |      | req. |      |      |      |      |
 | path          |         | opt. | opt. | opt. | opt. | opt. | opt. | opt. |
 | snp           | allowed |      |      |      | req. | req. |      |      |
+| probeset_ids  | allowed |      |      | opt. | opt. | opt. |      |      |
 | calls         | allowed |      |      |      |      | req. |      |      |
 | confidences   | allowed |      |      |      |      | opt. |      |      |
 | summary       | allowed |      |      |      |      | req. |      |      |
@@ -143,48 +147,42 @@ Primary Options
 
 The following are the primary options that you can set in the main input json file. Parameters that are indicated with ? are optional (unless required by the specific mode selected)
 
-| key                | type     | description                                                                                      |
-|--------------------|----------|--------------------------------------------------------------------------------------------------|
-| sample_set_id      | String   | cohort name that will be used as prefix for temporary and output files                           |
-| mode               | String   | pipeline mode, one of: **idat**, **gtc**, **cel**, **chp**, **txt**, **vcf**, or **pvcf**        |
-| realign            | Boolean? | whether manifest file should be realigned (not in **vcf** or **pvcf** mode) [false]              |
-| gtc_output         | Boolean? | whether to output the conversion from IDAT to GTC (only in **idat** mode) [false]                |
-| chp_output         | Boolean? | whether to output the conversion from CEL to CHP (only in **cel** mode) [false]                  |
-| do_not_phase       | Boolean? | whether to only run the conversion to VCF files (not in **vcf** or **pvcf** mode) [false]        |
-| do_not_mocha       | Boolean? | whether to only run the conversion to VCF and the phasing (not in **pvcf** mode) [false]         |
-| sequencing         | Boolean? | whether the data is from WGS cohorts (should only be used with modes **vcf** and **pvcf**)       |
-| idat_batch_size    | Int?     | largest batch size for conversion of IDAT files to GTC [48] (only in **idat** mode)              |
-| gtc_batch_size     | Int?     | largest batch size for conversion of GTC files to VCF [1024] (only in **idat** and **gtc** mode) |
-| chp_batch_size     | Int?     | largest batch size for conversion of CHP files to VCF [1024] (only in **cel** and **chp** mode)  |
-| phase_threads      | Int?     | number of threads for the SHAPEIT4/Eagle phasing software [4]                                    |
-| max_win_size_cm    | Float?   | maximum windows size in cM for phasing [300.0]                                                   |
-| overlap_size_cm    | Float?   | required overlap size in cM for consecutive windows [5.0]                                        |
-| ref_path           | String?  | path for reference genome resources, unless already provided with path                           |
-| manifest_path      | String?  | path for manifest file resources, unless already provided with path                              |
-| docker_json_file   | File     | JSON file with docker information                                                                |
-| ref_json_file      | File     | JSON file with genome reference information                                                      |
-| sample_tsv_file    | File     | TSV file with sample information                                                                 |
-| batch_tsv_file     | File     | TSV file with batch information                                                                  |
-| ped_file           | File?    | optional PED file for improved phasing with trios                                                |
-| extra_xcl_vcf_file | File?    | optional VCF file with list of additional variants to exclude from analysis, mostly for WGS data |
-| mocha_extra_args   | String   | extra arguments for MoChA                                                                        |
-
-The **docker_json_file** <a href="docker.json">file</a> should contain the list of dockers to use and it should look like this (for running with Cromwell or Terra):
-```json
-{
-  "ubuntu": "ubuntu:20.10",
-  "pandas": "fastgenomics/pandas:0.22-p36-v3",
-  "iaap_cli": "us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-20200813",
-  "autoconvert": "us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-20200813",
-  "apt": "us.gcr.io/mccarroll-mocha/apt:1.10.2-20200813",
-  "gtc2vcf": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
-  "bcftools": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
-  "shapeit4": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
-  "eagle": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
-  "mocha": "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200813",
-  "mocha_plot":"us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-20200813"
-}
-```
+| key                | type     | description                                                                                       |
+|--------------------|----------|---------------------------------------------------------------------------------------------------|
+| sample_set_id      | String   | cohort name that will be used as prefix for temporary and output files                            |
+| mode               | String   | pipeline mode, one of: **idat**, **gtc**, **cel**, **chp**, **txt**, **vcf**, or **pvcf**         |
+| realign            | Boolean? | whether manifest file should be realigned (not in **vcf** or **pvcf** mode) [false]               |
+| gtc_output         | Boolean? | whether to output the conversion from IDAT to GTC (only in **idat** mode) [false]                 |
+| chp_output         | Boolean? | whether to output the conversion from CEL to CHP (only in **cel** mode) [false]                   |
+| do_not_phase       | Boolean? | whether to only run the conversion to VCF files (not in **vcf** or **pvcf** mode) [false]         |
+| do_not_mocha       | Boolean? | whether to only run the conversion to VCF and the phasing (not in **pvcf** mode) [false]          |
+| do_not_plot        | Boolean? | whether to not run the plotting of highly confident mCA calls after running MoChA [false]         |
+| sequencing         | Boolean? | whether the data is from WGS cohorts (should only be used with modes **vcf** and **pvcf**)        |
+| idat_batch_size    | Int?     | largest batch size for conversion of IDAT files to GTC [48] (only in **idat** mode)               |
+| gtc_batch_size     | Int?     | largest batch size for conversion of GTC files to VCF [1024] (only in **idat** and **gtc** mode)  |
+| chp_batch_size     | Int?     | largest batch size for conversion of CHP files to VCF [1024] (only in **cel** and **chp** mode)   |
+| phase_threads      | Int?     | number of threads for the SHAPEIT4/Eagle phasing software [4]                                     |
+| max_win_size_cm    | Float?   | maximum windows size in cM for phasing [300.0]                                                    |
+| overlap_size_cm    | Float?   | required overlap size in cM for consecutive windows [5.0]                                         |
+| ref_path           | String?  | path for reference genome resources, unless already provided with path                            |
+| manifest_path      | String?  | path for manifest file resources, unless already provided with path                               |
+| ref_json_file      | File     | JSON file with genome reference information                                                       |
+| sample_tsv_file    | File     | TSV file with sample information                                                                  |
+| batch_tsv_file     | File     | TSV file with batch information                                                                   |
+| ped_file           | File?    | optional PED file for improved phasing with trios                                                 |
+| extra_xcl_vcf_file | File?    | optional VCF file with list of additional variants to exclude from analysis, mostly for WGS data  |
+| mocha_extra_args   | String   | extra arguments for MoChA                                                                         |
+| basic_bash_docker  | String   | docker to run basic bash scripts [ubuntu:latest]                                                  |
+| pandas_docker      | String   | docker to run task ref_scatter [amancevice/pandas:slim]                                           |
+| iaap_cli_docker    | String   | docker to run task idat2gtc [us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-yyyymmdd]                  |
+| autoconvert_docker | String   | docker to run task idat2gtc [us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-yyyymmdd]               |
+| apt_docker         | String   | docker to run task cel2chp [us.gcr.io/mccarroll-mocha/apt:1.10.2-yyyymmdd]                        |
+| gtc2vcf_docker     | String   | docker to run tasks csv2bam {gtc,chp,txt}2vcf [us.gcr.io/mccarroll-mocha/gtc2vcf:1.10.2-yyyymmdd] |
+| bcftools_docker    | String   | docker to run tasks requiring bcftools [us.gcr.io/mccarroll-mocha/bcftools:1.10.2-yyyymmdd]       |
+| shapeit4_docker    | String   | docker to run task vcf_phase [us.gcr.io/mccarroll-mocha/shapeit4:1.10.2-yyyymmdd]                 |
+| eagle_docker       | String   | docker to run task vcf_phase [us.gcr.io/mccarroll-mocha/eagle:1.10.2-yyyymmdd]                    |
+| mocha_docker       | String   | docker to run task vcf_mocha [us.gcr.io/mccarroll-mocha/mocha:1.10.2-yyyymmdd]                    |
+| mocha_plot_docker  | String   | docker to run tasks mocha_{plot,summary} [us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-yyyymmdd]   |
 
 The **ref_path** variable should contain the path to the genome reference resources. These are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a> for either the GRCh37 or GRCh38 human genome reference
 
@@ -194,7 +192,8 @@ The **ref_json_file** file should look either like this for the <a href="GRCh37.
   "name": "GRCh37",
   "fasta_ref": "human_g1k_v37.fasta",
   "n_chrs": 23,
-  "mhc_reg": "6:29669719-33093965",
+  "mhc_reg": "6:28542424-33448264",
+  "kir_reg": "19:54574747-55504099",
   "dup_file": "dup.grch37.bed.gz",
   "genetic_map_file": "genetic_map_hg19_withX.txt.gz",
   "cnp_file": "cnp.grch37.bed",
@@ -210,7 +209,8 @@ Or like this for the <a href="GRCh38.json">GRCh38</a> reference:
   "name": "GRCh38",
   "fasta_ref": "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna",
   "n_chrs": 23,
-  "mhc_reg": "chr6:29701942-33126188",
+  "mhc_reg": "chr6:28574647-33480487",
+  "kir_reg": "chr19:54071493-54992731",
   "dup_file": "dup.grch38.bed.gz",
   "genetic_map_file": "genetic_map_hg38_withX.txt.gz",
   "cnp_file": "cnp.grch38.bed",
@@ -260,12 +260,14 @@ After a pipeline run, assuming the options **do_not_phase** and **do_not_mocha**
 | sample_id_file       | File         | yes  | yes  | yes  | yes  | yes  | yes  | yes  | sample ID list                                      |
 | computed_gender_file | File         | yes  | yes  | yes  | yes  | yes  | yes  | yes  | sample computed gender list                         |
 | call_rate_file       | File?        | yes  | yes  | yes  | yes  | yes  | yes  |      | sample call rate list                               |
-| mocha_stats_tsv      | File?        | yes  | yes  | yes  | yes  | yes  | yes  | yes  | summary table for samples processed with MoChA      |
-| mocha_calls_tsv      | File?        | yes  | yes  | yes  | yes  | yes  | yes  | yes  | table of mosaic chromosomal alterations calls       |
-| mocha_summary_pdf    | File?        | yes  | yes  | yes  | yes  | yes  | yes  | yes  | summary of MoChA run across all batches             |
+| mocha_stats_file     | File?        | yes  | yes  | yes  | yes  | yes  | yes  | yes  | summary table for samples processed with MoChA      |
+| mocha_calls_file     | File?        | yes  | yes  | yes  | yes  | yes  | yes  | yes  | table of mosaic chromosomal alterations calls       |
 | mocha_ucsc_bed       | File?        | yes  | yes  | yes  | yes  | yes  | yes  | yes  | bed file with mosaic chromosomal alterations calls  |
-| bam_files            | Array[File]? | opt. | opt. | opt. | opt. | opt. |      |      | realignment file for CSV manifest file              |
-| mendel_tsv           | Array[File]? | opt. | opt. | opt. | opt. | opt. | opt. |      | Mendelian summary tables if ped_file was provided   |
+| mocha_summary_pdf    | File?        | yes  | yes  | yes  | yes  | yes  | yes  | yes  | summary of MoChA run across all batches             |
+| mocha_pileup_pdf     | File?        | yes  | yes  | yes  | yes  | yes  | yes  | yes  | pileup of calls passing quality control filters     |
+| png_files            | Array[File]? | yes  | yes  | yes  | yes  | yes  | yes  | yes  | single call plots for all calls passing filters     |
+| bam_files            | Array[File]? | opt. | opt. | opt. | opt. | opt. |      |      | realignment files for CSV manifest files            |
+| mendel_files         | Array[File]? | opt. | opt. | opt. | opt. | opt. | opt. |      | Mendelian summary tables if ped_file was provided   |
 | gtc_files            | Array[File]? | yes  |      |      |      |      |      |      | Illumina GTC files (if **gtc_output** is true)      |
 | chp_files            | Array[File]? |      |      | yes  |      |      |      |      | Affymetrix CHP files (if **chp_output** is true)    |
 | snp_files            | Array[File]? |      |      | yes  |      |      |      |      | Affymetrix SNP posteriors files (if **chp_output**) |
@@ -274,8 +276,8 @@ After a pipeline run, assuming the options **do_not_phase** and **do_not_mocha**
 | xcl_vcf_file         | File?        | yes  | yes  | yes  | yes  | yes  | yes  |      | VCF of variants excluded from analysis              |
 | xcl_vcf_idx          | File?        | yes  | yes  | yes  | yes  | yes  | yes  |      | index for VCF of variants excluded from analysis    |
 
-Running with Cromwell or Terra
-==============================
+Running with Terra
+==================
 
 While the pipeline can be run with a Cromwell server alone, even on your laptop, it has been fully tested to work in the <a href="https://terra.bio/">Terra</a> environment developed at the <a href="https://www.broadinstitute.org/data-sciences-platform">Broad Institute</a>. To setup you workspace to work with the MoChA WDL on Terra you will have to:
 
@@ -283,7 +285,8 @@ While the pipeline can be run with a Cromwell server alone, even on your laptop,
 * Create a new Terra workspace
 * Find the <a href="https://portal.firecloud.org/?return=terra#methods/mocha/mocha/">MoChA method</a> in the Broad Methods Repository and have it exported to your workspace (you can choose **sample_set** as Root Entity Type)
 * Setup resources for GRCh37 or GRCh38 (available for download <a href="http://software.broadinstitute.org/software/mocha/">here</a>) by unpacking them in a directory in your own Google bucket, such as **gs://your-google-bucket/GRCh38/** and making sure that the **ref_path** variable points to that path including the trailing **/**
-* Have the basic configuration files, <a href="docker.json">docker.json</a>, <a href="GRCh37.json">GRCh37</a>, and <a href="GRCh38.json">GRCh38</a> available in your Google bucket making sure that variables **docker_json_file** and **ref_json_file** point to the Google bucket locations where you have located them
+* Make sure the bucket with the reference genome resources can be accessed by your Terra service account. Your Terra service account will be labeled like **pet-012345678909876543210@TERRA-PROJECT.iam.gserviceaccount.com** and you will have to add it to the list of members with permission to access the bucket with the role "Storage Object Viewer". You can use a command like the following: **gsutil iam ch serviceAccount:pet-012345678909876543210@TERRA-PROJECT.iam.gserviceaccount.com:objectViewer gs://your-bucket**
+* Have the basic configuration files <a href="GRCh37.json">GRCh37</a> and <a href="GRCh38.json">GRCh38</a> available in your Google bucket making sure that the variable **ref_json_file** points to the Google bucket locations where you have located the configuration file to be used
 * Upload your CSV/BPM/EGT/XML/ZIP manifest files in the same location in your Google bucket, such as **gs://your-google-bucket/manifests/** and making sure that the **manifest_path** variable points to that path including the trailing **/**. Alternatively you can leave the **manifest_path** variable empty and include the full paths in the **batch_tsv_file** table
 * Upload your IDAT/GTC/CEL/CHP/TXT/VCF files to your Google bucket, if you have uploaded CHP/TXT files, make sure you upload also the corresponding SNP **AxiomGT1.snp-posteriors.txt** and report **AxiomGT1.report.txt** files
 * Format two TSV tables describing samples and batches as explained in the inputs section, upload them to your Google bucket, and make sure variables **sample_tsv_file** and **batch_tsv_file** are set to their location. If you include the file names without their absolute paths, you can include the path including the trailing **/** in the **path** column but you have to make sure all data files from the same batch are in the same directory. See below for examples for Illumina and Affymetrix arrays
@@ -293,7 +296,128 @@ While the pipeline can be run with a Cromwell server alone, even on your laptop,
 * Click the on \"upload json\" and select the JSON files with the variable defining your run. Then click on \"SAVE\" and then click on \"RUN ANALYSIS\"
 * A job will have spawned that you will be able to monitor through the Job Manager to check the pipeline progress. While monitoring the progress, you will be able to open some summary outputs that are generated before the pipeline fully completes
 
-If you would rather run the pipeline without Terra, you can set up your own Cromwell server instead. Notice that Cromwell will need to load some input files to properly organize the batching and to do so it will need the <a href="https://cromwell.readthedocs.io/en/stable/filesystems/Filesystems/#engine-filesystems">engine filesystem</a> activated for reading files. Due to the many steps involved, there are many temporary files that will be generated that can be safely removed. If you are running Cromwell with a Google backend, we recommend to use the `"delete_intermediate_output_files": true` as a <a href="https://cromwell.readthedocs.io/en/stable/wf_options/Google/">workflow option</a>
+Running with Cromwell on Google Cloud Platform
+==============================================
+
+If you want to run the pipeline without Terra, you can set up your own Cromwell server instead. This is notoriously difficult. These are the steps that I personally advice to take:
+
+* Create a project `MY-GOOGLE-PROJECT` from the Google Cloud Platform
+* Enable Google Genomics API from <a href="https://console.cloud.google.com/flows/enableapi?apiid=genomics.googleapis.com,compute.googleapis.com,storage-api.googleapis.com">here</a>
+* Find default service account for `MY-GOOGLE-PROJECT` from the <a href="https://console.cloud.google.com/iam-admin/iam">IAM</a> page which should be labeled as `MY-NUMBER-compute@developer.gserviceaccount.com`
+* Download a private key for your service account either from the <a href="https://console.cloud.google.com/iam-admin/serviceaccounts">Service accounts</a> page. You should get a `MY-GOOGLE-PROJECT-############.json` file
+* add the following roles to the service account `Cloud Life Sciences Workflows Runner`, `Service Account User`, `Firebase Develop Admin`, using the following commands (or manually from the <a href="https://console.cloud.google.com/iam-admin/iam">IAM</a> page):
+```
+for roles in lifesciences.workflowsRunner iam.serviceAccountUser firebase.developAdmin; do
+  gcloud projects add-iam-policy-binding MY-GOOGLE-PROJECT --member serviceAccount:MY-NUMBER-compute@developer.gserviceaccount.com --role roles/$roles
+done
+```
+* Start a Google VM from the <a href="https://console.cloud.google.com/compute/instances">VM instances</a> page. The n1-standard-1 (1 vCPU, 3.75 GB memory) basic VM with Ubuntu 20.04 will be sufficient
+* Obtain the `EXTERNAL-IP` for the Google VM once it is up and running and then login to the VM with the following command:
+```
+ssh -L 8000:localhost:8000 EXTERNAL-IP
+```
+* Once in the virtual machine, install some basic packages as well as the Cromwell server (replace `XY` with the current version):
+```
+sudo apt install openjdk-14-jre-headless mysql-server
+wget https://github.com/broadinstitute/cromwell/releases/download/XY/cromwell-XY.jar
+```
+* Download the <a href="https://github.com/broadinstitute/cromwell/blob/develop/cromwell.example.backends/PAPIv2.conf">PAPIv2.conf</a> configuration file with the following command:
+```
+wget https://raw.githubusercontent.com/broadinstitute/cromwell/develop/cromwell.example.backends/PAPIv2.conf
+```
+* Add the Google authentication stanza to the `PAPIv2.conf` configuration file:
+```
+google {
+  application-name = "cromwell"
+  auths = [
+    {
+      name = "service-account"
+      scheme = "service_account"
+      json-file = "MY-GOOGLE-PROJECT-############.json"
+    }
+  ]
+}
+```
+* Change `auth = "application-default"` to `auth = "service-account"` in the `PAPIv2.conf` configuration file
+* Change `project = "my-cromwell-workflows"` and `project = "google-billing-project"` to `project = "MY-GOOGLE-PROJECT"` in the `PAPIv2.conf` configuration file
+* Change `root = "gs://my-cromwell-workflows-bucket"` to `root = "gs://MY-GOOGLE-BUCKET/cromwell/cromwell-executions"` in the `PAPIv2.conf` configuration file
+* As Cromwell will need to load some input files to properly organize the batching, it will need the <a href="https://cromwell.readthedocs.io/en/stable/filesystems/Filesystems/#engine-filesystems">engine filesystem</a> activated for reading files, Add the Google engine stanza to the `PAPIv2.conf` configuration file:
+```
+engine {
+  filesystems {
+    gcs {
+      auth = "service-account"
+      project = "MY-GOOGLE-PROJECT"
+    }
+  }
+}
+```
+* Add the database stanza to the `PAPIv2.conf` configuration file (as explained <a href="https://cromwell.readthedocs.io/en/stable/Configuring/#database">here</a> and <a href="https://cromwell.readthedocs.io/en/develop/tutorials/PersistentServer/">here</a>):
+```
+database {
+  profile = "slick.jdbc.MySQLProfile$"
+  db {
+    driver = "com.mysql.cj.jdbc.Driver"
+    url = "jdbc:mysql://localhost/cromwell?rewriteBatchedStatements=true"
+    user = "user"
+    password = "pass"
+    connectionTimeout = 5000
+  }
+}
+```
+* Optionally, to avoid the database taking more and more space over time and possibly running out of disk space on the VM, add the additional stanza to the `PAPIv2.conf` configuration file to clear the metadata in the database as explained <a href="https://cromwell.readthedocs.io/en/stable/Configuring/#hybrid-metadata-storage-classic-carbonite">here</a>
+* Start the mySQL database and initialize the root user with the following command (use cromwell as the default root password):
+```
+sudo systemctl start mysql
+sudo mysql_secure_installation
+```
+* Login into the mySQL database with the following command:
+```
+sudo mysql -u root -pcromwell
+```
+* Run the following commands to create a database to be used by Cromwell:
+```
+CREATE DATABASE cromwell;
+SET GLOBAL validate_password.policy=LOW;
+SET GLOBAL validate_password.length=4;
+CREATE USER 'user'@'localhost' IDENTIFIED BY 'pass';
+GRANT ALL PRIVILEGES ON * . * TO 'user'@'localhost';
+```
+* Create an `options.json` file for Cromwell that should look like this (additional options can be used from <a href="https://cromwell.readthedocs.io/en/stable/wf_options/Google/">here</a>):
+```
+{
+  "delete_intermediate_output_files": true,
+  "final_workflow_outputs_dir": "gs://MY-GOOGLE-BUCKET/cromwell/outputs",
+  "use_relative_output_paths": true,
+  "final_workflow_log_dir": "gs://MY-GOOGLE-BUCKET/cromwell/wf_logs",
+  "final_call_logs_dir": "gs://MY-GOOGLE-BUCKET/cromwell/call_logs"
+}
+```
+* Start the Cromwell server on the Google VM with the following command:
+```
+(java -Xmx3500m -Dconfig.file=PAPIv2.conf -jar cromwell-XY.jar server &)
+```
+* To submit a job, use the command:
+```
+java -Dconfig.file=PAPIv2.conf -jar cromwell-XY.jar submit mocha.wdl -i xxx.json -o options.json
+```
+* To monitor a submitted job with workflow ID `00112233-4455-6677-8899-aabbccddeeff` just open your browser and go to URL:
+```
+http://localhost:8000/api/workflows/v1/00112233-4455-6677-8899-aabbccddeeff/timing
+```
+* To check the size of the mySQL database, run:
+```
+sudo ls -l /var/lib/mysql/cromwell
+```
+* If you want to flush the metadata database to recover disk space from the VM, login into the database and run (though notice that you will have first to stop the Cromwell server and then restart it):
+```
+DROP DATABASE cromwell;
+CREATE DATABASE cromwell;
+```
+To abort a running job, you can simply run:
+```
+curl -X POST http://localhost:8000/api/workflows/v1/{id}/abort
+```
 
 Filtering Output Calls
 ======================
@@ -351,7 +475,7 @@ These are some of the messages that you might receive when something goes wrong:
 
 * If you run the pipeline on Terra with the `Delete intermediate options` flag selected and your workflow keeps showing as Running even after the final outputs have been generated, it is possible that the Cromwell server behind Terra might have failed while deleting the intermediate outputs. This is an <a href="https://support.terra.bio/hc/en-us/community/posts/360071861791-Job-seems-stuck-indefinitely-at-the-delete-intermediate-files-step-and-does-not-complete">issue</a> that is being patched
 * `Failed to evaluate input 'disk_size' (reason 1 of 1): ValueEvaluator[IdentifierLookup]: No suitable input for ...`: this indicates that Cromwell was unable to find the size of one of the input files for a task, most likely because the file does not exist where indicated by the user
-* `The job was stopped before the command finished. PAPI error code 2. Execution failed: generic::unknown: pulling image: docker pull: running ["docker" "pull" "###"]: exit status 1 (standard error: "Error response from daemon: Get https://###: unknown: Project 'project:###' not found or deleted.\n")`: this means that one of the docker images provided in the **docker_json_file** does not exist
+* `The job was stopped before the command finished. PAPI error code 2. Execution failed: generic::unknown: pulling image: docker pull: running ["docker" "pull" "###"]: exit status 1 (standard error: "Error response from daemon: Get https://###: unknown: Project 'project:###' not found or deleted.\n")`: this means that one of the docker images provided does not exist
 * `Job exit code 255. Check gs://###/stderr for more information. PAPI error code 9. Please check the log file for more details:`: if this is an error provided by the task cel2chp, it means that the `apt-probeset-genotype` command has encountered an error. Reading the `stderr` file should easily provide an explanation
 * `The job was stopped before the command finished. PAPI error code 10. The assigned worker has failed to complete the operation`: this could mean that the job was preempted despite the fact that it was not running in preemptible computing (see <a href="https://support.terra.bio/hc/en-us/community/posts/360046714292-Are-you-experiencing-PAPI-error-code-10-Read-this-for-a-workaround-">here</a>)
 * `The compute backend terminated the job. If this termination is unexpected, examine likely causes such as preemption, running out of disk or memory on the compute instance, or exceeding the backend's maximum job duration`: this could be an indication that a task was killed as it requested too much memory
@@ -360,6 +484,9 @@ These are some of the messages that you might receive when something goes wrong:
 * idat2gtc task fails with internall `stderr` message `System.Exception: Unrecoverable Error...Exiting! Unable to find manifest entry ######## in the cluster file!`: this means that you are using the incorrect Illumina EGT cluster file
 * If when monitor the status of the job you get the error: `Job Manager is running but encountered a problem getting data from its workflow server. Click here to start over. 500: Internal Server Error` then it means that there is too much metadata input and output into the tasks for the Job Manager to handle te request. This metadata limit is a known issue currently being worked on
 * When you mismatch a BPM manifest file with an IDAT in task idat2gtc, iaap-cli, while outputting an error message such as `Normalization failed for sample: ########! This is likely a BPM and IDAT mismatch. ERROR: Index was outside the bounds of the array.` will not return an error code, causing the pipeline to fail at the next task
+* If you are running with your own Cromwell server using the PAPIv2 API and you get error `Error attempting to Execute cromwell.backend.google.pipelines.common.api.PipelinesApiRequestManager$UserPAPIApiException: Unable to complete PAPI request due to a problem with the request (The caller does not have permission).` whenever Cromwell tries to submit a task, the the cause is the service account that you are using to run the computations with Google Cloud does not have the <a href="https://cloud.google.com/life-sciences/docs/concepts/access-control#roles">Cloud Life Sciences</a> Workflows Runner (`lifesciences.workflowsRunner`) role set
+* If you are running with your own Cromwell server using the PAPIv2 API and some of your tasks start running but they then fail with and you have the error `Error attempting to Execute cromwell.backend.google.pipelines.common.api.PipelinesApiRequestManager$UserPAPIApiException: Unable to complete PAPI request due to a problem with the request (Error: checking service account permission: caller does not have access to act as the specified service account: "MY_NUMBER-compute@developer.gserviceaccount.com").` in the workflow log, then the cause is the service account not having the <a href="https://cloud.google.com/iam/docs/service-accounts#user-role">Service Account</a> User (`roles/iam.serviceAccountUser`) role set
+* If you are running with your own Cromwell server using the PAPIv2 API and all of your tasks start running but they all fail with a log file including just the line `yyyy/mm/dd hh:mm:ss Starting container setup.` the cause is the service account not having the <a href="https://firebase.google.com/docs/projects/iam/roles-predefined-category#analytics_roles">Firebase Develop</a> Admin (`firebase.developAdmin`) role set
 
 If you receive an error that you do not understand, feel free contact the <a href="mailto:giulio.genovese@gmail.com">author</a> for troubleshooting
 
@@ -387,9 +514,9 @@ For users and developers that want to understand the logic and ideas behind the 
 * The WDL is written according to the version development specification as it requires grouping by batch and sub batch through the <a href="https://github.com/openwdl/wdl/blob/main/versions/development/SPEC.md#mapxarrayy-collect_by_keyarraypairxy">collect_bt_key()</a> function together with the <a href="https://github.com/openwdl/wdl/blob/main/versions/development/SPEC.md#mapxy-as_maparraypairxy">as_map()</a> and <a href="https://github.com/openwdl/wdl/blob/main/versions/development/SPEC.md#arrayx-keysmapxy">keys()</a> functions
 * To achieve parallelization both across batches and across genome windows, the <a href="https://github.com/openwdl/wdl/blob/main/versions/development/SPEC.md#arrayarrayx-transposearrayarrayx">transpose()</a> is used to move from one model to the other
 * To minimize memory load on Cromwell, computed gender and call rate maps are passed to tasks **vcf_qc** and **vcf_mocha** as files rather than WDL maps, and similarly sample IDs are passed to tasks **vcf_merge** as a file rather than WDL arrays. However, since Cromwell on Terra is unable to serialize files, these objects are serialized with dedicated tasks whose input and output can be monitored during the running of the pipeline
-* As Cromwell v52 does not accept optional output in tasks dispatched to Google Cloud, we have to **touch** optional output files in tasks **cel2affy** and **vcf_split**
-* As Cromwell v52 does not delocalize on Google Cloud list of output files whose names are determined during runtime, we use the trick of delocalizing a **Directory** for tasks **idat2gtc**, **cel2affy**, **vcf_scatter**, and **vcf_split**
-* Terra does not allow scatters with width larger than 35,000 (although Cromwell by default allows width up to 1,000,000), so to allow cohorts with more than 35,000 samples to be able to run on Terra we avoid scattering over each sample in the cohort
+* As the current version of Cromwell does not accept optional output in tasks dispatched to Google Cloud, we have to **touch** optional output files in tasks **cel2affy** and **vcf_split**
+* As the current version of Cromwell does not delocalize on Google Cloud list of output files whose names are determined during runtime, we use the trick of delocalizing a **Directory** for tasks **idat2gtc**, **cel2affy**, **vcf_scatter**, and **vcf_split**
+* Terra does not allow <a href="https://support.terra.bio/hc/en-us/articles/360037128572-Scatter-Gather-Parallelism">scatters</a> with width larger than 35,000 (although Cromwell by default allows width up to 1,000,000), so to allow cohorts with more than 35,000 samples to be able to run on Terra we avoid scattering over each sample in the cohort
 * As estimating the sizes of a large array of files is extremely time consuming in Google Cloud, causing tasks to spend a long time in PreparingJob state before starting to localize the files, for array of IDAT, GTC, CEL, and CHP files we estimate the size of the first file in an array and assume all the other files have similar sizes
 * As the Terra job manager crashes if too much metadata is transferred between the workflow and the tasks, we try to transfer metadata to tasks through files wherever possible
 * To avoid SIGPIPE error 141 when piping a stream to the UNIX command `head`, we use the `|| if [[ $? -eq 141 ]]; then true; else exit $?; fi` trick
@@ -404,7 +531,7 @@ For users and developers that want to understand the logic and ideas behind the 
 * Genotyping using the Affymetrix Power Tools is best run on many samples at once. Affymetrix recommends, in their <a href="https://assets.thermofisher.com/TFS-Assets/LSG/manuals/axiom_genotyping_solution_analysis_guide.pdf">data analysis guide</a>, to batch as large a batch size as computationally feasible, or up to 4800 samples. However, this can take up to 16 hours to execute, it is not parallelizable, and the genotyping software from Affymetrix is not multi-threaded. For this reason task **cel2chp** is set to run on non-preemptible computing by default
 * Conversion to VCF for Affymetrix data can be done either from AGCC CHP files or from  matrices of tab delimited genotype calls and confidences. We recommend the former as it can be more easily parallelizable by splitting the conversion into sub batches. When converting the latter, the whole batch will need to be converted into VCF in one single task. For this reason task **txt2vcf** is set to run on non-preemptible computing by default
 * All tasks that output a VCF can, if requested, output either in compressed or uncompressed format. For VCFs with BAF and LRR intensities, we observed a modest ~25% space saving, most likely due to the high entropy in the intensity measurements. For VCF files with exclusively the GT format field, we observed around ~75% space saving
-* Due to high sequence divergence between HLA class I and II genes in the MHC (<a href="http://doi.org/10.1101/gr.213538.116">Norman et al. 2017</a>), heterozygous variants from HLA-F to HLA-DPB1 show unusual degrees of allelic imbalance. To avoid false positive mosaic chromosomal alteration in the MHC region, we mask, both for phasing and for mosaic chromosomal alterations detection, the ~3.5Mbp segment starting at the midpoint between genes <i>ZFP57</i> and <i>HLA-F</i> and ending at the midpoint between genes <i>HLA-DPB1</i> and <i>COL11A2</i>
+* Due to high sequence divergence between HLA class I and class II genes in the MHC (<a href="http://doi.org/10.1101/gr.213538.116">Norman et al. 2017</a>), heterozygous variants in the MHC region show unusual degrees of allelic imbalance. To avoid false positive mosaic chromosomal alterations we mask the ~5Mbp segment between rs450630 and rs9366822 on chromosome 6. We further mask a ~1Mbp KIR region between rs4806703 and rs34679212 on chromosome 19
 * Due to residual correlation between the BAF and LRR, observed both for Illumina arrays (<a href="http://doi.org/10.1101/gr.5686107">Oosting et al\. 2007</a> and <a href="http://doi.org/10.1101/gr.5686107">Staaf et al\. 2008</a>) and Affymetrix arrays (<a href="http://doi.org/10.1038/srep36158">Mayrhofer et al\. 2016</a>), MoChA performs a BAF correction by regressing BAF values against the LRR. This improves detection of mosaic chromosomal alterations at low cell fractions. However, for this correction to be effective, batches need to include 100s of samples
 * While Illumina internally computes BAF and LRR and stores these values in the GTC files, we instead recompute these values from normalized intensities and genotype cluster centers following the method first described by Illumina in <a href="http://doi.org/10.1101/gr.5402306">Peiffer et al\. 2006</a> but we do non truncate the BAF values between 0 and 1 like Illumina does. This allows to better estimate the residual correlation between the BAF and the LRR for homozygous calls
 * When phasing a dataset with a reference panel only the variants present both in the reference panel and the dataset will be phased. As the 1000 Genomes project reference panel for <a href="https://www.internationalgenome.org/announcements/updated-GRCh38-liftover/">GRCh38</a> is missing the chromosome X PAR1/PAR2 regions and these are exactly the regions that need to be phased to detect mosaic loss of chromosome Y, the most common chromosomal alteration in clonal hematopoiesis, we recommend using SHAPEIT4 without a reference panel to detect mosaic loss of chromosome Y at low cell fractions. This is the default behavior for cohorts whose sample size is more than twice the size of the 1000 Genomes reference panel (2,504 samples)
@@ -443,7 +570,6 @@ Define options to run the WDL:
   "mocha.realign": true,
   "mocha.max_win_size_cm": 300.0,
   "mocha.overlap_size_cm": 5.0,
-  "mocha.docker_json_file": "gs://your-google-bucket/docker.json",
   "mocha.ref_path": "gs://your-google-bucket/GRCh38/",
   "mocha.ref_json_file": "gs://your-google-bucket/GRCh38.json",
   "mocha.manifest_path": "gs://your-google-bucket/manifests/",
@@ -572,7 +698,6 @@ Define options to run the WDL:
   "mocha.realign": true,
   "mocha.max_win_size_cm": 100.0,
   "mocha.overlap_size_cm": 5.0,
-  "mocha.docker_json_file": "gs://your-google-bucket/docker.json",
   "mocha.ref_path": "gs://your-google-bucket/GRCh38/",
   "mocha.ref_json_file": "gs://your-google-bucket/GRCh38.json",
   "mocha.manifest_path": "gs://your-google-bucket/manifests/",
@@ -621,8 +746,8 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev \
                  libmono-system-windows-forms4.0-cil && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200813.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200813.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200825.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200825.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -649,7 +774,7 @@ RUN apt-get -qqy update --fix-missing && \
                  libc6-dev && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200813.deb \
+    rm -rf gtc2vcf_1.10.2-20200825.deb \
            autoconvert-software-v2-0-1-installer.zip \
            AutoConvertInstaller.msi \
            genomestudio-software-v2-0-4-5-installer.zip \
@@ -670,8 +795,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  bcftools \
                  icu-devtools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200813.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200813.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200825.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200825.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -686,7 +811,7 @@ RUN apt-get -qqy update --fix-missing && \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200813.deb \
+    rm -rf gtc2vcf_1.10.2-20200825.deb \
            iaap-cli-linux-x64-1.1.0.tar.gz \
            /var/lib/apt/lists/*
 ```
@@ -700,8 +825,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  bcftools \
                  unzip && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200813.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200813.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200825.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200825.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -714,7 +839,7 @@ RUN apt-get -qqy update --fix-missing && \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200813.deb \
+    rm -rf gtc2vcf_1.10.2-20200825.deb \
            apt_2.11.3_linux_64_bit_x86_binaries.zip \
            /var/lib/apt/lists/*
 ```
@@ -731,10 +856,10 @@ RUN apt-get -qqy update --fix-missing && \
                  bcftools \
                  bio-eagle \
                  shapeit4 && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200813.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200813.deb && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200813.deb && \
-    dpkg -i bio-mocha_1.10.2-20200813.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200825.deb && \
+    dpkg -i gtc2vcf_1.10.2-20200825.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200825.deb && \
+    dpkg -i bio-mocha_1.10.2-20200825.deb && \
     mkdir /usr/local/libexec && \
     ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
     wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
@@ -750,8 +875,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200813.deb \
-           bio-mocha_1.10.2-20200813.deb \
+    rm -rf gtc2vcf_1.10.2-20200825.deb \
+           bio-mocha_1.10.2-20200825.deb \
            /var/lib/apt/lists/*
 ```
 
@@ -766,13 +891,13 @@ RUN apt-get -qqy update --fix-missing && \
                  r-cran-optparse \
                  r-cran-ggplot2 \
                  r-cran-data.table && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200813.deb && \
-    dpkg -i bio-mocha_1.10.2-20200813.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200825.deb && \
+    dpkg -i bio-mocha_1.10.2-20200825.deb && \
     apt-get -qqy purge \
                  wget && \
     apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf bio-mocha_1.10.2-20200813.deb \
+    rm -rf bio-mocha_1.10.2-20200825.deb \
            /var/lib/apt/lists/*
 ```
 
