@@ -384,8 +384,7 @@ sudo mysql -u root -pcromwell
 * Run the following commands to create a database to be used by Cromwell:
 ```
 CREATE DATABASE cromwell;
-4
-         SET GLOBAL validate_password.policy=LOW;
+SET GLOBAL validate_password.policy=LOW;
 SET GLOBAL validate_password.length=4;
 CREATE USER 'user'@'localhost' IDENTIFIED BY 'pass';
 GRANT ALL PRIVILEGES ON * . * TO 'user'@'localhost';
@@ -506,19 +505,20 @@ Implementation Notes
 
 The following softwares are used by the various steps of the pipeline:
 
-| software                                                     | description                                    | license     |
-|--------------------------------------------------------------|------------------------------------------------|-------------|
+| software                                                          | description                                    | license     |
+|-------------------------------------------------------------------|------------------------------------------------|-------------|
 | <a href="https://support.illumina.com/array/array_software/illumina-array-analysis-platform/downloads.html">Illumina Array Analysis Platform</a> | runs the GenCall algorithm to call genotypes   | proprietary |
 | <a href="https://support.illumina.com/array/array_software/beeline/downloads.html">Illumina AutoConvert</a> | runs the GenCall algorithm to call genotypes   | proprietary |
 | <a href="https://www.thermofisher.com/us/en/home/life-science/microarray-analysis/microarray-analysis-partners-programs/affymetrix-developers-network/affymetrix-power-tools.html">Affymetrix Power Tools</a> | runs the Axiom algorithm to call genotypes     | GPLv2       |
-| <a href="https://github.com/lh3/bwa">BWA</a>                 | maps DNA sequences against a reference genome  | GPLv3 / MIT |
-| <a href="https://github.com/samtools/htslib">HTSlib</a>      | a C library for accessing SAMs, CRAMs and VCFs | MIT / BSD   |
-| <a href="https://github.com/samtools/samtools">Samtools</a>  | manipulates SAMs and BAMs                      | MIT         |
-| <a href="https://github.com/samtools/bcftools">BCFtools</a>  | manipulates VCFs and BCFs                      | MIT         |
-| <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a>    | converts DNA microarray data to VCF            | MIT         |
-| <a href="https://github.com/odelaneau/shapeit4">SHAPEIT4</a> | estimates haplotype phase from genotypes       | MIT         |
-| <a href="https://github.com/poruloh/Eagle">Eagle</a>         | estimates haplotype phase from genotypes       | GPLv3       |
-| <a href="https://github.com/freeseek/mocha">MoChA</a>        | calls mosaic chromosomal alterations           | MIT         |
+| <a href="https://github.com/lh3/bwa">BWA</a>                      | maps DNA sequences against a reference genome  | GPLv3 / MIT |
+| <a href="https://github.com/samtools/htslib">HTSlib</a>           | a C library for accessing SAMs, CRAMs and VCFs | MIT / BSD   |
+| <a href="https://github.com/samtools/samtools">Samtools</a>       | manipulates SAMs and BAMs                      | MIT         |
+| <a href="https://github.com/samtools/bcftools">BCFtools</a>       | manipulates VCFs and BCFs                      | MIT         |
+| <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a>         | converts DNA microarray data to VCF            | MIT         |
+| <a href="https://github.com/odelaneau/shapeit4">SHAPEIT4</a>      | estimates haplotype phase from genotypes       | MIT         |
+| <a href="https://github.com/poruloh/Eagle">Eagle</a>              | estimates haplotype phase from genotypes       | GPLv3       |
+| <a href="https://github.com/freeseek/mocha">MoChA</a>             | calls mosaic chromosomal alterations           | MIT         |
+| <a href="https://github.com/broadinstitute/cromwell">Cromwell</a> | workflow management system                     | BSD         |
 
 For users and developers that want to understand the logic and ideas behind the pipeline, here is a list of important aspects:
 
