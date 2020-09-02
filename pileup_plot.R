@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-pileup_plot_version <- '2020-08-25'
+pileup_plot_version <- '2020-09-01'
 
 library(optparse)
 library(ggplot2)
@@ -84,7 +84,8 @@ for (chr in c(1:22, 'X')) {
     idx <- !(df_calls$sample_id %in% xcl_smpls) & df_calls$chrom == chr & df_calls$type %in% c('Undetermined', 'CN-LOH', 'Loss', 'Gain')
   }
   if ( sum(idx) == 0 ) next
-  df_calls$index[idx] <- rank(df_calls[idx, beg_pos] + 1e9 * (3 * (df_calls$type[idx]=='Loss') + 2 * (df_calls$type[idx]=='CN-LOH') + (df_calls$type[idx]=='Gain')) , ties.method = 'first') - .5
+  df_calls$index[idx] <- rank(df_calls[idx, beg_pos] - df_calls[idx, 'length']/chrlen[chr] + 1e9 * (3 * (df_calls$type[idx]=='Loss') + 2 * (df_calls$type[idx]=='CN-LOH') + (df_calls$type[idx]=='Gain')) , ties.method = 'first') - .5
+
   p <- ggplot(data=df_calls[idx,], aes_string(x=paste0(beg_pos, '/1e6'), y='index', color='type')) +
     geom_segment(aes_string(x=paste0(beg_pos, '/1e6'), xend=paste0(end_pos, '/1e6'), y='index', yend='index')) +
     theme_bw() +
@@ -96,11 +97,40 @@ for (chr in c(1:22, 'X')) {
                                         'Loss' = paste0('Loss (n=', sum(df_calls$type[idx] == 'Loss'), ')'),
                                         'Gain' = paste0('Gain (n=', sum(df_calls$type[idx] == 'Gain'), ')'))) +
     theme(legend.position='bottom', legend.box = 'horizontal')
+
   p <- p  +
     geom_rect(data = df_cyto[df_cyto$chrom == chr & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = sum(idx), ymax = sum(idx) * 21 / 20, color = 'black', size = 1/4, show.legend = FALSE) +
     geom_polygon(data = df_cen[df_cen$chrom == chr,], aes(x = x/1e6, y = sum(idx) - sum(idx)/20 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8) +
-    scale_fill_manual(values = c('gneg' = 'white', 'gpos25' = 'lightgray', 'gpos50' = 'gray50', 'gpos75' = 'darkgray', 'gpos100' = 'black', 'gvar' = 'lightblue', 'stalk' = 'slategrey')) +
-    coord_cartesian(xlim = c(0, chrlen[chr] / 1e6), ylim = c(0, sum(idx) * 21 / 20), expand = FALSE)
+    scale_fill_manual(values = c('gneg' = 'white', 'gpos25' = 'lightgray', 'gpos50' = 'gray50', 'gpos75' = 'darkgray', 'gpos100' = 'black', 'gvar' = 'lightblue', 'stalk' = 'slategrey'))
+
+  if (sum(idx & df_calls$type=='Loss') > 0) {
+    begs <- as.data.frame(table(df_calls[idx & df_calls$type=='Loss', beg_pos]))
+    begs$Var1 <- as.numeric(as.character(begs$Var1))
+    ends <- as.data.frame(table(df_calls[idx & df_calls$type=='Loss', end_pos]))
+    ends$Var1 <- as.numeric(as.character(ends$Var1))
+    df <- merge(begs, ends, by='Var1', all=TRUE)
+    df[is.na(df)] <- 0
+    df_loss <- data.frame(x=rep(df$Var1, each=2), y=c(0, head(rep(cumsum(df$Freq.x-df$Freq.y), each=2), -1)))
+    p <- p + geom_line(data=df_loss, aes(x=x/1e6, y=sum(idx) / 20 * (21 + 4 * y/max(y))), color = 'blue')
+  }
+
+  if (sum(idx & df_calls$type=='CN-LOH') > 0) {
+    begs <- as.data.frame(table(df_calls[idx & df_calls$type=='CN-LOH', beg_pos]))
+    begs$Var1 <- as.numeric(as.character(begs$Var1))
+    ends <- as.data.frame(table(df_calls[idx & df_calls$type=='CN-LOH', end_pos]))
+    ends$Var1 <- as.numeric(as.character(ends$Var1))
+    df <- merge(begs, ends, by='Var1', all=TRUE)
+    df[is.na(df)] <- 0
+    df_cnloh <- data.frame(x=rep(df$Var1, each=2), y=c(0, head(rep(cumsum(df$Freq.x-df$Freq.y), each=2), -1)))
+    p <- p + geom_line(data=df_cnloh, aes(x=x/1e6, y=sum(idx) / 20 * (21 + 4 * y/max(y))), color = 'orange')
+  }
+
+  if (sum(idx & (df_calls$type=='Loss' | df_calls$type=='CN-LOH')) > 0) {
+    p <- p + coord_cartesian(xlim = c(0, chrlen[chr] / 1e6), ylim = c(0, sum(idx) * 25 / 20), expand = FALSE)
+  } else {
+    p <- p + coord_cartesian(xlim = c(0, chrlen[chr] / 1e6), ylim = c(0, sum(idx) * 21 / 20), expand = FALSE)
+  }
+
   print(p)
 }
 

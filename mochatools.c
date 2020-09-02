@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2020-08-25"
+#define MOCHATOOLS_VERSION "2020-09-01"
 
 #define GC_WIN_DFLT "200"
 

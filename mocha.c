@@ -41,7 +41,7 @@
 #include "beta_binom.h"
 #include "bcftools.h"
 
-#define MOCHA_VERSION "2020-08-25"
+#define MOCHA_VERSION "2020-09-01"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -61,8 +61,8 @@
 #define FLIP_PRB_DFLT "1e-02"
 #define CEN_PRB_DFLT "1e-04"
 #define TEL_PRB_DFLT "1e-02"
-#define X_TEL_PRB_DFLT "1e-03"
-#define Y_TEL_PRB_DFLT "1e-04"
+#define X_TEL_PRB_DFLT "1e-04"
+#define Y_TEL_PRB_DFLT "1e-05"
 #define SHORT_ARM_CHRS_DFLT "13,14,15,21,22,chr13,chr14,chr15,chr21,chr22"
 #define LRR_BIAS_DFLT "0.2"
 // https://www.illumina.com/documents/products/technotes/technote_cnv_algorithms.pdf
@@ -1300,8 +1300,7 @@ static int8_t mocha_type(float ldev, float ldev_se, float bdev, int n_hets, floa
     else
         z2_cnloh -= 4.0f * M_LN10;
 
-    // if one model has 2 LOD scores point more than the other model, select the better
-    // model
+    // if one model has 4 LOD scores point more than the other model, select the better model
     if (ldev > 0) {
         if (n_hets < 5 || isnan(bdev)) {
             return MOCHA_GAIN;
@@ -1309,8 +1308,8 @@ static int8_t mocha_type(float ldev, float ldev_se, float bdev, int n_hets, floa
             float expected_ldev =
                 -logf(1.0f - 2.0f * bdev > 2.0f / 3.0f ? 1.0f - 2.0f * bdev : 2.0f / 3.0f) * M_LOG2E * lrr_hap2dip;
             float z2_gain = sqf((ldev - expected_ldev) / ldev_se);
-            if (z2_cnloh > z2_gain + 4.0f * M_LN10) return MOCHA_GAIN;
-            if (z2_gain > z2_cnloh + 4.0f * M_LN10) return MOCHA_CNLOH;
+            if (z2_cnloh > z2_gain + 8.0f * M_LN10) return MOCHA_GAIN;
+            if (z2_gain > z2_cnloh + 8.0f * M_LN10) return MOCHA_CNLOH;
         }
     } else {
         if (n_hets < 5 || isnan(bdev)) {
@@ -1318,8 +1317,8 @@ static int8_t mocha_type(float ldev, float ldev_se, float bdev, int n_hets, floa
         } else {
             float expected_ldev = -logf(1.0f + 2.0f * bdev) * M_LOG2E * lrr_hap2dip;
             float z2_loss = sqf((ldev - expected_ldev) / ldev_se);
-            if (z2_cnloh > z2_loss + 4.0f * M_LN10) return MOCHA_LOSS;
-            if (z2_loss > z2_cnloh + 4.0f * M_LN10) return MOCHA_CNLOH;
+            if (z2_cnloh > z2_loss + 8.0f * M_LN10) return MOCHA_LOSS;
+            if (z2_loss > z2_cnloh + 8.0f * M_LN10) return MOCHA_CNLOH;
         }
     }
     return MOCHA_UNDET;
@@ -2724,10 +2723,10 @@ int run(int argc, char *argv[]) {
                                        {"xy-prob", required_argument, NULL, 17},
                                        {"err-prob", required_argument, NULL, 18},
                                        {"flip-prob", required_argument, NULL, 19},
-                                       {"centromere-penalty", required_argument, NULL, 20},
-                                       {"telomere-advantage", required_argument, NULL, 21},
-                                       {"x-telomere-advantage", required_argument, NULL, 22},
-                                       {"y-telomere-advantage", required_argument, NULL, 23},
+                                       {"centromere-loss", required_argument, NULL, 20},
+                                       {"telomere-gain", required_argument, NULL, 21},
+                                       {"x-telomere-gain", required_argument, NULL, 22},
+                                       {"y-telomere-gain", required_argument, NULL, 23},
                                        {"short-arm-chrs", required_argument, NULL, 24},
                                        {"use-short-arms", no_argument, NULL, 25},
                                        {"use-centromeres", no_argument, NULL, 26},

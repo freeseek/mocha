@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2020 Giulio Genovese
 ##
-## Version 2020-08-25
+## Version 2020-09-01
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -32,13 +32,10 @@ workflow mocha {
   input {
     String sample_set_id
     String mode # idat gtc cel chp txt vcf pvcf
+    String target = "pngs"
     Boolean realign = false
-    Boolean gtc_output = false # only for idat
-    Boolean chp_output = false # only for cel
-    Boolean do_not_phase = false # only for idat gtc cel chp txt mode
-    Boolean do_not_mocha = false # only for idat gtc cel chp txt vcf mode
-    Boolean do_not_plot = false
-    Boolean sequencing = false
+    Boolean gtc_output = false # only for idat mode
+    Boolean chp_output = false # only for cel mode
     Int idat_batch_size = 48
     Int gtc_batch_size = 1024
     Int chp_batch_size = 1024
@@ -51,19 +48,20 @@ workflow mocha {
     File sample_tsv_file # sample_id batch_id green_idat red_idat gtc cel chp computed_gender call_rate
     File batch_tsv_file # batch_id path bpm csv egt sam xml zip probeset_ids snp report calls confidences summary vcf vcf_index xcl_vcf xcl_vcf_index
     File? ped_file
+    File? duplicate_samples_file
     File? extra_xcl_vcf_file
     String? mocha_extra_args
     String basic_bash_docker = "ubuntu:latest"
     String pandas_docker = "amancevice/pandas:slim"
-    String iaap_cli_docker = "us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-20200825"
-    String autoconvert_docker = "us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-20200825"
-    String apt_docker = "us.gcr.io/mccarroll-mocha/apt:1.10.2-20200825"
-    String gtc2vcf_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
-    String bcftools_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
-    String shapeit4_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
-    String eagle_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
-    String mocha_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200825"
-    String mocha_plot_docker = "us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-20200825"
+    String iaap_cli_docker = "us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-20200901"
+    String autoconvert_docker = "us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-20200901"
+    String apt_docker = "us.gcr.io/mccarroll-mocha/apt:1.10.2-20200901"
+    String gtc2vcf_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200901"
+    String bcftools_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200901"
+    String shapeit4_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200901"
+    String eagle_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200901"
+    String mocha_docker = "us.gcr.io/mccarroll-mocha/mocha:1.10.2-20200901"
+    String mocha_plot_docker = "us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-20200901"
     Boolean autoconvert = false
     Boolean? table_output
     Boolean? do_not_check_bpm
@@ -321,7 +319,7 @@ workflow mocha {
 
   call tsv_column as computed_gender_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "computed_gender", docker = basic_bash_docker }
   call tsv_column as call_rate_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "call_rate", docker = basic_bash_docker }
-  if (mode != "pvcf" && !do_not_phase) {
+  if (mode != "pvcf" && target != "vcf") {
     call ref_scatter {
       input:
         n_chrs = ref["n_chrs"],
@@ -352,7 +350,7 @@ workflow mocha {
 
     call lst_concat as sample_id_split_tsv { input: lst_files = vcf_scatter.sample_id_lines, filebase = "split_sample_id", docker = basic_bash_docker }
     Int n_smpls = length(flatten(read_tsv(sample_id_split_tsv.file)))
-    Boolean use_reference = !select_first([do_not_use_reference, !eagle && n_smpls > 2 * ref["n_smpls"]])
+    Boolean use_reference = !select_first([do_not_use_reference, n_smpls > 2 * ref["n_smpls"]])
     Array[Array[File]] interval_slices = transpose(vcf_scatter.vcf_files)
     Array[String] chrs = transpose(read_tsv(ref_scatter.intervals_bed))[0]
     scatter (idx in range(length(chrs))) {
@@ -370,6 +368,7 @@ workflow mocha {
           sample_id_file = select_first([flatten_sample_id_lines.file, vcf_sample_id_lines.file]),
           computed_gender_file = computed_gender_lines.file,
           call_rate_file = call_rate_lines.file,
+          duplicate_samples_file = duplicate_samples_file,
           extra_xcl_vcf_file = if defined(extra_xcl_vcf_file) then select_first([xcl_vcf_scatter.vcf_files])[idx] else None,
           docker = bcftools_docker
       }
@@ -385,8 +384,7 @@ workflow mocha {
           ref_vcf_idx = if use_reference then ref_path + ref["kgp_pfx"] + chrs[idx] + ref["kgp_sfx"] + ".csi" else None,
           xcl_vcf_file = vcf_qc.xcl_vcf_file,
           xcl_vcf_idx = vcf_qc.xcl_vcf_idx,
-          chr = if eagle then None else chrs[idx],
-          sequencing = sequencing,
+          chr = chrs[idx],
           eagle = eagle,
           docker = if eagle then eagle_docker else shapeit4_docker,
           cpu = phase_threads
@@ -428,7 +426,7 @@ workflow mocha {
     }
   }
 
-  if (!do_not_phase && !do_not_mocha) {
+  if (target == "calls" || target == "pngs") {
     scatter (idx in range(n_batches)) {
       call vcf_mocha {
         input:
@@ -447,7 +445,7 @@ workflow mocha {
           mocha_extra_args = mocha_extra_args,
           docker = mocha_docker
       }
-      if (!do_not_plot) {
+      if (target == "pngs") {
         call mocha_plot {
           input:
             vcf_file = vcf_mocha.mocha_vcf_file,
@@ -479,9 +477,9 @@ workflow mocha {
     File? mocha_ucsc_bed = mocha_summary.ucsc_bed
     File? mocha_summary_pdf = mocha_summary.summary_pdf
     File? mocha_pileup_pdf = mocha_summary.pileup_pdf
-    Array[File]? png_files = if !do_not_phase && !do_not_mocha && !do_not_plot then flatten(select_all(select_first([mocha_plot.png_files]))) else None
+    Array[File]? png_files = if target == "pngs" then flatten(select_all(select_first([mocha_plot.png_files]))) else None
     Array[File]? bam_files = csv2bam.bam_file
-    Array[File]? mendel_files = if mode != "pvcf" && !do_not_phase && defined(ped_file) then select_all(select_first([vcf_split.mendel_tsv])) else None
+    Array[File]? mendel_files = if mode != "pvcf" && target != "vcf" && defined(ped_file) then select_all(select_first([vcf_split.mendel_tsv])) else None
     Array[File]? gtc_files = if mode == "idat" && gtc_output then flatten(select_first([idat2gtc.gtc_files])) else None
     Array[File]? chp_files = if mode == "cel" && chp_output then flatten(select_first([cel2chp.chp_files])) else None
     Array[File]? snp_files = if mode == "cel" && chp_output then select_first([cel2chp.snp_file]) else None
@@ -1471,6 +1469,7 @@ task vcf_qc {
     Float dup_divergence_thr = 0.02
     Float genotype_exc_het_thr = 0.000001
     Float genotype_sex_cor_thr = 0.000001
+    File? duplicate_samples_file
     File? extra_xcl_vcf_file
     Boolean uncompressed = false
 
@@ -1490,11 +1489,13 @@ task vcf_qc {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_id_file, computed_gender_file, call_rate_file, extra_xcl_vcf_file])}" | \
+    echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_id_file, computed_gender_file, call_rate_file, duplicate_samples_file, extra_xcl_vcf_file])}" | \
       tr '\n' '\0' | xargs -0 mv -t .
     paste -d $'\t' "~{basename(sample_id_file)}" "~{basename(computed_gender_file)}" > computed_gender.map
     paste -d $'\t' "~{basename(sample_id_file)}" "~{basename(call_rate_file)}" | \
-      awk -F"\t" '$2<~{sample_call_rate_thr} {print $1}' > samples_xcl.lines
+      awk -F"\t" '$2<~{sample_call_rate_thr} {print $1}' ~{if defined(duplicate_samples_file) then "| \\\n" +
+      "  cat - \"" + basename(select_first([duplicate_samples_file])) + "\" | \\\n" +
+      "  sort | uniq " else ""}> samples_xcl.lines
     bcftools query --format "\n" "~{basename(vcf_file)}" | wc -l
     echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
       bcftools annotate --no-version --output-type u --annotations "~{basename(dup_file)}" --columns CHROM,FROM,TO,JK --header-lines /dev/stdin --samples-file ^samples_xcl.lines~{if cpu > 1 then " --threads " + (cpu - 1) else ""} "~{basename(vcf_file)}" | \
@@ -1511,7 +1512,7 @@ task vcf_qc {
       "bcftools merge --no-version --output-type " + (if uncompressed then "u" else "b") + " --output \"" + filebase + ".xcl.bcf\" --merge none \"" + filebase + ".tmp.bcf\" \"" + basename(select_first([extra_xcl_vcf_file])) + "\"\n" +
       "bcftools index --force \"" + filebase + ".xcl.bcf\"\n" +
       "rm \"" + filebase + ".tmp.bcf\" \"" + filebase + ".tmp.bcf.csi\"" else ""}
-    echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_id_file, computed_gender_file, call_rate_file, extra_xcl_vcf_file])}" | \
+    echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_id_file, computed_gender_file, call_rate_file, duplicate_samples_file, extra_xcl_vcf_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
     rm computed_gender.map samples_xcl.lines
   >>>
@@ -1544,11 +1545,10 @@ task vcf_phase {
     File? ref_vcf_idx
     File? xcl_vcf_file
     File? xcl_vcf_idx
-    String? chr
-    Boolean sequencing = false
+    String chr
     Boolean eagle = false
-    Int? pbwtIters
     Boolean uncompressed = false
+    String? phase_extra_args
 
     String docker
     Int cpu = 1
@@ -1557,7 +1557,7 @@ task vcf_phase {
     Int preemptible = 1
     Int maxRetries = 0
 
-    Float mult = 4.0 # how much more memory does SHAPEIT4 consume compared to Eagle
+    Float mult = 6.0 # how much more memory SHAPEIT4 consumes compared to Eagle
   }
 
   Float vcf_size = size(unphased_vcf_file, "GiB")
@@ -1574,46 +1574,52 @@ task vcf_phase {
     set -euo pipefail
     echo "~{sep="\n" select_all([unphased_vcf_file, unphased_vcf_idx, genetic_map_file, ref_vcf_file, ref_vcf_idx, xcl_vcf_file, xcl_vcf_idx])}" | \
       tr '\n' '\0' | xargs -0 mv -t .
+    ~{if defined(xcl_vcf_file) then
+    "bcftools isec \\\n" +
+    "  --no-version \\\n" +
+    "  --output-type " + (if uncompressed then "u" else "b") + " \\\n" +
+    "  --output \"" + filebase + ".isec.bcf\" \\\n" +
+    "  --complement \\\n" +
+    "  --exclude \"N_ALT>1\" \\\n" +
+    "  --write 1 \\\n" +
+    "  \"" + basename(unphased_vcf_file) + "\" \\\n" +
+    "  \"" + basename(select_first([xcl_vcf_file])) + "\"\n" +
+    "bcftools index --force \"" + filebase + ".isec.bcf\"" else ""}
     ~{if eagle then
       "bio-eagle \\\n" +
       "  --geneticMapFile \"" + basename(genetic_map_file) + "\" \\\n" +
-      "  --outPrefix \"" + filebase + ".phased\" \\\n" +
+      "  --outPrefix \"" + filebase + ".tmp\" \\\n" +
       (if cpu > 1 then "  --numThreads " + cpu + " \\\n" else "") +
-      (if defined(ref_vcf_file) then "  --vcfRef \"" + basename(select_first([ref_vcf_file])) + "\" \\\n" else "") +
-      "  --vcfTarget \"" + basename(unphased_vcf_file) + "\" \\\n" +
+      (if defined(ref_vcf_file) then "  --vcfRef \"" + basename(select_first([ref_vcf_file])) + "\" \\\n" +
+      "  --vcfTarget \"" else "  --vcf \"") + (if defined(xcl_vcf_file) then filebase + ".isec.bcf" else basename(unphased_vcf_file)) + "\" \\\n" +
       "  --vcfOutFormat " + (if uncompressed then "u" else "b") + " \\\n" +
-      "  --noImpMissing \\\n" +
-      "  --outputUnphased \\\n" +
-      (if defined(xcl_vcf_file) then "  --vcfExclude \"" + basename(select_first([xcl_vcf_file])) + "\" \\\n" else "") +
-      (if defined(chr) then " --chrom " + chr + " \\\n" else "") +
-      (if defined(pbwtIters) then "  --pbwtIters " + pbwtIters + " \\\n" else "") +
+      "  --chrom " + chr + " \\\n" +
+      (if defined(phase_extra_args) then phase_extra_args + " \\\n" else "") +
       "  1>&2"
     else
-      (if defined(xcl_vcf_file) then
-        "bcftools isec --no-version --output-type " +(if uncompressed then "u" else "b") + " --output \"" + filebase + ".unphased.bcf\" --complement --write 1 \"" + basename(unphased_vcf_file) + "\" \"" + basename(select_first([xcl_vcf_file])) + "\"\n" +
-        "bcftools index --force \"" + filebase + ".unphased.bcf\"\n" else "xcl_vcf_file") +
       "chr=" + chr + "; zcat \"" + basename(genetic_map_file) + "\" | \\\n" +
       "  sed 's/^23/X/' | awk -v chr=" + dollar + "{chr#chr} '$1==chr {print $2,$3,$4}' > genetic_map.txt\n" +
       "shapeit4 \\\n" +
       (if cpu > 1 then "  --thread " + cpu + " \\\n" else "") +
-      "  --input \"" + (if defined(xcl_vcf_file) then filebase + ".unphased.bcf" else basename(unphased_vcf_file)) + "\" \\\n" +
+      "  --input \"" + (if defined(xcl_vcf_file) then filebase + ".isec.bcf" else basename(unphased_vcf_file)) + "\" \\\n" +
       (if defined(ref_vcf_file) then "  --reference \"" + basename(select_first([ref_vcf_file])) + "\" \\\n" else "") +
       "  --map genetic_map.txt \\\n" +
       "  --region " + chr + " \\\n" +
-      (if sequencing then "  --sequencing \\\n" else "") +
-      "  --output \"" + filebase + ".shapeit4.bcf\" \\\n" +
+      "  --output \"" + filebase + ".tmp.bcf\" \\\n" +
+      (if defined(phase_extra_args) then phase_extra_args + " \\\n" else "") +
       "  1>&2\n" +
-      "bcftools index --force \"" + filebase + ".shapeit4.bcf\"\n" +
-      "bcftools annotate \\\n" +
-      "  --no-version \\\n" +
-      "  --output-type " + (if uncompressed then "u" else "b") + " \\\n" +
-      "  --output \"" + filebase + ".phased.bcf\" \\\n" +
-      "  --annotations \"" + filebase + ".shapeit4.bcf\" \\\n" +
-      "  --columns -FMT/GT \\\n" +
-      "  \"" + basename(unphased_vcf_file) + "\" \\\n" +
-      (if cpu > 1 then "  --threads " + (cpu - 1) + "\n" else "") +
-      "rm genetic_map.txt \"" + filebase + ".shapeit4.bcf\" \"" + filebase + ".shapeit4.bcf.csi\"" +
-      (if defined(xcl_vcf_file) then " \"" + filebase + ".unphased.bcf\" \"" + filebase + ".unphased.bcf.csi\"" else "")}
+      "rm genetic_map.txt"}
+    ~{if defined(xcl_vcf_file) then "rm \"" + filebase + ".isec.bcf\" \"" + filebase + ".isec.bcf.csi\"" else ""}
+    bcftools index --force "~{filebase}.tmp.bcf"
+    bcftools annotate \
+      --no-version \
+      --output-type ~{if uncompressed then "u" else "b"} \
+      --output "~{filebase}.phased.bcf" \
+      --annotations "~{filebase}.tmp.bcf" \
+      --columns -FMT/GT \
+      "~{basename(unphased_vcf_file)}" \
+      ~{if cpu > 1 then "--threads " + (cpu - 1) else ""}
+    rm "~{filebase}.tmp.bcf" "~{filebase}.tmp.bcf.csi"
     echo "~{sep="\n" select_all([unphased_vcf_file, unphased_vcf_idx, genetic_map_file, ref_vcf_file, ref_vcf_idx, xcl_vcf_file, xcl_vcf_idx])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>

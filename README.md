@@ -233,7 +233,7 @@ wget -O $HOME/res/cytoBand.hg19.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath
 Setup variables
 ```
 ref="$HOME/res/human_g1k_v37.fasta"
-mhc_reg="6:28542424-33448264"
+mhc_reg="6:27486711-33448264"
 kir_reg="19:54574747-55504099"
 map="$HOME/res/genetic_map_hg19_withX.txt.gz"
 kgp_pfx="$HOME/res/ALL.chr"
@@ -330,7 +330,7 @@ wget -O $HOME/res/cytoBand.hg38.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath
 Setup variables
 ```
 ref="$HOME/res/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
-mhc_reg="chr6:28574647-33480487"
+mhc_reg="chr6:27518932-33480487"
 kir_reg="chr19:54071493-54992731"
 map="$HOME/res/genetic_map_hg38_withX.txt.gz"
 kgp_pfx="$HOME/res/ALL.chr"

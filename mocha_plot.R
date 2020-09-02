@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-mocha_plot_version <- '2020-08-25'
+mocha_plot_version <- '2020-09-01'
 
 library(optparse)
 library(data.table)
