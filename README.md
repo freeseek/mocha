@@ -413,7 +413,8 @@ Generate a list of variants that will be excluded from modeling by both eagle an
 ```
 awk -F"\t" '$2<.97 {print $1}' $crt > samples_xcl_list.txt; \
 echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
-  bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin -S ^samples_xcl_list.txt $dir/$pfx.unphased.bcf | \
+  bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
+  bcftools view --no-version -Ou -S ^samples_xcl_list.txt | \
   bcftools +fill-tags --no-version -Ou -t ^Y,MT,chrY,chrM -- -t ExcHet,F_MISSING | \
   bcftools +mochatools --no-version -Ou -- -x $sex -G | \
   bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \

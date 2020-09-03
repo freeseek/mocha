@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2020 Giulio Genovese
 ##
-## Version 2020-09-01
+## Version 2020-09-02
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -1498,7 +1498,8 @@ task vcf_qc {
       "  sort | uniq " else ""}> samples_xcl.lines
     bcftools query --format "\n" "~{basename(vcf_file)}" | wc -l
     echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
-      bcftools annotate --no-version --output-type u --annotations "~{basename(dup_file)}" --columns CHROM,FROM,TO,JK --header-lines /dev/stdin --samples-file ^samples_xcl.lines~{if cpu > 1 then " --threads " + (cpu - 1) else ""} "~{basename(vcf_file)}" | \
+      bcftools annotate --no-version --output-type u --annotations "~{basename(dup_file)}" --columns CHROM,FROM,TO,JK --header-lines /dev/stdin~{if cpu > 1 then " --threads " + (cpu - 1) else ""} "~{basename(vcf_file)}" | \
+      bcftools view --no-version --output-type u~{if cpu > 1 then " --threads " + (cpu - 1) else ""} --samples-file ^samples_xcl.lines | \
       bcftools +fill-tags --no-version --output-type u --targets ^Y,MT,chrY,chrM~{if cpu > 1 then " --threads " + (cpu - 1) else ""} -- --tags ExcHet,F_MISSING | \
       bcftools +mochatools --no-version --output-type u~{if cpu > 1 then " --threads " + (cpu - 1) else ""} -- --sex computed_gender.map --drop-genotypes | \
       bcftools annotate --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.xcl.bcf" \
