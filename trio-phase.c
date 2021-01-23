@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2017-2020 Giulio Genovese
+   Copyright (C) 2017-2021 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -37,7 +37,7 @@
 #include <htslib/kseq.h>
 #include "bcftools.h"
 
-#define TRIO_PHASE_VERSION "2020-09-01"
+#define TRIO_PHASE_VERSION "2021-01-20"
 
 #define ABSOLUTE (1 << 24)
 #define TRANSMITTED (1 << 16)

@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2018-2020 Giulio Genovese
+   Copyright (C) 2018-2021 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2020-09-01"
+#define EXTENDFMT_VERSION "2021-01-20"
 
 /******************************************
  * CIRCULAR BUFFER                        *
@@ -121,7 +121,7 @@ static void auxbuf_push(auxbuf_t *buf, bcf1_t *line) {
         for (int k = 0; k < buf->nsmpl; k++) {                                                                         \
             vals[k] = p[k];                                                                                            \
             if (vals[k] && phase) {                                                                                    \
-                if (buf->phase_arr[k] == bcf_int8_missing)                                                             \
+                if (buf->phase_arr[k] == bcf_int8_missing || buf->phase_arr[k] == bcf_int8_vector_end)                 \
                     vals[k] = (ht_type_t)0;                                                                            \
                 else                                                                                                   \
                     vals[k] *= buf->phase_arr[k];                                                                      \
@@ -199,7 +199,7 @@ static data_t *auxbuf_flush(auxbuf_t *buf, int flush_all) {
     {                                                                                                                  \
         type_t *vals = (type_t *)buf->data[i].vals;                                                                    \
         for (int k = 0; k < buf->nsmpl; k++) {                                                                         \
-            if (buf->phase_arr[k] == bcf_int8_missing)                                                                 \
+            if (buf->phase_arr[k] == bcf_int8_missing || buf->phase_arr[k] == bcf_int8_vector_end)                     \
                 vals[k] = (type_t)0;                                                                                   \
             else                                                                                                       \
                 vals[k] *= buf->phase_arr[k];                                                                          \
@@ -318,8 +318,8 @@ int run(int argc, char **argv) {
                                        {"samples", required_argument, NULL, 's'},
                                        {"samples-file", required_argument, NULL, 'S'},
                                        {"force-samples", no_argument, NULL, 1},
+                                       {"output", required_argument, NULL, 'o'},
                                        {"output-type", required_argument, NULL, 'O'},
-                                       {"output-file", required_argument, NULL, 'o'},
                                        {"threads", required_argument, NULL, 9},
                                        {"targets", required_argument, NULL, 't'},
                                        {"targets-file", required_argument, NULL, 'T'},
@@ -329,7 +329,7 @@ int run(int argc, char **argv) {
                                        {0, 0, 0, 0}};
     int c;
     char *tmp;
-    while ((c = getopt_long(argc, argv, "f:pd:s:S:t:T:r:R:h?o:O:89", loptions, NULL)) >= 0) {
+    while ((c = getopt_long(argc, argv, "h?f:pd:o:O:s:S:t:T:r:R:", loptions, NULL)) >= 0) {
         switch (c) {
         case 'f':
             format = optarg;
@@ -450,7 +450,7 @@ int run(int argc, char **argv) {
         error("TODO: %s:%d .. type=%d\n", __FILE__, __LINE__, format_type);
 
     int gt_id = phase_format ? bcf_hdr_id2int(hdr, BCF_DT_ID, "GT") : -1;
-    if (gt_id < 0) error("Format GT was not found in the input header\n");
+    if (phase_format && gt_id < 0) error("Format GT was not found in the input header\n");
     int fmt_id = bcf_hdr_id2int(hdr, BCF_DT_ID, format);
     if (fmt_id < 0) error("Format %s was not found in the input header\n", format);
 

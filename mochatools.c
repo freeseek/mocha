@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2017-2020 Giulio Genovese
+   Copyright (C) 2017-2021 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2020-09-01"
+#define MOCHATOOLS_VERSION "2021-01-20"
 
 #define GC_WIN_DFLT "200"
 
@@ -323,8 +323,28 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     return 0;
 }
 
-// Petr Danecek's implementation in bcftools/mcall.c
-double binom_dist(int N, double p, int k);
+// Petr Danecek's implementation in bcftools/mcall.c (removed after version 1.11)
+double binom_dist(int N, double p, int k) {
+    int mean = (int)(N * p);
+    if (mean == k) return 1.0;
+
+    double log_p = (k - mean) * log(p) + (mean - k) * log(1.0 - p);
+    if (k > N - k) k = N - k;
+    if (mean > N - mean) mean = N - mean;
+
+    if (k < mean) {
+        int tmp = k;
+        k = mean;
+        mean = tmp;
+    }
+    double diff = k - mean;
+
+    double val = 1.0;
+    int i;
+    for (i = 0; i < diff; i++) val = val * (N - mean - i) / (k - i);
+
+    return exp(log_p) / val;
+}
 
 // returns 2*pbinom(k,n,1/2) if k<n/2 by precomputing values in a table
 static double binom_exact(int k, int n) {

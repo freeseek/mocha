@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2015-2020 Giulio Genovese
+   Copyright (C) 2015-2021 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -41,7 +41,7 @@
 #include "beta_binom.h"
 #include "bcftools.h"
 
-#define MOCHA_VERSION "2020-09-01"
+#define MOCHA_VERSION "2021-01-20"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -628,10 +628,12 @@ static int cnp_edge_is_not_cn2_lrr_baf(const float *lrr, const float *baf, int n
     for (int i = a - 1; i >= 0; i--) {
         float log_lkl = lrr_baf_log_lkl(lrr[i], baf[i], ldev, bdev, lrr_sd, baf_sd, lrr_bias)
                         - lrr_baf_log_lkl(lrr[i], baf[i], 0.0f, 0.0f, lrr_sd, baf_sd, lrr_bias);
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
+        if (!isnan(err_log_prb)) {
+            if (log_lkl < err_log_prb)
+                log_lkl = err_log_prb;
+            else if (log_lkl > -err_log_prb)
+                log_lkl = -err_log_prb;
+        }
         sum_log_lkl += log_lkl;
         if (sum_log_lkl > -xy_log_prb) return -1;
         if (sum_log_lkl < xy_log_prb) break;
@@ -642,10 +644,12 @@ static int cnp_edge_is_not_cn2_lrr_baf(const float *lrr, const float *baf, int n
     for (int i = b + 1; i < n; i++) {
         float log_lkl = lrr_baf_log_lkl(lrr[i], baf[i], ldev, bdev, lrr_sd, baf_sd, lrr_bias)
                         - lrr_baf_log_lkl(lrr[i], baf[i], 0, 0, lrr_sd, baf_sd, lrr_bias);
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
+        if (!isnan(err_log_prb)) {
+            if (log_lkl < err_log_prb)
+                log_lkl = err_log_prb;
+            else if (log_lkl > -err_log_prb)
+                log_lkl = -err_log_prb;
+        }
         sum_log_lkl += log_lkl;
         if (sum_log_lkl > -xy_log_prb) return -1;
         if (sum_log_lkl < xy_log_prb) break;
@@ -666,30 +670,12 @@ static double lrr_baf_lod(const float *lrr_arr, const float *baf_arr, int n, con
         float baf = imap ? baf_arr[imap[i]] : baf_arr[i];
         float log_lkl = lrr_baf_log_lkl(lrr, baf, ldev, (float)bdev_lrr_baf, lrr_sd, baf_sd, lrr_bias)
                         - lrr_baf_log_lkl(lrr, baf, 0.0f, 0.0f, lrr_sd, baf_sd, lrr_bias);
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
-        ret += log_lkl;
-    }
-    return (double)ret * M_LOG10E;
-}
-
-// return the LOD likelihood for a segment
-static double baf_lod(const float *baf_arr, int n, const int *imap, float err_log_prb, float baf_sd, double bdev) {
-    if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
-
-    float ret = 0.0f;
-    for (int i = 0; i < n; i++) {
-        float baf = imap ? baf_arr[imap[i]] : baf_arr[i];
-        if (isnan(baf)) continue;
-        float log_lkl = log_mean_expf(norm_log_lkl(baf - 0.5f, (float)bdev, baf_sd, 1.0f),
-                                      norm_log_lkl(baf - 0.5f, -(float)bdev, baf_sd, 1.0f))
-                        - norm_log_lkl(baf - 0.5f, 0.0f, baf_sd, 1.0f);
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
+        if (!isnan(err_log_prb)) {
+            if (log_lkl < err_log_prb)
+                log_lkl = err_log_prb;
+            else if (log_lkl > -err_log_prb)
+                log_lkl = -err_log_prb;
+        }
         ret += log_lkl;
     }
     return (double)ret * M_LOG10E;
@@ -706,10 +692,12 @@ static double baf_phase_lod(const float *baf_arr, const int8_t *gt_phase, int n,
         int8_t p = imap ? gt_phase[imap[i]] : gt_phase[i];
         if (bdev_phase) p *= (int8_t)SIGN(bdev_phase[i]); // notice bdev_phase has no imap
         float log_lkl = baf_phase_log_lkl(baf, p, (float)bdev, baf_sd) - baf_phase_log_lkl(baf, 0, 0.0f, baf_sd);
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
+        if (!isnan(err_log_prb)) {
+            if (log_lkl < err_log_prb)
+                log_lkl = err_log_prb;
+            else if (log_lkl > -err_log_prb)
+                log_lkl = -err_log_prb;
+        }
         ret += log_lkl;
     }
     return (double)ret * M_LOG10E;
@@ -732,8 +720,39 @@ static float compare_models(const float *baf, const int8_t *gt_phase, int n, con
     free(path);
     return -(float)fx + (float)n_flips * flip_log_prb * (float)M_LOG10E;
 }
+static double baf_log_lkl(const float *baf_arr, int n, const int *imap, float baf_sd, double bdev) {
+    if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
 
-void get_max_sum(const int16_t *ad0, const int16_t *ad1, int n, const int *imap, int *n1, int *n2) {
+    double ret = 0.0;
+    for (int i = 0; i < n; i++) {
+        float baf = imap ? baf_arr[imap[i]] : baf_arr[i];
+        if (isnan(baf)) continue;
+        float log_lkl = log_mean_expf(norm_log_lkl(baf - 0.5f, (float)bdev, baf_sd, 1.0f),
+                                      norm_log_lkl(baf - 0.5f, -(float)bdev, baf_sd, 1.0f));
+        ret += (double)log_lkl;
+    }
+    return ret * M_LOG10E;
+}
+
+static float get_baf_bdev(const float *baf_arr, int n, const int *imap, float baf_sd) {
+    double bdev = 0.0;
+    int j = 0;
+    for (int i = 0; i < n; i++) {
+        float baf = imap ? baf_arr[imap[i]] : baf_arr[i];
+        if (isnan(baf)) continue;
+        bdev += fabs((double)baf - 0.5);
+        j++;
+    }
+    if (j == 0) return NAN;
+    bdev /= j;
+    // simple method to compute bdev should work well for germline duplications
+    if ((float)bdev > 2.0f * baf_sd) return (float)bdev;
+    double f(double x, void *data) { return -baf_log_lkl(baf_arr, n, imap, baf_sd, x); }
+    kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
+    return (float)bdev < 1e-4 ? (float)NAN : (float)bdev;
+}
+
+static void get_max_sum(const int16_t *ad0, const int16_t *ad1, int n, const int *imap, int *n1, int *n2) {
     *n1 = 0;
     *n2 = 0;
     for (int i = 0; i < n; i++) {
@@ -745,6 +764,32 @@ void get_max_sum(const int16_t *ad0, const int16_t *ad1, int n, const int *imap,
             if (a + b > *n2) *n2 = a + b;
         }
     }
+}
+
+static double ad_log_lkl(const int16_t *ad0_arr, const int16_t *ad1_arr, int n, const int *imap, float ad_rho,
+                         double bdev) {
+    if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
+
+    int n1, n2;
+    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
+    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, ad_rho, n1, n2);
+
+    double ret = 0.0;
+    for (int i = 0; i < n; i++) {
+        int16_t ad0 = imap ? ad0_arr[imap[i]] : ad0_arr[i];
+        int16_t ad1 = imap ? ad1_arr[imap[i]] : ad1_arr[i];
+        float log_lkl =
+            log_mean_expf(beta_binom_log_lkl(beta_binom_alt, ad0, ad1), beta_binom_log_lkl(beta_binom_alt, ad1, ad0));
+        ret += (double)log_lkl;
+    }
+    return (double)ret * M_LOG10E;
+}
+
+static float get_ad_bdev(const int16_t *ad0_arr, const int16_t *ad1_arr, int n, const int *imap, float ad_rho) {
+    double bdev = 0.0;
+    double f(double x, void *data) { return -ad_log_lkl(ad0_arr, ad1_arr, n, imap, ad_rho, x); }
+    kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
+    return (float)bdev < 1e-4 ? (float)NAN : (float)bdev;
 }
 
 /*********************************
@@ -839,11 +884,12 @@ static int cnp_edge_is_not_cn2_lrr_ad(const float *lrr, int16_t *ad0, int16_t *a
     for (int i = a - 1; i >= 0; i--) {
         float log_lkl = lrr_ad_log_lkl(lrr[i], ad0[i], ad1[i], ldev, lrr_sd, lrr_bias, beta_binom_alt)
                         - lrr_ad_log_lkl(lrr[i], ad0[i], ad1[i], 0.0f, lrr_sd, lrr_bias, beta_binom_null);
-
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
+        if (!isnan(err_log_prb)) {
+            if (log_lkl < err_log_prb)
+                log_lkl = err_log_prb;
+            else if (log_lkl > -err_log_prb)
+                log_lkl = -err_log_prb;
+        }
         sum_log_lkl += log_lkl;
         if (sum_log_lkl > -xy_log_prb) return -1;
         if (sum_log_lkl < xy_log_prb) break;
@@ -854,10 +900,12 @@ static int cnp_edge_is_not_cn2_lrr_ad(const float *lrr, int16_t *ad0, int16_t *a
     for (int i = b + 1; i < n; i++) {
         float log_lkl = lrr_ad_log_lkl(lrr[i], ad0[i], ad1[i], ldev, lrr_sd, lrr_bias, beta_binom_alt)
                         - lrr_ad_log_lkl(lrr[i], ad0[i], ad1[i], 0.0f, lrr_sd, lrr_bias, beta_binom_null);
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
+        if (!isnan(err_log_prb)) {
+            if (log_lkl < err_log_prb)
+                log_lkl = err_log_prb;
+            else if (log_lkl > -err_log_prb)
+                log_lkl = -err_log_prb;
+        }
         sum_log_lkl += log_lkl;
         if (sum_log_lkl > -xy_log_prb) return -1;
         if (sum_log_lkl < xy_log_prb) break;
@@ -884,35 +932,12 @@ static double lrr_ad_lod(const float *lrr_arr, const int16_t *ad0_arr, const int
         int16_t ad1 = imap ? ad1_arr[imap[i]] : ad1_arr[i];
         float log_lkl = lrr_ad_log_lkl(lrr, ad0, ad1, ldev, lrr_sd, lrr_bias, beta_binom_alt)
                         - lrr_ad_log_lkl(lrr, ad0, ad1, 0.0f, lrr_sd, lrr_bias, beta_binom_null);
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
-        ret += log_lkl;
-    }
-    return (double)ret * M_LOG10E;
-}
-
-// return the LOD likelihood for a segment
-static double ad_lod(const int16_t *ad0_arr, const int16_t *ad1_arr, int n, const int *imap, float err_log_prb,
-                     float ad_rho, double bdev) {
-    if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
-
-    int n1, n2;
-    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
-    beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
-    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, ad_rho, n1, n2);
-    float ret = 0.0f;
-    for (int i = 0; i < n; i++) {
-        int16_t ad0 = imap ? ad0_arr[imap[i]] : ad0_arr[i];
-        int16_t ad1 = imap ? ad1_arr[imap[i]] : ad1_arr[i];
-        float log_lkl =
-            log_mean_expf(beta_binom_log_lkl(beta_binom_alt, ad0, ad1), beta_binom_log_lkl(beta_binom_alt, ad1, ad0))
-            - beta_binom_log_lkl(beta_binom_null, ad0, ad1);
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
+        if (!isnan(err_log_prb)) {
+            if (log_lkl < err_log_prb)
+                log_lkl = err_log_prb;
+            else if (log_lkl > -err_log_prb)
+                log_lkl = -err_log_prb;
+        }
         ret += log_lkl;
     }
     return (double)ret * M_LOG10E;
@@ -934,10 +959,12 @@ static double ad_phase_lod(const int16_t *ad0_arr, const int16_t *ad1_arr, const
         int8_t p = imap ? gt_phase[imap[i]] : gt_phase[i];
         if (bdev_phase) p *= (int8_t)SIGN(bdev_phase[i]); // notice bdev_phase has no imap
         float log_lkl = ad_phase_log_lkl(ad0, ad1, p, beta_binom_alt) - ad_phase_log_lkl(ad0, ad1, 0, beta_binom_null);
-        if (log_lkl < err_log_prb)
-            log_lkl = err_log_prb;
-        else if (log_lkl > -err_log_prb)
-            log_lkl = -err_log_prb;
+        if (!isnan(err_log_prb)) {
+            if (log_lkl < err_log_prb)
+                log_lkl = err_log_prb;
+            else if (log_lkl > -err_log_prb)
+                log_lkl = -err_log_prb;
+        }
         ret += log_lkl;
     }
     return (double)ret * M_LOG10E;
@@ -1568,19 +1595,12 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                                     &mocha);
                     // compute bdev, if possible
                     if (mocha.n_hets > 0) {
-                        double f(double x, void *data) {
-                            if (model->flags & WGS_DATA)
-                                return -ad_lod(ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb,
-                                               self->stats.dispersion, x);
-                            else
-                                return -baf_lod(baf + a, b + 1 - a, NULL, model->err_log_prb, self->stats.dispersion,
-                                                x);
-                        }
-                        double x;
-                        kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
-                        mocha.bdev = fabsf((float)x);
-                    } else
+                        mocha.bdev = model->flags & WGS_DATA
+                                         ? get_ad_bdev(ad0 + a, ad1 + a, b + 1 - a, NULL, self->stats.dispersion)
+                                         : get_baf_bdev(baf + a, b + 1 - a, NULL, self->stats.dispersion);
+                    } else {
                         mocha.bdev = NAN;
+                    }
                     mocha_table->n++;
                     hts_expand(mocha_t, mocha_table->n, mocha_table->m, mocha_table->a);
                     mocha_table->a[mocha_table->n - 1] = mocha;
@@ -1684,14 +1704,22 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 
             double f(double x, void *data) {
                 if (model->flags & WGS_DATA)
-                    return -lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.n_sites, NULL, model->err_log_prb,
-                                       model->lrr_bias, model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
+                    return -lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.n_sites, NULL, NAN, model->lrr_bias,
+                                       model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
                 else
-                    return -lrr_baf_lod(lrr + a, baf + a, mocha.n_sites, NULL, model->err_log_prb, model->lrr_bias,
-                                        model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
+                    return -lrr_baf_lod(lrr + a, baf + a, mocha.n_sites, NULL, NAN, model->lrr_bias, model->lrr_hap2dip,
+                                        self->adjlrr_sd, self->stats.dispersion, x);
             }
-            double x, fx = kmin_brent(f, -0.15, 0.15, NULL, KMIN_EPS, &x);
-            mocha.lod_lrr_baf = -(float)fx;
+            double x;
+            kmin_brent(f, -0.15, 0.15, NULL, KMIN_EPS, &x);
+            if (model->flags & WGS_DATA)
+                mocha.lod_lrr_baf =
+                    lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.n_sites, NULL, model->err_log_prb, model->lrr_bias,
+                               model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
+            else
+                mocha.lod_lrr_baf =
+                    lrr_baf_lod(lrr + a, baf + a, mocha.n_sites, NULL, model->err_log_prb, model->lrr_bias,
+                                model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
 
             if (hmm_model == LRR_BAF) {
                 // here you need to check whether the call would have been
@@ -1718,18 +1746,12 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 
                 // compute bdev, if possible
                 if (n_hets_imap > 0) {
-                    double f(double x, void *data) {
-                        if (model->flags & WGS_DATA)
-                            return -ad_lod(ad0, ad1, n_hets_imap, hets_imap_arr, model->err_log_prb,
-                                           self->stats.dispersion, x);
-                        else
-                            return -baf_lod(baf, n_hets_imap, hets_imap_arr, model->err_log_prb, self->stats.dispersion,
-                                            x);
-                    }
-                    fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
-                    mocha.bdev = fabsf((float)x);
-                } else
+                    mocha.bdev = model->flags & WGS_DATA
+                                     ? get_ad_bdev(ad0, ad1, n_hets_imap, hets_imap_arr, self->stats.dispersion)
+                                     : get_baf_bdev(baf, n_hets_imap, hets_imap_arr, self->stats.dispersion);
+                } else {
                     mocha.bdev = NAN;
+                }
                 mocha.bdev_se = NAN;
                 for (int j = 0; j < n_hets_imap; j++)
                     bdev_phase[hets_imap_arr[j]] = (int8_t)SIGN(baf[hets_imap_arr[j]] - 0.5f);
@@ -1739,17 +1761,32 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                 for (int j = beg[i]; j < end[i]; j++)
                     if (path[j] != path[j + 1]) mocha.n_flips++;
 
-                double f(double x, void *data) {
-                    if (model->flags & WGS_DATA)
-                        return -ad_phase_lod(ad0, ad1, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i],
-                                             model->err_log_prb, self->stats.dispersion, x);
-                    else
-                        return -baf_phase_lod(baf, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i],
-                                              model->err_log_prb, self->stats.dispersion, x);
+                if (model->flags & WGS_DATA) {
+                    double f(double x, void *data) {
+                        return -ad_phase_lod(ad0, ad1, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i], NAN,
+                                             self->stats.dispersion, x);
+                    }
+                    double bdev;
+                    kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
+                    mocha.bdev = fabsf((float)bdev);
+                    mocha.lod_baf_phase = ad_phase_lod(ad0, ad1, gt_phase, mocha.n_hets, imap_arr + beg[i],
+                                                       path + beg[i], model->err_log_prb, self->stats.dispersion, x);
+                } else {
+                    mocha.bdev = get_baf_bdev(baf, mocha.n_hets, imap_arr + beg[i], self->stats.dispersion);
+                    // if estimated bdev is too small, use method with phase for proper estimation
+                    if (isnan(mocha.bdev) || mocha.bdev < self->stats.dispersion) {
+                        double f(double x, void *data) {
+                            return -baf_phase_lod(baf, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i], NAN,
+                                                  self->stats.dispersion, x);
+                        }
+                        double bdev;
+                        kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
+                        mocha.bdev = fabsf((float)bdev);
+                    }
+                    mocha.lod_baf_phase = baf_phase_lod(baf, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i],
+                                                        model->err_log_prb, self->stats.dispersion, mocha.bdev);
                 }
-                double x, fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
-                mocha.bdev = fabsf((float)x);
-                mocha.lod_baf_phase = -(float)fx + (float)mocha.n_flips * model->flip_log_prb * (float)M_LOG10E;
+                mocha.lod_baf_phase += (float)mocha.n_flips * model->flip_log_prb * (float)M_LOG10E;
 
                 for (int j = 0; j < mocha.n_hets; j++)
                     pbaf_arr[j] = (baf[imap_arr[beg[i] + j]] - 0.5f) * (float)SIGN(path[beg[i] + j]);
@@ -1889,8 +1926,7 @@ static void sample_stats(sample_t *self, const model_t *model) {
         if (model->flags & WGS_DATA) {
             double f(double x, void *data) { return -lod_lkl_beta_binomial(ad0, ad1, n_imap, imap_arr, x); }
             double x;
-            kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS,
-                       &x); // dispersions above 0.5 are not allowed
+            kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x); // dispersions above 0.5 are not allowed
             self->x_nonpar_dispersion = (float)x;
         } else {
             self->x_nonpar_dispersion = get_sample_sd(baf, n_imap, imap_arr);
@@ -2114,8 +2150,7 @@ static int put_contig(bcf_srs_t *sr, const sample_t *sample, const model_t *mode
                     bdev[sample[j].idx] = int16_to_float(sample[j].data_arr[BDEV][synced_iter[j]]);
                 if (sample[j].phase_arr) bdev_phase[sample[j].idx] = sample[j].phase_arr[synced_iter[j]];
             } else {
-                // if no match variant found, match the end of the contig or
-                // keep conservative
+                // if no match variant found, match the end of the contig or keep conservative
                 if (i == 0 && sample[j].data_arr[BDEV])
                     bdev[sample[j].idx] = int16_to_float(sample[j].data_arr[BDEV][0]);
                 if (i == 0 && sample[j].data_arr[LDEV])

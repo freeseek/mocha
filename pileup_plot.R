@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2020 Giulio Genovese
+#  Copyright (C) 2017-2021 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-pileup_plot_version <- '2020-09-01'
+pileup_plot_version <- '2021-01-20'
 
 library(optparse)
 library(ggplot2)
@@ -35,6 +35,8 @@ parser <- OptionParser('usage: pileup_plot.R [options] --cytoband <cytoband.txt.
 parser <- add_option(parser, c('--cytoband'), type = 'character', help = 'cytoband file', metavar = '<cytoband.txt.gz>')
 parser <- add_option(parser, c('--stats'), type = 'character', help = 'input MoChA stats file', metavar = '<file.tsv>')
 parser <- add_option(parser, c('--calls'), type = 'character', help = 'input MoChA calls file', metavar = '<file.tsv>')
+parser <- add_option(parser, c('--call-rate-thr'), type = 'double', default = 0.97, help = 'minimum call rate threshold [0.97]', metavar = '<float>')
+parser <- add_option(parser, c('--baf-auto-thr'), type = 'double', default = 0.03, help = 'maximum BAF autocorrelation threshold [0.03]', metavar = '<float>')
 parser <- add_option(parser, c('--pdf'), type = 'character', help = 'output PDF file', metavar = '<file.pdf>')
 parser <- add_option(parser, c('--width'), type = 'integer', default = 7, help = 'inches width of the output file [7]', metavar = '<integer>')
 parser <- add_option(parser, c('--height'), type = 'integer', default = 7, help = 'inches height of the output file [7]', metavar = '<integer>')
@@ -49,7 +51,7 @@ if (is.null(args$calls)) {print_help(parser); stop('option --calls is required')
 if (is.null(args$pdf)) {print_help(parser); stop('option --pdf is required')}
 
 df_stats <- read.table(args$stats, sep = '\t', header = TRUE)
-xcl_smpls <- df_stats$sample_id[df_stats$call_rate < .97 & df_stats$baf_conc > .51]
+xcl_smpls <- df_stats$sample_id[df_stats$call_rate < args$`call-rate-thr` & df_stats$baf_auto > args$`baf-auto-thr`]
 df_calls <- read.table(args$calls, sep = '\t', header = TRUE)
 df_calls$chrom <- as.factor(gsub('^chr', '', gsub('^chrM', 'MT', df_calls$chrom)))
 ord <- order(as.numeric(gsub('MT', '26', gsub('Y', '24', gsub('X', '23', levels(df_calls$chrom))))))

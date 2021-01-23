@@ -57,7 +57,7 @@ The following diagram depicts all possible files that you might need to input in
 
 Not all files will be needed and which ones are needed will be defined by the analysis mode selected
 
-For Illumina data you will need to provide a CSV manifest file, a BPM manifest file, and an EGT cluster file. Illumina provides these files for their arrays <a href="https://support.illumina.com/array/downloads.html">here</a> or through their customer support. You will need to make sure you are using the correct manifest and cluster files or else the behavior will be undefined. All Illumina arrays should be supported
+For Illumina data you will need to provide a CSV manifest file, a BPM manifest file, and an EGT cluster file. Illumina provides these files for their arrays <a href="https://support.illumina.com/array/downloads.html">here</a> or through their customer support. You will need to make sure you are using the correct manifest and cluster files or else the behavior will be undefined. All Illumina arrays should be supported. Notice that some custom Illumina arrays, such as the Global Screening Array + Multi Disease (GSAMD), are extensions of more mainstream Illumina arrays, such as the Global Screening Array (GSA). A manifest file for the latter will likely worker for data from the former, but you will end up missing some custom probes in doing so. Illumina only provides manifest files for custom arrays through their customer support.
 
 For Affymetrix data you will need to provide a CSV manifest file. If you are providing CEL files you will need to provide an XML option file and then a ZIP file including all the files listed within the XML option file. You will need to manually create the ZIP file. Alternatively, you can also provide a mix of SNP posterior files containing cluster information and either CHP files or calls TXT and summary TXT files containing genotype and intensities information, all files that can be generated with apt-probeset-genotype or the apt-genotype-axiom <a href="https://www.thermofisher.com/us/en/home/life-science/microarray-analysis/microarray-analysis-partners-programs/affymetrix-developers-network/affymetrix-power-tools.html">Affymetrix Power Tools</a> softwares. However, only analysis types AxiomGT1 and birdseed are supported. In particular, Affymetrix arrays before the Genome-Wide Human SNP Array 6.0 are not supported
 
@@ -130,7 +130,7 @@ Allowed columns in the batch table:
 
 Some files in this table can be provided in gzip format and the **sam** alignment file can be provided either as a SAM or as a BAM file. The pipeline will process these seamlessly
 
-It is extremely important that the **batch_id** column contains unique IDs. Repeated IDs will cause undefined behavior. It is also equally important that, if the boolean **realign** variable is left to its default **false** value, then the **csv** manifest files must be provided with respect to the same reference genome as the one selected in the **ref_json_file** variable. A mismatch in the two references will cause undefined behavior. For newer DNA microarrays, Illumina follows a convention of providing manifest files ending with the **1** suffix for GRCh37 (e.g\. `Multi-EthnicGlobal_D1.csv`) amd ending with the **2** suffix for GRCh38 (e.g\. `Multi-EthnicGlobal_D2.csv`). We recommend to always use GRCh38 with the latter type of manifest files and, whenever GRCh38 manifests are not available from Illumina, to still use GRCh38 by setting the boolean **realign** variable to **true**
+It is extremely important that the **batch_id** column contains unique IDs. Repeated IDs will cause undefined behavior. It is also equally important that, if the boolean **realign** variable is left to its default **false** value, then the **csv** manifest files must be provided with respect to the same reference genome as the one selected in the **ref_name** variable. A mismatch in the two references will cause undefined behavior. For newer DNA microarrays, Illumina follows a convention of providing manifest files ending with the **1** suffix for GRCh37 (e.g\. `Multi-EthnicGlobal_D1.csv`) amd ending with the **2** suffix for GRCh38 (e.g\. `Multi-EthnicGlobal_D2.csv`). We recommend to always use GRCh38 with the latter type of manifest files and, whenever GRCh38 manifests are not available from Illumina, to still use GRCh38 by setting the boolean **realign** variable to **true**
 
 If you are running the pipeline in **idat** mode, it is important that the **bpm** file name matches the internal descriptor file name or a safety check during the conversion from GTC to VCF will fail. You can verify the internal descriptor file name with the command `bcftools +gtc2vcf -b $bpm_file`. We have observed discrepancies only in old Illumina BPM manifest files. If necessary, you can use set the boolean flag **do_not_check_bpm** to turn off this safety check
 
@@ -161,9 +161,26 @@ The following are the primary options that you can set in the main input json fi
 | phase_threads          | Int?     | number of threads for the SHAPEIT4/Eagle phasing software [4]                                     |
 | max_win_size_cm        | Float?   | maximum windows size in cM for phasing [300.0]                                                    |
 | overlap_size_cm        | Float?   | required overlap size in cM for consecutive windows [5.0]                                         |
-| ref_path               | String?  | path for reference genome resources, unless already provided with path                            |
-| manifest_path          | String?  | path for manifest file resources, unless already provided with path                               |
-| ref_json_file          | File     | JSON file with genome reference information                                                       |
+| sample_call_rate_thr   | Float?   | Minimum sample call rate allowed for quality control and plotting purposes [0.97]                 |
+| variant_call_rate_thr  | Float?   | Minimum sample call rate allowed for plotting purposes [0.97]                                     |
+| baf_auto_thr           | Float?   | Minimum sample call rate allowed for plotting purposes [0.03]                                     |
+| ext_string             | String?  | Extension suffix for VCF files with Bdev_Phase information [bdev]                                 |
+| ref_name               | String?  | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]              |
+| ref_path               | String?  | path for reference genome resources, unless already provided with path []                         |
+| ref_fasta              | String?  | reference sequence [GCA_000001405.15_GRCh38_no_alt_analysis_set.fna/human_g1k_v37.fasta]          |
+| n_chrs                 | Int?     | number of chromosomes [23]                                                                        |
+| mhc_reg                | String?  | coordinates for MHC region [chr6:27518932-33480487/6:27486711-33448264]                           |
+| kir_reg                | String?  | coordinates for KIR region [chr19:54071493-54992731/19:54574747-55504099]                         |
+| dup_file               | String?  | file with location of segmental duplications [dup.grch38.bed.gz/dup.grch37.bed.gz]                |
+| genetic_map_file       | String?  | genetic map [genetic_map_hg38_withX.txt.gz/genetic_map_hg19_withX.txt.gz]                         |
+| cnp_file               | String?  | file with location of copy number polymorphism [cnp.grch38.bed/cnp.grch37.bed]                    |
+| cyto_file              | String?  | file with location of cytoband regions [cytoBand.hg38.txt.gz/cytoBand.hg19.txt.gz]                |
+| panel_pfx              | String?  | prefix for phasing reference [ALL./ALL.chr]                                                       |
+| panel_sfx              | String?  | suffix for phasing reference [_GRCh38.genotypes.20170504/.phase3_integrated.20130502.genotypes]   |
+| panel_idx              | String?  | index extension for phasing reference [.bcf]                                                      |
+| n_panel_smpls          | Int?     | number of samples in phasing reference [2504]                                                     |
+| manifest_path          | String?  | path for manifest file resources if these are provided without path []                            |
+| data_path              | String?  | path for data files if these are provided without path or if path not provided in batch file []   |
 | sample_tsv_file        | File     | TSV file with sample information                                                                  |
 | batch_tsv_file         | File     | TSV file with batch information                                                                   |
 | ped_file               | File?    | optional PED file for improved phasing with trios                                                 |
@@ -173,54 +190,19 @@ The following are the primary options that you can set in the main input json fi
 | mocha_extra_args       | String   | extra arguments for MoChA                                                                         |
 | basic_bash_docker      | String   | docker to run basic bash scripts [ubuntu:latest]                                                  |
 | pandas_docker          | String   | docker to run task ref_scatter [amancevice/pandas:slim]                                           |
-| iaap_cli_docker        | String   | docker to run task idat2gtc [us.gcr.io/mccarroll-mocha/iaap_cli:1.10.2-yyyymmdd]                  |
-| autoconvert_docker     | String   | docker to run task idat2gtc [us.gcr.io/mccarroll-mocha/autoconvert:1.10.2-yyyymmdd]               |
-| apt_docker             | String   | docker to run task cel2chp [us.gcr.io/mccarroll-mocha/apt:1.10.2-yyyymmdd]                        |
-| gtc2vcf_docker         | String   | docker to run tasks csv2bam {gtc,chp,txt}2vcf [us.gcr.io/mccarroll-mocha/gtc2vcf:1.10.2-yyyymmdd] |
-| bcftools_docker        | String   | docker to run tasks requiring bcftools [us.gcr.io/mccarroll-mocha/bcftools:1.10.2-yyyymmdd]       |
-| shapeit4_docker        | String   | docker to run task vcf_phase [us.gcr.io/mccarroll-mocha/shapeit4:1.10.2-yyyymmdd]                 |
-| eagle_docker           | String   | docker to run task vcf_phase [us.gcr.io/mccarroll-mocha/eagle:1.10.2-yyyymmdd]                    |
-| mocha_docker           | String   | docker to run task vcf_mocha [us.gcr.io/mccarroll-mocha/mocha:1.10.2-yyyymmdd]                    |
-| mocha_plot_docker      | String   | docker to run tasks mocha_{plot,summary} [us.gcr.io/mccarroll-mocha/mocha_plot:1.10.2-yyyymmdd]   |
+| iaap_cli_docker        | String   | docker to run task idat2gtc [us.gcr.io/mccarroll-mocha/iaap_cli:1.11-yyyymmdd]                    |
+| autoconvert_docker     | String   | docker to run task idat2gtc [us.gcr.io/mccarroll-mocha/autoconvert:1.11-yyyymmdd]                 |
+| apt_docker             | String   | docker to run task cel2chp [us.gcr.io/mccarroll-mocha/apt:1.11-yyyymmdd]                          |
+| gtc2vcf_docker         | String   | docker to run tasks csv2bam {gtc,chp,txt}2vcf [us.gcr.io/mccarroll-mocha/gtc2vcf:1.11-yyyymmdd]   |
+| bcftools_docker        | String   | docker to run tasks requiring bcftools [us.gcr.io/mccarroll-mocha/bcftools:1.11-yyyymmdd]         |
+| shapeit4_docker        | String   | docker to run task vcf_phase [us.gcr.io/mccarroll-mocha/shapeit4:1.11-yyyymmdd]                   |
+| eagle_docker           | String   | docker to run task vcf_phase [us.gcr.io/mccarroll-mocha/eagle:1.11-yyyymmdd]                      |
+| mocha_docker           | String   | docker to run task vcf_mocha [us.gcr.io/mccarroll-mocha/mocha:1.11-yyyymmdd]                      |
+| mocha_plot_docker      | String   | docker to run tasks mocha_{plot,summary} [us.gcr.io/mccarroll-mocha/mocha_plot:1.11-yyyymmdd]     |
 
 The **ref_path** variable should contain the path to the genome reference resources. These are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a> for either the GRCh37 or GRCh38 human genome reference
 
-The **ref_json_file** file should look either like this for the <a href="GRCh37.json">GRCh37</a> reference:
-```json
-{
-  "name": "GRCh37",
-  "fasta_ref": "human_g1k_v37.fasta",
-  "n_chrs": 23,
-  "mhc_reg": "6:27486711-33448264",
-  "kir_reg": "19:54574747-55504099",
-  "dup_file": "dup.grch37.bed.gz",
-  "genetic_map_file": "genetic_map_hg19_withX.txt.gz",
-  "cnp_file": "cnp.grch37.bed",
-  "cyto_file": "cytoBand.hg19.txt.gz",
-  "kgp_pfx": "ALL.chr",
-  "kgp_sfx": ".phase3_integrated.20130502.genotypes.bcf",
-  "n_smpls": 2504
-}
-```
-Or like this for the <a href="GRCh38.json">GRCh38</a> reference:
-```json
-{
-  "name": "GRCh38",
-  "fasta_ref": "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna",
-  "n_chrs": 23,
-  "mhc_reg": "chr6:27518932-33480487",
-  "kir_reg": "chr19:54071493-54992731",
-  "dup_file": "dup.grch38.bed.gz",
-  "genetic_map_file": "genetic_map_hg38_withX.txt.gz",
-  "cnp_file": "cnp.grch38.bed",
-  "cyto_file": "cytoBand.hg38.txt.gz",
-  "kgp_pfx": "ALL.",
-  "kgp_sfx": "_GRCh38.genotypes.20170504.bcf",
-  "n_smpls": 2504
-}
-
-```
-However, if you do not provide the **ref_path** variable, variables **fasta_ref**, **dup_file**, **genetic_map_file**, **cnp_file**, **cyto_file**, and **kgp_pfx** will need to be provided with their full path. Also notice that the reference genome file should come with the fasta index file and, if you request the manifest files to be realigned, you will need to make sure it also comes with the five corresponding bwa index files. The fasta index file needs to be such that the first 23 entries correspond to the 22 human autosomes and chromosome X, in no specific order
+However, if you do not provide the **ref_path** variable, variables **ref_fasta**, **dup_file**, **genetic_map_file**, **cnp_file**, **cyto_file**, and **panel_pfx** will need to be provided with their full path. Also notice that the reference genome file should come with the fasta index file and, if you request the manifest files to be realigned, you will need to make sure it also comes with the five corresponding bwa index files. The fasta index file needs to be such that the first 23 entries correspond to the 22 human autosomes and chromosome X, in no specific order
 
 The **manifest_path** variable should contain the path to all the CSV/BPM/EGT/XML/ZIP/SAM files necessary to run the analyses. If these manifest files are located in different directories, then provide them with their full path and leave the **manifest_path** variable empty
 
@@ -274,6 +256,7 @@ After a pipeline run, assuming the **target** variable is set to the default **p
 | vcf_idxs             | Array[File]  | yes  | yes  | yes  | yes  | yes  | yes  | yes  | output VCF indexes                                  |
 | xcl_vcf_file         | File?        | yes  | yes  | yes  | yes  | yes  | yes  |      | VCF of variants excluded from analysis              |
 | xcl_vcf_idx          | File?        | yes  | yes  | yes  | yes  | yes  | yes  |      | index for VCF of variants excluded from analysis    |
+| output_tsv_file      | File         | yes  | yes  | yes  | yes  | yes  | yes  | yes  | table with output VCF files                         |
 
 Running with Terra
 ==================
@@ -283,10 +266,9 @@ While the pipeline can be run with a Cromwell server alone, even on your laptop,
 * <a href="https://support.terra.bio/hc/en-us/articles/360034677651-Account-setup-and-exploring-Terra">Setup an account</a> with Terra associated with a billing account
 * Create a new Terra workspace
 * Find the <a href="https://portal.firecloud.org/?return=terra#methods/mocha/mocha/">MoChA method</a> in the Broad Methods Repository and have it exported to your workspace (you can choose **sample_set** as Root Entity Type)
-* Setup resources for GRCh37 or GRCh38 (available for download <a href="http://software.broadinstitute.org/software/mocha/">here</a>) by unpacking them in a directory in your own Google bucket, such as **gs://your-google-bucket/GRCh38/** and making sure that the **ref_path** variable points to that path including the trailing **/**
-* Make sure the bucket with the reference genome resources can be accessed by your Terra service account. Your Terra service account will be labeled like **pet-012345678909876543210@TERRA-PROJECT.iam.gserviceaccount.com** and you will have to add it to the list of members with permission to access the bucket with the role "Storage Object Viewer". You can use a command like the following: **gsutil iam ch serviceAccount:pet-012345678909876543210@TERRA-PROJECT.iam.gserviceaccount.com:objectViewer gs://your-bucket**
-* Have the basic configuration files <a href="GRCh37.json">GRCh37</a> and <a href="GRCh38.json">GRCh38</a> available in your Google bucket making sure that the variable **ref_json_file** points to the Google bucket locations where you have located the configuration file to be used
-* Upload your CSV/BPM/EGT/XML/ZIP manifest files in the same location in your Google bucket, such as **gs://your-google-bucket/manifests/** and making sure that the **manifest_path** variable points to that path including the trailing **/**. Alternatively you can leave the **manifest_path** variable empty and include the full paths in the **batch_tsv_file** table
+* Setup resources for GRCh37 or GRCh38 (available for download <a href="http://software.broadinstitute.org/software/mocha/">here</a>) by unpacking them in a directory in your own Google bucket, such as **gs://{google-bucket}/GRCh38/** and making sure that the **ref_path** variable points to that path including the trailing **/**
+* Make sure the bucket with the reference genome resources can be accessed by your Terra service account. Your Terra service account will be labeled like **pet-012345678909876543210@TERRA-PROJECT.iam.gserviceaccount.com** and you will have to add it to the list of members with permission to access the bucket with the role "Storage Object Viewer". You can use a command like the following: **gsutil iam ch serviceAccount:pet-012345678909876543210@TERRA-PROJECT.iam.gserviceaccount.com:objectViewer gs://{google-bucket}**
+* Upload your CSV/BPM/EGT/XML/ZIP manifest files in the same location in your Google bucket, such as **gs://{google-bucket}/manifests/** and making sure that the **manifest_path** variable points to that path including the trailing **/**. Alternatively you can leave the **manifest_path** variable empty and include the full paths in the **batch_tsv_file** table
 * Upload your IDAT/GTC/CEL/CHP/TXT/VCF files to your Google bucket, if you have uploaded CHP/TXT files, make sure you upload also the corresponding SNP **AxiomGT1.snp-posteriors.txt** and report **AxiomGT1.report.txt** files
 * Format two TSV tables describing samples and batches as explained in the inputs section, upload them to your Google bucket, and make sure variables **sample_tsv_file** and **batch_tsv_file** are set to their location. If you include the file names without their absolute paths, you can include the path including the trailing **/** in the **path** column but you have to make sure all data files from the same batch are in the same directory. See below for examples for Illumina and Affymetrix arrays
 * Create a JSON file with all the variables including the cohort ID (**sample_set_id**), the **mode** of the analysis, the location of your tables and resource files, parameters to select the amount of desired parallelization. See below for examples for Illumina and Affymetrix arrays
@@ -300,29 +282,63 @@ Running with Cromwell on Google Cloud Platform
 
 If you want to run the pipeline without Terra, you can set up your own Cromwell server instead. This is notoriously difficult. These are the steps that I personally advice to take:
 
-* Create a project `MY-GOOGLE-PROJECT` from the Google Cloud Platform
-* Enable Google Genomics API from <a href="https://console.cloud.google.com/flows/enableapi?apiid=genomics.googleapis.com,compute.googleapis.com,storage-api.googleapis.com">here</a>
-* Find default service account for `MY-GOOGLE-PROJECT` from the <a href="https://console.cloud.google.com/iam-admin/iam">IAM</a> page which should be labeled as `MY-NUMBER-compute@developer.gserviceaccount.com`
-* Download a private key for your service account either from the <a href="https://console.cloud.google.com/iam-admin/serviceaccounts">Service accounts</a> page. You should get a `MY-GOOGLE-PROJECT-############.json` file
-* add the following roles to the service account `Cloud Life Sciences Workflows Runner`, `Service Account User`, `Storage Object Admin`, using the following commands (or manually from the <a href="https://console.cloud.google.com/iam-admin/iam">IAM</a> page):
+* Initialize your Google Cloud configuration:
 ```
-for role in lifesciences.workflowsRunner iam.serviceAccountUser storage.objectAdmin; do
-  gcloud projects add-iam-policy-binding MY-GOOGLE-PROJECT --member serviceAccount:MY-NUMBER-compute@developer.gserviceaccount.com --role roles/$role
+$ gcloud init
+```
+* If your institution has not provided you with one, create a billing account from the <a href="https://console.cloud.google.com/billing">Billing</a> page
+* Create a project `{google-project}` in your Google Cloud Platform account from the <a href="https://console.cloud.google.com/cloud-resource-manager">Manage resources</a> page 
+* Find default service account for `{google-project}` from the <a href="https://console.cloud.google.com/iam-admin/iam">IAM</a> page which should be labeled as `{google-number}-compute@developer.gserviceaccount.com`
+* Download a private json key for your service account through the following command:
+```
+$ gcloud iam service-accounts keys create {google-project}.key.json --iam-account={google-number}-compute@developer.gserviceaccount.com
+```
+or from the <a href="https://console.cloud.google.com/iam-admin/serviceaccounts">Service accounts</a> page by selecting the `{google-project}` first and then the `{google-number}-compute@developer.gserviceaccount.com` service account
+* Enable the Cloud Life Sciences API for your Google project from the Google <a href="https://console.developers.google.com/apis/library/lifesciences.googleapis.com">console</a>
+* Enable the Compute Engine API for your Google project from the Google <a href="https://console.cloud.google.com/apis/library/compute.googleapis.com">console</a>
+* Enable the Google Cloud Storage JSON API for your Google project from the Google <a href="https://console.cloud.google.com/apis/library/storage-api.googleapis.com">console</a>
+```
+$ for api in lifesciences compute storage-api; do
+  gcloud services enable $api.googleapis.com
 done
 ```
-* Start a Google VM with name `INSTANCE-ID` from the <a href="https://console.cloud.google.com/compute/instances">VM instances</a> page. The n1-standard-1 (1 vCPU, 3.75 GB memory) basic VM with Ubuntu 20.04 will be sufficient
-* Once the Google VM is up and running you can login to the VM with the following command:
+* You need the following roles available to your service account: `Cloud Life Sciences Workflows Runner`, `Service Account User`, `Storage Object Admin`. To add these roles you need to have been assigned the rights to change roles you can use the following commands (or manually from the <a href="https://console.cloud.google.com/iam-admin/iam">IAM</a> page):
 ```
-gcloud compute ssh INSTANCE-ID -- -L 8000:localhost:8000
+$ for role in lifesciences.workflowsRunner iam.serviceAccountUser storage.objectAdmin; do
+  gcloud projects add-iam-policy-binding {google-project} --member serviceAccount:{google-number}-compute@developer.gserviceaccount.com --role roles/$role
+done
 ```
-* Once in the virtual machine, install some basic packages as well as the Cromwell server (replace `XY` with the current version):
+* Create a Google bucket `gs://{google-bucket}` making sure request pays is not activated from the <a href="https://console.cloud.google.com/storage/browser">Storage</a> page or through the following command:
 ```
-sudo apt install openjdk-14-jre-headless mysql-server
-wget https://github.com/broadinstitute/cromwell/releases/download/XY/cromwell-XY.jar
+gsutil mb -p {google-project} -l us-central1-a -b on gs://{google-bucket}
+```
+* Create a Google virtual machine (VM) with name `INSTANCE-ID` from the <a href="https://console.cloud.google.com/compute/instances">VM instances</a> page. The n1-standard-1 (1 vCPU, 3.75 GB memory) basic VM with Ubuntu 21.04 will be sufficient, but make sure to provide at least 100GB of space for the boot disk, rather than the default 10GB, as the mySQL database will easily fail with the default space settings
+
+* Start the virtual machine with the following command:
+```
+$ gcloud compute instances start INSTANCE-ID --project {google-project} --zone us-central1-a
+```
+* Copy the private json key for your service account to the VM:
+```
+$ gcloud compute scp {google-project}.key.json INSTANCE-ID: --project mccarroll-mocha --zone us-central1-a
+```
+* Login to the VM with the following command (notice this command will enable ssh tunneling):
+```
+$ gcloud compute ssh INSTANCE-ID --project {google-project} --zone us-central1-a -- -L 8000:localhost:8000
+```
+* Later, if you are not running any computations, to avoid incurring unnecessary costs, make sure you stop the virtual machine with the following command:
+```
+$ gcloud compute instances stop INSTANCE-ID --project {google-project} --zone us-central1-a
+```
+* Once in the virtual machine, install some basic packages as well as the WOMtool and the Cromwell server (replace `XY` with the current version):
+```
+$ sudo apt update && sudo apt install default-jre-headless mysql-server jq
+$ wget https://github.com/broadinstitute/cromwell/releases/download/XY/womtool-XY.jar
+$ wget https://github.com/broadinstitute/cromwell/releases/download/XY/cromwell-XY.jar
 ```
 * Download the <a href="https://github.com/broadinstitute/cromwell/blob/develop/cromwell.example.backends/PAPIv2.conf">PAPIv2.conf</a> configuration file with the following command:
 ```
-wget https://raw.githubusercontent.com/broadinstitute/cromwell/develop/cromwell.example.backends/PAPIv2.conf
+$ wget https://raw.githubusercontent.com/broadinstitute/cromwell/develop/cromwell.example.backends/PAPIv2.conf
 ```
 * Add the webservice stanza to the `PAPIv2.conf` configuration file to make sure the server will only be accessible from the local machine (by default it is open to any interface):
 ```
@@ -339,21 +355,21 @@ google {
     {
       name = "service-account"
       scheme = "service_account"
-      json-file = "MY-GOOGLE-PROJECT-############.json"
+      json-file = "{google-project}.key.json"
     }
   ]
 }
 ```
-* Change `auth = "application-default"` to `auth = "service-account"` in the `PAPIv2.conf` configuration file
-* Change `project = "my-cromwell-workflows"` and `project = "google-billing-project"` to `project = "MY-GOOGLE-PROJECT"` in the `PAPIv2.conf` configuration file
-* Change `root = "gs://my-cromwell-workflows-bucket"` to `root = "gs://MY-GOOGLE-BUCKET/cromwell/cromwell-executions"` in the `PAPIv2.conf` configuration file
+* Change `auth = "application-default"` to `auth = "service-account"` in the `PAPIv2.conf` configuration file in both instances where it occurs
+* Change `project = "my-cromwell-workflows"` and `project = "google-billing-project"` to `project = "{google-project}"` in the `PAPIv2.conf` configuration file
+* Change `root = "gs://my-cromwell-workflows-bucket"` to `root = "gs://{google-bucket}/cromwell/cromwell-executions"` in the `PAPIv2.conf` configuration file
 * As Cromwell will need to load some input files to properly organize the batching, it will need the <a href="https://cromwell.readthedocs.io/en/stable/filesystems/Filesystems/#engine-filesystems">engine filesystem</a> activated for reading files, Add the Google engine stanza to the `PAPIv2.conf` configuration file:
 ```
 engine {
   filesystems {
     gcs {
       auth = "service-account"
-      project = "MY-GOOGLE-PROJECT"
+      project = "{google-project}"
     }
   }
 }
@@ -372,61 +388,109 @@ database {
 }
 ```
 * Optionally, to avoid the database taking more and more space over time and possibly running out of disk space on the VM, add the additional stanza to the `PAPIv2.conf` configuration file to clear the metadata in the database as explained <a href="https://cromwell.readthedocs.io/en/stable/Configuring/#hybrid-metadata-storage-classic-carbonite">here</a>
+* If you want to configure the directory of the mysql database to something other than `/var/lib/mysql` make sure to set the `datadir` variable in the `/etc/mysql/mysql.conf.d/mysqld.cnf` file
 * Start the mySQL server and initialize the root user with the following command (use cromwell as the default root password):
 ```
-sudo systemctl start mysql
-sudo mysql_secure_installation
+$ sudo systemctl start mysql
+$ sudo mysql_secure_installation
 ```
-* Login into the mySQL database with the following command:
+* Login into the mySQL database and run the following commands to create a database to be used by Cromwell:
 ```
-sudo mysql -u root -pcromwell
-```
-* Run the following commands to create a database to be used by Cromwell:
-```
-CREATE DATABASE cromwell;
-SET GLOBAL validate_password.policy=LOW;
-SET GLOBAL validate_password.length=4;
-CREATE USER 'user'@'localhost' IDENTIFIED BY 'pass';
-GRANT ALL PRIVILEGES ON * . * TO 'user'@'localhost';
+$ sudo mysql --user=root --password=cromwell --execute "SET GLOBAL validate_password.policy=LOW"
+$ sudo mysql --user=root --password=cromwell --execute "SET GLOBAL validate_password.length=4"
+$ sudo mysql --user=root --password=cromwell --execute "CREATE USER 'user'@'localhost' IDENTIFIED BY 'pass'"
+$ sudo mysql --user=root --password=cromwell --execute "GRANT ALL PRIVILEGES ON * . * TO 'user'@'localhost'"
+$ sudo mysql --user=root --password=cromwell --execute "CREATE DATABASE cromwell"
 ```
 * Start the Cromwell server on the Google VM with the following command:
 ```
-(java -Xmx3500m -Dconfig.file=PAPIv2.conf -jar cromwell-XY.jar server &)
+$ (java -Xmx3500m -Dconfig.file=PAPIv2.conf -jar cromwell-XY.jar server &)
+```
+* Now it would be a good time to test whether the configuration worked well. Edit and generate the following `hello.wdl` workflow file:
+```
+version development
+
+workflow myWorkflow {
+  call myTask
+}
+
+task myTask {
+  command {
+    echo "hello world"
+  }
+  output {
+    String out = read_string(stdout())
+  }
+  runtime {
+    docker: "ubuntu:latest"
+  }
+}
+```
+* Submit the workflow to the Cromwell server:
+```
+$ java -jar cromwell-XY.jar submit hello.wdl
+```
+* You will receive an output as follows with the `{id}` of the submitted job:
+```
+[yyyy-mm-dd hh:mm:ss,ss] [info] Slf4jLogger started
+[yyyy-mm-dd hh:mm:ss,ss] [info] Workflow 01234567-89ab-dcef-0123-456789abcdef submitted to http://localhost:8000
+```
+* You can then monitor the submitted workflow until completion with the following command:
+```
+$ curl -X GET http://localhost:8000/api/workflows/v1/{id}/metadata | jq
 ```
 * Create an `options.json` file for Cromwell that should look like this (additional options can be used from <a href="https://cromwell.readthedocs.io/en/stable/wf_options/Google/">here</a>):
 ```
 {
   "delete_intermediate_output_files": true,
-  "final_workflow_outputs_dir": "gs://MY-GOOGLE-BUCKET/cromwell/outputs",
+  "final_workflow_outputs_dir": "gs://{google-bucket}/cromwell/outputs",
   "use_relative_output_paths": true,
-  "final_workflow_log_dir": "gs://MY-GOOGLE-BUCKET/cromwell/wf_logs",
-  "final_call_logs_dir": "gs://MY-GOOGLE-BUCKET/cromwell/call_logs"
+  "final_workflow_log_dir": "gs://{google-bucket}/cromwell/wf_logs",
+  "final_call_logs_dir": "gs://{google-bucket}/cromwell/call_logs"
 }
 ```
 * Download the MoChA WDL pipeline:
 ```
-curl https://raw.githubusercontent.com/freeseek/mocha/master/wdl/mocha.wdl -o mocha.wdl
+$ curl https://raw.githubusercontent.com/freeseek/mocha/master/wdl/mocha.wdl -o mocha.wdl
 ```
-* To submit a job, use the command:
+* To verify that your input `{sample-set-id}.json` file is correcly formatted, you can use the WOMtool as follows:
 ```
-java -Dconfig.file=PAPIv2.conf -jar cromwell-XY.jar submit mocha.wdl -i xxx.json -o options.json
+$ java -jar womtool-XY.jar validate mocha.wdl -i {sample-set-id}.json
 ```
-* To monitor a submitted job with workflow ID `00112233-4455-6677-8899-aabbccddeeff` just open your browser and go to URL:
+* To submit a job, use the command (you can run this straight from your computer if you logged to the VM with ssh tunneling):
 ```
-http://localhost:8000/api/workflows/v1/00112233-4455-6677-8899-aabbccddeeff/timing
+$ java -jar cromwell-XY.jar submit mocha.wdl -i {sample-set-id}.json -o options.json
+```
+* To monitor the status of jobs submitted to the server, you can use:
+```
+$ curl -X GET http://localhost:8000/api/workflows/v1/query | jq
+```
+* To monitor the status of a specific job
+```
+$ curl -X GET http://localhost:8000/api/workflows/v1/{id}/metadata | jq
+```
+* To monitor a submitted job with workflow ID `{id}` just open your browser and go to URL:
+```
+http://localhost:8000/api/workflows/v1/{id}/timing
+```
+* To abort a running job, you can simply run:
+```
+$ curl -X POST http://localhost:8000/api/workflows/v1/{id}/abort | jq
 ```
 * To check the size of the mySQL database, run:
 ```
-sudo ls -l /var/lib/mysql/cromwell
+$ sudo ls -l /var/lib/mysql/cromwell
 ```
 * If you want to flush the metadata database to recover disk space from the VM, login into the database and run (though notice that you will have first to stop the Cromwell server and then restart it):
 ```
-DROP DATABASE cromwell;
-CREATE DATABASE cromwell;
+$ killall java # to stop the Cromwell server
+$ sudo mysql --user=root --password=cromwell --execute "DROP DATABASE cromwell"
+$ sudo mysql --user=root --password=cromwell --execute "CREATE DATABASE cromwell"
+$ (java -Xmx3500m -Dconfig.file=PAPIv2.conf -jar cromwell-XY.jar server &)
 ```
-To abort a running job, you can simply run:
+* If you want to clean temporary files and log files, after you have properly moved all the output files you need, you can delete the workflow executions directory defined as `root` in the `PAPIv2.conf` configuration file. Remember that failure to do proper cleanup could cause you to incur unexpected storage costs. After making sure there are no active jobs running with the Cromwell server, you can remove the executions directory with the following command:
 ```
-curl -X POST http://localhost:8000/api/workflows/v1/{id}/abort
+$ gsutil -m rm -r gs://{google-bucket}/cromwell/cromwell-executions
 ```
 
 Filtering Output Calls
@@ -476,7 +540,7 @@ To make best use of the elasticity of cloud computing, the pipeline attempts to 
 
 All tasks but the phasing tasks are set by default to run on a single CPU. All tasks but cel2chp and txt2vcf are set by default to run on preemptible computing on the first run, and to then proceed to run as non-preemptible is they are preempted
 
-Terra has a 2,300 task limit per project (called \"Hog Limits\") but a single job should work well within this limit. Tasks idat2gtc/cel2chp and tasks {gtc,chp,txt}2vcf will output tables with metadata about their input files which will be aggregated across batches
+Terra has a 2,300 task limit per project (called \"Hog Limits\") but a single job should work well within this limit. Tasks idat2gtc/cel2chp and tasks {gtc,chp,txt}2vcf will output tables with metadata about their input files which will be aggregated across batches. From personal experience, even running a small cohort takes a minimum of ~1 hour on Terra, as there are enough housekeeping tasks that need to be run
 
 Troubleshooting
 ===============
@@ -497,6 +561,7 @@ These are some of the messages that you might receive when something goes wrong:
 * If you are running with your own Cromwell server using the PAPIv2 API and you get error `Error attempting to Execute cromwell.backend.google.pipelines.common.api.PipelinesApiRequestManager$UserPAPIApiException: Unable to complete PAPI request due to a problem with the request (The caller does not have permission).` whenever Cromwell tries to submit a task, the the cause is the service account that you are using to run the computations with Google Cloud does not have the <a href="https://cloud.google.com/life-sciences/docs/concepts/access-control#roles">Cloud Life Sciences</a> Workflows Runner (`lifesciences.workflowsRunner`) role set
 * If you are running with your own Cromwell server using the PAPIv2 API and some of your tasks start running but they then fail with and you have the error `Error attempting to Execute cromwell.backend.google.pipelines.common.api.PipelinesApiRequestManager$UserPAPIApiException: Unable to complete PAPI request due to a problem with the request (Error: checking service account permission: caller does not have access to act as the specified service account: "MY_NUMBER-compute@developer.gserviceaccount.com").` in the workflow log, then the cause is the service account not having the <a href="https://cloud.google.com/iam/docs/service-accounts#user-role">Service Account User</a> (`roles/iam.serviceAccountUser`) role set
 * If you are running with your own Cromwell server using the PAPIv2 API and all of your tasks start running but they all fail with a log file including just the line `yyyy/mm/dd hh:mm:ss Starting container setup.` the cause is the service account not having the <a href="https://cloud.google.com/storage/docs/access-control/iam-roles">Storage Object</a> Admin (`storage.objectAdmin`) role set
+* When running the phasing step on a very large cohort, we have noticed that tasks including the MHC can run very slowly. This is due to the very special nature of the MHC and there is currently no solution. Currently these tasks might dominate the speed of the whole pipeline
 
 If you receive an error that you do not understand, feel free contact the <a href="mailto:giulio.genovese@gmail.com">author</a> for troubleshooting
 
@@ -533,8 +598,8 @@ For users and developers that want to understand the logic and ideas behind the 
 * To avoid SIGPIPE error 141 when piping a stream to the UNIX command `head`, we use the `|| if [[ $? -eq 141 ]]; then true; else exit $?; fi` trick
 * To avoid return error 1 when grep returns no matches, we use the `|| if [[ $? -eq 1 ]]; then true; else exit $?; fi` trick
 * To avoid return error 2 when gunzip is used on a file localized as a hard link, we use `gunzip --force`
-* From personal experience, even running a small cohort takes a minimum of ~1 hour on Terra, as there are enough housekeeping tasks that need to be run
-* Conversion from IDAT to GTC for some arrays might fail to infer gender when using IAAP CLI. For this reason, we use by default the IAAP CLI flag **\--gender-estimate-call-rate-threshold -0.1** (similarly to how it is done by the Broad Genomics platform)
+* Due to a numpy <a href="https://github.com/numpy/numpy/issues/10448">BUG in interp</a>, the option `period = np.inf` needs to be added when interpolating chromosome coordinates 
+* Conversion from IDAT to GTC for some arrays might fail to infer gender when using IAAP CLI. For this reason, we use by default the IAAP CLI flag **\--gender-estimate-call-rate-threshold -0.1** (similarly to how it is done by the Broad Genomics platform in <a href="https://github.com/broadinstitute/warp/blob/IlluminaGenotypingArray_v1.11.0/tasks/broad/IlluminaGenotypingArrayTasks.wdl">IlluminaGenotypingArrayTasks.wdl</a>)
 * Conversion from IDAT to GTC using IAAP CLI is 2-3x faster when run on multiple IDATs at once than when run individually on each IDAT (the latter being how the Broad Genomics platform runs it)
 * Conversion from IDAT to GTC for Omni5 arrays requires more than 8GB of RAM
 * Conversion of many GTC or CHP files to VCF can take a long time and be difficult to run on preemptible cloud computing, so making it hierarchical, while requiring more CPU cycles, can actually be cheaper. By default, up to 1,024 GTC or CHP files are converted at once
@@ -543,14 +608,13 @@ For users and developers that want to understand the logic and ideas behind the 
 * Conversion to VCF for Affymetrix data can be done either from AGCC CHP files or from  matrices of tab delimited genotype calls and confidences. We recommend the former as it can be more easily parallelizable by splitting the conversion into sub batches. When converting the latter, the whole batch will need to be converted into VCF in one single task. For this reason task **txt2vcf** is set to run on non-preemptible computing by default
 * All tasks that output a VCF can, if requested, output either in compressed or uncompressed format. For VCFs with BAF and LRR intensities, we observed a modest ~25% space saving, most likely due to the high entropy in the intensity measurements. For VCF files with exclusively the GT format field, we observed around ~75% space saving
 * Due to high sequence divergence between HLA class I and class II genes in the MHC (<a href="http://doi.org/10.1101/gr.213538.116">Norman et al. 2017</a>), heterozygous variants in the MHC region show unusual degrees of allelic imbalance. To avoid false positive mosaic chromosomal alterations we mask the ~6Mbp segment between rs9468147 and rs9366822 on chromosome 6. We further mask a ~1Mbp KIR region between rs4806703 and rs34679212 on chromosome 19
-* Due to residual correlation between the BAF and LRR, observed both for Illumina arrays (<a href="http://doi.org/10.1101/gr.5686107">Oosting et al\. 2007</a> and <a href="http://doi.org/10.1101/gr.5686107">Staaf et al\. 2008</a>) and Affymetrix arrays (<a href="http://doi.org/10.1038/srep36158">Mayrhofer et al\. 2016</a>), MoChA performs a BAF correction by regressing BAF values against LRR values. This improves detection of mosaic chromosomal alterations at low cell fractions. However, for this correction to be effective, batches need to include 100s of samples
+* Due to residual correlation between the BAF and LRR, observed both for Illumina arrays (<a href="http://doi.org/10.1101/gr.5686107">Oosting et al\. 2007</a> and <a href="http://doi.org/10.1186/1471-2105-9-409">Staaf et al\. 2008</a>) and Affymetrix arrays (<a href="http://doi.org/10.1038/srep36158">Mayrhofer et al\. 2016</a>), MoChA performs a BAF correction by regressing BAF values against LRR values. This improves detection of mosaic chromosomal alterations at low cell fractions. However, for this correction to be effective, batches need to include 100s of samples
 * While Illumina internally computes BAF and LRR and stores these values in the GTC files, we instead recompute these values from normalized intensities and genotype cluster centers following the method first described by Illumina in <a href="http://doi.org/10.1101/gr.5402306">Peiffer et al\. 2006</a> but we do non truncate the BAF values between 0 and 1 like Illumina does. This allows to better estimate the residual correlation between the BAF and the LRR for homozygous calls
 * When phasing a dataset with a reference panel only the variants present both in the reference panel and the dataset will be phased. As the 1000 Genomes project reference panel for <a href="https://www.internationalgenome.org/announcements/updated-GRCh38-liftover/">GRCh38</a> is missing the chromosome X PAR1/PAR2 regions and these are exactly the regions that need to be phased to detect mosaic loss of chromosome Y, the most common chromosomal alteration in clonal hematopoiesis, we recommend using SHAPEIT4 without a reference panel to detect mosaic loss of chromosome Y at low cell fractions. This is the default behavior for cohorts whose sample size is more than twice the size of the 1000 Genomes reference panel (2,504 samples)
 * SHAPEIT4 does not have an option to disable imputation of missing target genotypes, like Eagle does. This is problematic as homozygous variants improperly imputed as heterozygous can be interpreted as huge BAF imbalances. To overcome this limitation of SHAPEIT4, we use BCFtools annotate to import the genotypes back in the target VCF using the **\--columns -FMT/GT** option to replace only existing unphased genotype values without modifying missing genotypes
 * SHAPEIT4 is used to phase genotypes across genome windows with overlapping ends. To avoid phase switch errors across windows which would negatively affect the ability to detect large mosaic chromosomal alterations at low cell fractions, we use BCFtools concat with the option **\--ligate** to ligate phased VCFs by matching phase at phased haplotypes over overlapping windows
 * Genotype data is transmitted across tasks in binary VCF format (BCF) rather than plain text VCF format as this is much more efficient to process especially for many samples. The relationship between BCF and VCF is similar to the one between BAM and SAM. The whole pipeline, both for Illumina and Affymetrix data, can completely avoid any intermediate conversion to non-binary format, providing significant time and cost savings (though notice that in **txt** mode the data provided by the user is not in binary format)
 * Many large biobanks perform their genotyping across a span of several years. This causes sometimes to have to switch from one DNA microarray version to a newer version of the same DNA microarray (e.g\. the Global Screening Array v1.0 vs\. the Global Screening Array v2.0). While it is not possible to process samples on different arrays in the same batch, the batched design of the pipeline allows to include samples on separate arrays in the same workflow as long as they are assigned to different batches. One small drawback is that, when the whole cohort is phased across batches, only variants that are shared across all batches will be phased. Therefore we recommend to only process samples genotyped on the same array or on fairly similar arrays. As an example, we absolutely recommend to not process samples from the Global Screening Array and the Multi-Ethnic Global Array in the same workflow, although the user will not be prevented from doing so
-* Several features not available in BCFtools 1.10.2 are needed to run this pipeline, so currently BCFtools needs to be manually compiled
 * The pipeline is designed to be minimalistic and require the user to provide the minimal amount of information necessary to run
 
 Illumina Example
@@ -572,6 +636,7 @@ Download IDAT files and sample trackers:
 wget http://bioconductor.org/packages/release/data/annotation/src/contrib/hapmap370k_1.0.1.tar.gz
 tar xzvf hapmap370k_1.0.1.tar.gz --strip-components=3 hapmap370k/inst/idatFiles
 ```
+Then make sure you copy all the IDAT files in the `gs://{google-bucket}/idats` Google bucket
 
 Define options to run the WDL:
 ```json
@@ -581,12 +646,13 @@ Define options to run the WDL:
   "mocha.realign": true,
   "mocha.max_win_size_cm": 300.0,
   "mocha.overlap_size_cm": 5.0,
-  "mocha.ref_path": "gs://your-google-bucket/GRCh38/",
-  "mocha.ref_json_file": "gs://your-google-bucket/GRCh38.json",
-  "mocha.manifest_path": "gs://your-google-bucket/manifests/",
-  "mocha.batch_tsv_file": "gs://your-google-bucket/hapmap370k.batch.tsv",
-  "mocha.sample_tsv_file": "gs://your-google-bucket/hapmap370k.sample.tsv",
-  "mocha.ped_file": "gs://your-google-bucket/hapmap370k.ped",
+  "mocha.ref_name": "GRCh38",
+  "mocha.ref_path": "gs://{google-bucket}/GRCh38",
+  "mocha.manifest_path": "gs://{google-bucket}/manifests",
+  "mocha.data_path": "gs://{google-bucket}/idats",
+  "mocha.batch_tsv_file": "gs://{google-bucket}/hapmap370k.batch.tsv",
+  "mocha.sample_tsv_file": "gs://{google-bucket}/hapmap370k.sample.tsv",
+  "mocha.ped_file": "gs://{google-bucket}/hapmap370k.ped",
   "mocha.do_not_check_bpm": true
 }
 ```
@@ -594,10 +660,10 @@ Notice that for this example we need the secondary boolean flag **do_not_check_b
 
 The **hapmap370k.batch.tsv** table could look like this:
 
-| batch_id | csv                 | bpm                 | egt                 | path                           |
-|----------|---------------------|---------------------|---------------------|--------------------------------|
-| A        | HumanCNV370v1_C.csv | humancnv370v1_c.bpm | HumanCNV370v1_C.egt | gs://your-google-bucket/idats/ |
-| B        | HumanCNV370v1_C.csv | humancnv370v1_c.bpm | HumanCNV370v1_C.egt | gs://your-google-bucket/idats/ |
+| batch_id | csv                 | bpm                 | egt                 |
+|----------|---------------------|---------------------|---------------------|
+| A        | HumanCNV370v1_C.csv | humancnv370v1_c.bpm | HumanCNV370v1_C.egt |
+| B        | HumanCNV370v1_C.csv | humancnv370v1_c.bpm | HumanCNV370v1_C.egt |
 
 The **hapmap370k.sample.tsv** table could look like this:
 
@@ -699,6 +765,7 @@ tar xzvf Broad_hapmap3_r2_Affy6_cels_excluded.tgz --strip-components=1 \
   Broad_hapmap3_r2_Affy6_cels_excluded/SHELF_g_GAINmixHapMapAffy3_GenomeWideEx_6_{B05_31476,A01_31410,E05_31482,E04_31466,G11_31582}.CEL
 echo {SCALE,GIGAS,SHELF} | tr ' ' '\n' | xargs -i tar xzvf {}.tgz
 ```
+Then make sure you copy all the CEL files in the `gs://{google-bucket}/cels` Google bucket
 
 Define options to run the WDL:
 
@@ -709,12 +776,13 @@ Define options to run the WDL:
   "mocha.realign": true,
   "mocha.max_win_size_cm": 100.0,
   "mocha.overlap_size_cm": 5.0,
-  "mocha.ref_path": "gs://your-google-bucket/GRCh38/",
-  "mocha.ref_json_file": "gs://your-google-bucket/GRCh38.json",
-  "mocha.manifest_path": "gs://your-google-bucket/manifests/",
-  "mocha.batch_tsv_file": "gs://your-google-bucket/hapmapSNP6.batch.tsv",
-  "mocha.sample_tsv_file": "gs://your-google-bucket/hapmapSNP6.sample.tsv",
-  "mocha.ped_file": "gs://your-google-bucket/hapmapSNP6.ped",
+  "mocha.ref_name": "GRCh38",
+  "mocha.ref_path": "gs://{google-bucket}/GRCh38",
+  "mocha.manifest_path": "gs://{google-bucket}/manifests",
+  "mocha.data_path": "gs://{google-bucket}/cels",
+  "mocha.batch_tsv_file": "gs://{google-bucket}/hapmapSNP6.batch.tsv",
+  "mocha.sample_tsv_file": "gs://{google-bucket}/hapmapSNP6.sample.tsv",
+  "mocha.ped_file": "gs://{google-bucket}/hapmapSNP6.ped",
   "mocha.chip_type": ["GenomeWideEx_6"]
 }
 ```
@@ -722,11 +790,11 @@ Notice that for this example we needed the **chip_type** secondary option set du
 
 The **hapmapSNP6.batch.tsv** table could look like this:
 
-| batch_id | csv                            | xml                          | zip                          | path                          |
-|----------|--------------------------------|------------------------------|------------------------------|-------------------------------|
-| SCALE    | GenomeWideSNP_6.na35.annot.csv | GenomeWideSNP_6.AxiomGT1.xml | GenomeWideSNP_6.AxiomGT1.zip | gs://your-google-bucket/cels/ |
-| GIGAS    | GenomeWideSNP_6.na35.annot.csv | GenomeWideSNP_6.AxiomGT1.xml | GenomeWideSNP_6.AxiomGT1.zip | gs://your-google-bucket/cels/ |
-| SHELF    | GenomeWideSNP_6.na35.annot.csv | GenomeWideSNP_6.AxiomGT1.xml | GenomeWideSNP_6.AxiomGT1.zip | gs://your-google-bucket/cels/ |
+| batch_id | csv                            | xml                          | zip                          |
+|----------|--------------------------------|------------------------------|------------------------------|
+| SCALE    | GenomeWideSNP_6.na35.annot.csv | GenomeWideSNP_6.AxiomGT1.xml | GenomeWideSNP_6.AxiomGT1.zip |
+| GIGAS    | GenomeWideSNP_6.na35.annot.csv | GenomeWideSNP_6.AxiomGT1.xml | GenomeWideSNP_6.AxiomGT1.zip |
+| SHELF    | GenomeWideSNP_6.na35.annot.csv | GenomeWideSNP_6.AxiomGT1.xml | GenomeWideSNP_6.AxiomGT1.zip |
 
 The **hapmapSNP6.sample.tsv** and **hapmapSNP6.ped** files could be generated with the following commands:
 ```
@@ -743,9 +811,43 @@ awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]++} NR>FNR && $3 in x || $4 in x {print;
 Dockerfiles
 ===========
 
+Dockerfile for BCFtools:
+```
+FROM ubuntu:21.04
+ARG DEBIAN_FRONTEND=noninteractive
+RUN sed -i 's/^# deb-src \(.*\) hirsute universe/deb-src \1 hirsute universe/' /etc/apt/sources.list && \
+    apt-get -qqy update --fix-missing && \
+    apt-get -qqy install --no-install-recommends \
+		 build-essential \
+		 debhelper \
+		 libio-pty-perl \
+		 libhts-dev \
+		 libbz2-dev \
+		 libgsl-dev \
+		 tabix && \
+    apt-get -qqy source bcftools && \
+    cd bcftools-1.11 && \
+    sed -i 's/^\(        if ( bcf_gt_is_missing(gt\[0\]) || gt\[1\]==bcf_int32_vector_end ) continue;\)$/\1\n        if ( !bcf_gt_is_phased(gt[1]) ) continue;/' vcfconcat.c && \
+    EDITOR=/bin/true dpkg-source -q --commit . vcfconcat.patch && \
+    dpkg-buildpackage && \
+    cd .. && \
+    apt-get -qqy install --no-install-recommends ./bcftools_1.11-1_amd64.deb && \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
+                 build-essential \
+                 debhelper \
+                 libio-pty-perl \
+                 libhts-dev \
+                 libbz2-dev \
+                 libgsl-dev \
+                 tabix && \
+    apt-get -qqy clean && \
+    rm -rf bcftools* \
+           /var/lib/apt/lists/*
+```
+
 Dockerfile for Illumina AutoConvert Software:
 ```
-FROM ubuntu:20.10
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -757,13 +859,8 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev \
                  libmono-system-windows-forms4.0-cil && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200901.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200901.deb && \
-    mkdir /usr/local/libexec && \
-    ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
-    wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/gtc2vcf.so http://software.broadinstitute.org/software/mocha/gtc2vcf.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/affy2vcf.so http://software.broadinstitute.org/software/mocha/affy2vcf.so && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210106_amd64.deb && \
+    dpkg -i gtc2vcf_1.11-20210106_amd64.deb && \
 #   wget https://support.illumina.com/content/dam/illumina-support/documents/downloads/software/beeline/autoconvert-software-v2-0-1-installer.zip && \
     wget --no-check-certificate https://www.dropbox.com/s/tm02cu6t0ib1us7/autoconvert-software-v2-0-1-installer.zip && \
     unzip autoconvert-software-v2-0-1-installer.zip && \
@@ -776,16 +873,15 @@ RUN apt-get -qqy update --fix-missing && \
     wget --no-check-certificate https://raw.githubusercontent.com/freeseek/gtc2vcf/master/nearest_neighbor.c && \
     gcc -fPIC -shared -O2 -o Illumina/AutoConvert\ 2.0/libMathRoutines.dll.so nearest_neighbor.c && \
     mv Illumina/AutoConvert\ 2.0 /opt && \
-    apt-get -qqy purge \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget \
                  unzip \
                  msitools \
                  cabextract \
                  gcc \
                  libc6-dev && \
-    apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200901.deb \
+    rm -rf gtc2vcf_1.11-20210106_amd64.deb \
            autoconvert-software-v2-0-1-installer.zip \
            AutoConvertInstaller.msi \
            genomestudio-software-v2-0-4-5-installer.zip \
@@ -794,106 +890,78 @@ RUN apt-get -qqy update --fix-missing && \
            nearest_neighbor.c \
            Illumina \
            /var/lib/apt/lists/*
-
 ```
 
 Dockerfile for Illumina Array Analysis Platform Genotyping Command Line Interface:
 ```
-FROM ubuntu:20.10
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
                  bcftools \
                  icu-devtools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200901.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200901.deb && \
-    mkdir /usr/local/libexec && \
-    ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
-    wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/gtc2vcf.so http://software.broadinstitute.org/software/mocha/gtc2vcf.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/affy2vcf.so http://software.broadinstitute.org/software/mocha/affy2vcf.so && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210106_amd64.deb && \
+    dpkg -i gtc2vcf_1.11-20210106_amd64.deb && \
     wget ftp://webdata2:webdata2@ussd-ftp.illumina.com/downloads/software/iaap/iaap-cli-linux-x64-1.1.0.tar.gz && \
     mkdir /opt/iaap-cli && \
     tar xzvf iaap-cli-linux-x64-1.1.0.tar.gz -C /opt iaap-cli-linux-x64-1.1.0/iaap-cli --strip-components=1 && \
     ln -s /opt/iaap-cli/iaap-cli /usr/local/bin/iaap-cli && \
-    echo 'alias autocall="/opt/iaap-cli/iaap-cli/iaap-cli gencall"' >> ~/.bashrc && \
-    apt-get -qqy purge \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
-    apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200901.deb \
+    rm -rf gtc2vcf_1.11-20210106_amd64.deb \
            iaap-cli-linux-x64-1.1.0.tar.gz \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for Affymetrix Power Tools:
 ```
-FROM ubuntu:20.10
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
                  bcftools \
                  unzip && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200901.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200901.deb && \
-    mkdir /usr/local/libexec && \
-    ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
-    wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/gtc2vcf.so http://software.broadinstitute.org/software/mocha/gtc2vcf.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/affy2vcf.so http://software.broadinstitute.org/software/mocha/affy2vcf.so && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210106_amd64.deb && \
+    dpkg -i gtc2vcf_1.11-20210106_amd64.deb && \
     wget --no-check-certificate https://downloads.thermofisher.com/APT/2.11.3/apt_2.11.3_linux_64_bit_x86_binaries.zip && \
     unzip -ojd /usr/local/bin apt_2.11.3_linux_64_bit_x86_binaries.zip apt_2.11.3_linux_64_bit_x86_binaries/bin/apt-probeset-genotype && \
     chmod a+x /usr/local/bin/apt-probeset-genotype && \
-    apt-get -qqy purge \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
-    apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200901.deb \
+    rm -rf gtc2vcf_1.11-20210106_amd64.deb \
            apt_2.11.3_linux_64_bit_x86_binaries.zip \
            /var/lib/apt/lists/*
 ```
 
-Dockerfile for BCFtools, gtc2vcf, SHAPEIT4, Eagle, and MoChA:
+Dockerfile for gtc2vcf and MoChA:
 ```
-FROM ubuntu:20.10
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
                  bwa \
                  samtools \
-                 bcftools \
-                 bio-eagle \
-                 shapeit4 && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.10.2-20200901.deb && \
-    dpkg -i gtc2vcf_1.10.2-20200901.deb && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200901.deb && \
-    dpkg -i bio-mocha_1.10.2-20200901.deb && \
-    mkdir /usr/local/libexec && \
-    ln -s /usr/lib/x86_64-linux-gnu/bcftools /usr/local/libexec/bcftools && \
-    wget -O /usr/bin/bcftools http://software.broadinstitute.org/software/mocha/bcftools && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/gtc2vcf.so http://software.broadinstitute.org/software/mocha/gtc2vcf.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/affy2vcf.so http://software.broadinstitute.org/software/mocha/affy2vcf.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/mochatools.so http://software.broadinstitute.org/software/mocha/mochatools.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/trio-phase.so http://software.broadinstitute.org/software/mocha/trio-phase.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/scatter.so http://software.broadinstitute.org/software/mocha/scatter.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/split.so http://software.broadinstitute.org/software/mocha/split.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/fill-tags.so http://software.broadinstitute.org/software/mocha/fill-tags.so && \
-    wget -O /usr/lib/x86_64-linux-gnu/bcftools/mendelian.so http://software.broadinstitute.org/software/mocha/mendelian.so && \
-    apt-get -qqy purge \
+                 bcftools && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210106_amd64.deb && \
+    dpkg -i gtc2vcf_1.11-20210106_amd64.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-20210106_amd64.deb && \
+    dpkg -i bio-mocha_1.11-20210106_amd64.deb && \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
-    apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.10.2-20200901.deb \
-           bio-mocha_1.10.2-20200901.deb \
+    rm -rf gtc2vcf_1.11-20210106_amd64.deb \
+           bio-mocha_1.11-20210106_amd64.deb \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for ggplot2 and scripts to plot MoChA calls:
 ```
-FROM ubuntu:20.10
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -902,17 +970,138 @@ RUN apt-get -qqy update --fix-missing && \
                  r-cran-optparse \
                  r-cran-ggplot2 \
                  r-cran-data.table && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.10.2-20200901.deb && \
-    dpkg -i bio-mocha_1.10.2-20200901.deb && \
-    apt-get -qqy purge \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-20210106_amd64.deb && \
+    dpkg -i bio-mocha_1.11-20210106_amd64.deb && \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
-    apt-get -qqy autoremove && \
     apt-get -qqy clean && \
-    rm -rf bio-mocha_1.10.2-20200901.deb \
+    rm -rf bio-mocha_1.11-20210106_amd64.deb \
            /var/lib/apt/lists/*
 ```
 
-Currently many BCFtools binaries need to be manually replaced as several needed functionalities are missing from HTSlib/BCFtools 1.10.2. This situation will simplify once a new version of HTSlib/BCFtools is out
+Dockerfile for Eagle:
+```
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get -qqy update --fix-missing && \
+    apt-get -qqy install --no-install-recommends \
+                 git \
+                 g++ \
+		 make \
+		 libboost-iostreams-dev \
+                 libboost-program-options-dev \
+                 libopenblas-dev \
+                 libhts-dev \
+                 libboost-iostreams1.74.0 \
+                 libboost-program-options1.74.0 \
+                 libgomp1 \
+                 libopenblas0 \
+                 bcftools && \
+    git config --global http.sslVerify false && \
+    git clone https://github.com/poruloh/Eagle.git && \
+    cd Eagle/src && \
+    sed -i 's/^BLAS_DIR =.*/BLAS_DIR =/' Makefile && \
+    sed -i 's/^BOOST_INSTALL_DIR =.*/BOOST_INSTALL_DIR =/' Makefile && \
+    sed -i 's/^HTSLIB_DIR =.*/HTSLIB_DIR =/' Makefile && \
+    sed -i 's/^ZLIB_STATIC_DIR =.*/ZLIB_STATIC_DIR =/' Makefile && \
+    sed -i 's/^LIBSTDCXX_STATIC_DIR =.*/LIBSTDCXX_STATIC_DIR =/' Makefile && \
+    sed -i 's/^GLIBC_STATIC_DIR =.*/GLIBC_STATIC_DIR =/' Makefile && \
+    sed -i 's/ memcpy.o$//' Makefile && \
+    make && \
+    mv eagle /usr/bin && \
+    cd ../.. && \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
+                 git \
+                 g++ \
+		 make \
+                 libboost-iostreams-dev \
+                 libboost-program-options-dev \
+                 libopenblas-dev \
+                 libhts-dev && \
+    apt-get -qqy clean && \
+    rm -rf Eagle \
+           /var/lib/apt/lists/*
+```
+
+Dockerfile for SHAPEIT4:
+```
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get -qqy update --fix-missing && \
+    apt-get -qqy install --no-install-recommends \
+                 wget \
+                 g++ \
+		 make \
+                 libboost-iostreams-dev \
+                 libboost-program-options-dev \
+                 libhts-dev \
+                 libbz2-dev \
+                 libboost-iostreams1.74.0 \
+                 libboost-program-options1.74.0 \
+                 bcftools && \
+    wget --no-check-certificate https://github.com/odelaneau/shapeit4/archive/v4.1.3.tar.gz && \
+    tar xzf v4.1.3.tar.gz && \
+    cd shapeit4-4.1.3 && \
+    sed -i 's/^HTSLIB_INC=\$(HOME)\/Tools\/htslib-1.9$/HTSLIB_INC=-Ihtslib/' makefile && \
+    sed -i 's/^HTSLIB_LIB=\$(HOME)\/Tools\/htslib-1.9\/libhts.a$/HTSLIB_LIB=-lhts/' makefile && \
+    sed -i 's/^BOOST_LIB_IO=\/usr\/lib\/x86_64-linux-gnu\/libboost_iostreams.a$/BOOST_LIB_IO=-lboost_iostreams/' makefile && \
+    sed -i 's/^BOOST_LIB_PO=\/usr\/lib\/x86_64-linux-gnu\/libboost_program_options.a$/BOOST_LIB_PO=-lboost_program_options/' makefile && \
+    make && \
+    mv bin/shapeit4 /usr/bin/ && \
+    cd .. && \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
+                 wget \
+                 g++ \
+		 make \
+                 libboost-iostreams-dev \
+                 libboost-program-options-dev \
+                 libhts-dev \
+                 libbz2-dev && \
+    apt-get -qqy clean && \
+    rm -rf shapeit4-4.1.3 \
+           /var/lib/apt/lists/*
+```
+
+Dockerfile for IMPUTE5:
+```
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get -qqy update --fix-missing && \
+    apt-get -qqy install --no-install-recommends \
+                 wget \
+                 bcftools \
+                 unzip && \
+    wget -O impute5_v1.1.4.zip --no-check-certificate https://www.dropbox.com/sh/mwnceyhir8yze2j/AAAPJVJv3kI2glXGDdc3sSHga/impute5_v1.1.4.zip?dl=0 && \
+    unzip -jd /usr/bin/ impute5_v1.1.4.zip impute5_v1.1.4/impute5_1.1.4_static impute5_v1.1.4/imp5Converter_1.1.4_static && \
+    ln -s impute5_1.1.4_static /usr/bin/impute5 && \
+    ln -s imp5Converter_1.1.4_static /usr/bin/imp5Converter && \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
+                 wget \
+                 unzip && \
+    apt-get -qqy clean && \
+    rm -rf impute5_v1.1.4.zip \
+           /var/lib/apt/lists/*
+```
+
+Dockerfile for Beagle:
+```
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get -qqy update --fix-missing && \
+    apt-get -qqy install --no-install-recommends \
+                 wget \
+                 bcftools \
+                 default-jre-headless && \
+    wget -P /usr/bin/ --no-check-certificate http://faculty.washington.edu/browning/beagle/beagle.18May20.d20.jar && \
+    wget -P /usr/bin http://faculty.washington.edu/browning/beagle/bref3.18May20.d20.jar && \
+    ln -s beagle.18May20.d20.jar /usr/bin/beagle.jar && \
+    ln -s bref3.18May20.d20.jar /usr/bin/bref3.jar && \
+    apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
+                 wget && \
+    apt-get -qqy autoremove && \
+    apt-get -qqy clean && \
+    rm -rf /var/lib/apt/lists/*
+```
 
 Acknowledgements
 ================

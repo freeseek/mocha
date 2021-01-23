@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2020 Giulio Genovese
+#  Copyright (C) 2017-2021 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-summary_plot_version <- '2020-09-01'
+summary_plot_version <- '2021-01-20'
 
 library(optparse)
 library(ggplot2)
@@ -71,51 +71,44 @@ df_calls$sv[df_calls$length <= 5e8] <- '>50 Mbp'
 df_calls$sv[df_calls$length <= 5e7] <- '5-50 Mbp'
 df_calls$sv[df_calls$length <= 5e6] <- '0.5-5 Mbp'
 df_calls$sv[df_calls$length <= 5e5] <- '<0.5 Mbp'
-df_calls$bdev[is.na(df_calls$bdev)] <- -.05
+
+# avoid plotting BDEV for calls with not enough heterozygous sites
+df_calls$bdev[df_calls$n_hets < 5] <- NaN
+df_calls$bdev[is.na(df_calls$bdev)] <- 0
 
 pdf(args$pdf, width = args$width, height = args$height)
 
 idx <- !( df_calls$sample_id %in% df_stats$sample_id[df_stats$call_rate < args$`call-rate-thr` | df_stats$baf_auto > args$`baf-auto-thr`] |
           df_calls$chrom %in% c('X', 'Y', 'MT') | grepl('^CNP', df_calls$type) )
-p <- ggplot(df_calls[idx,], aes(x=bdev, y=rel_cov, color=type, shape=type)) +
+p <- ggplot(df_calls[idx,], aes(x=bdev, y=rel_cov, color=type)) +
   geom_hline(yintercept = c(1.0, 2.0, 3.0), color = 'gray', size = .5, linetype = 'dashed') +
   geom_segment(aes(x = 0.0, y = 2.0, xend = 1.0/6.0, yend = 3.0), color = 'gray', size = .5, linetype = 'dashed') +
   geom_segment(aes(x = 0.0, y = 2.0, xend = 1.0/6.0, yend = 1.5), color = 'gray', size = .5, linetype = 'dashed') +
-  geom_point(size = 1, alpha = 1/2) +
+  geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_color_manual('', values = c('CN-LOH' = 'orange', 'Loss' = 'blue', 'Gain' = 'red', 'Undetermined' = 'gray50')) +
-  scale_shape_manual('', values = 0:5) +
   theme_bw(base_size = args$fontsize) +
   theme(strip.background = element_rect(color=NA, fill=NA), legend.position = 'bottom', legend.box = 'horizontal') +
   facet_wrap(~sv)
-print(p + scale_x_continuous('BAF deviation (Bdev)', breaks = c(-0.05, 0.0, 0.05, 0.1, 0.15, 0.2)) + scale_y_continuous(expression(paste('Relative coverage (rescaled ', 2^LRR, ')')), breaks = c(0, 1, 2, 3, 4)) + coord_cartesian(xlim = c(-0.05, 0.2), ylim = c(0, 4)))
-print(p + scale_x_continuous('BAF deviation (Bdev)', breaks = c(0.0, 0.01, 0.02, 0.03, 0.04, 0.05)) + scale_y_continuous(expression(paste('Relative coverage (rescaled ', 2^LRR, ')')), breaks = c(1.8, 1.9, 2.0, 2.1, 2.2)) + coord_cartesian(xlim = c(0.0, 0.05), ylim = c(1.8, 2.2)))
+print(p + scale_x_continuous('BAF deviation (Bdev)', breaks = c(0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30)) + scale_y_continuous(expression(paste('Relative coverage (rescaled ', 2^LRR, ')')), breaks = c(0, 1, 2, 3, 4)) + coord_cartesian(xlim = c(0.00, 0.30), ylim = c(0, 4)))
+print(p + scale_x_continuous('BAF deviation (Bdev)', breaks = c(0.00, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06)) + scale_y_continuous(expression(paste('Relative coverage (rescaled ', 2^LRR, ')')), breaks = c(1.8, 1.9, 2.0, 2.1, 2.2)) + coord_cartesian(xlim = c(0.00, 0.06), ylim = c(1.8, 2.2)))
 
-p <- ggplot(df_stats, aes(x=1-call_rate, fill=computed_gender)) +
-  geom_histogram(bins = 30, color = 'black', alpha = 1/2, position = 'identity') +
-  geom_vline(xintercept = 1-args$`call-rate-thr`, color = 'black', size = 1, alpha = 1/2) +
+p <- ggplot(df_stats, aes(x=1-call_rate, y=baf_auto, color=computed_gender)) +
+  geom_vline(xintercept = 1-args$`call-rate-thr`, color = 'black', size = .5, alpha = 1/2) +
+  geom_hline(yintercept = args$`baf-auto-thr`, color = 'black', size = .5, alpha = 1/2) +
+  geom_point(data = df_stats[df_stats$call_rate < args$`call-rate-thr` | df_stats$baf_auto > args$`baf-auto-thr`,], color='black', shape = 1, size = .5, alpha = 1/2) +
+  geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_log10('1 - call rate') +
-  scale_y_continuous(expand = c(0,0)) +
-  scale_fill_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'U' = 'Undetermined')) +
-  theme_bw(base_size = args$fontsize) +
-  theme(legend.position = 'bottom', legend.box = 'horizontal')
-print(p)
-
-p <- ggplot(df_stats, aes(x=x_nonpar_adj_lrr_median, y=y_nonpar_adj_lrr_median, color=computed_gender)) +
-  geom_point(size = .5, alpha = 1/2) +
-  scale_x_continuous('X nonPAR median LRR (autosome corrected)') +
-  scale_y_continuous('Y nonPAR median LRR (autosome corrected)') +
+  scale_y_continuous('BAF auto-correlation') +
   scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'U' = 'Undetermined')) +
   theme_bw(base_size = args$fontsize) +
   theme(legend.position = 'bottom', legend.box = 'horizontal')
 print(p)
 
-if ('lrr_auto' %in% colnames(df_stats)) { col_y <- 'lrr_auto'; lbl_y <- 'GC-adjusted LRR auto-correlation'
-} else if ('cov_auto' %in% colnames(df_stats)) { col_y <- 'cov_auto'; lbl_y <- 'GC-adjusted coverage auto-correlation' }
-p <- ggplot(df_stats, aes_string(x = 'baf_auto', y = col_y, color = 'computed_gender')) +
-  geom_point(size = .5, alpha = 1/2) +
-  geom_vline(xintercept = args$`baf-auto-thr`, color = 'black', size = 1, alpha = 1/2) +
-  scale_x_continuous('BAF auto-correlation') +
-  scale_y_continuous(lbl_y) +
+p <- ggplot(df_stats, aes(x=x_nonpar_adj_lrr_median, y=y_nonpar_adj_lrr_median, color=computed_gender)) +
+  geom_point(data = df_stats[df_stats$call_rate < args$`call-rate-thr` | df_stats$baf_auto > args$`baf-auto-thr`,], color='black', shape = 1, size = .5, alpha = 1/2) +
+  geom_point(shape = 20, size = .5, alpha = 1/2) +
+  scale_x_continuous('X nonPAR median LRR (autosome corrected)') +
+  scale_y_continuous('Y nonPAR median LRR (autosome corrected)') +
   scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'U' = 'Undetermined')) +
   theme_bw(base_size = args$fontsize) +
   theme(legend.position = 'bottom', legend.box = 'horizontal')
@@ -126,7 +119,8 @@ if ('baf_sd' %in% colnames(df_stats)) { col_x <- 'baf_sd'; lbl_x <- 'Standard de
 if ('lrr_sd' %in% colnames(df_stats)) { col_y <- 'lrr_sd'; lbl_y <- 'Standard deviation LRR'
 } else if ('cov_sd' %in% colnames(df_stats)) { col_y <- 'cov_sd'; lbl_y <- 'Standard deviation coverage' }
 p <- ggplot(df_stats, aes_string(x = col_x, y = col_y, color = 'computed_gender')) +
-  geom_point(size = .5, alpha = 1/2) +
+  geom_point(data = df_stats[df_stats$call_rate < args$`call-rate-thr` | df_stats$baf_auto > args$`baf-auto-thr`,], color='black', shape = 1, size = .5, alpha = 1/2) +
+  geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_continuous(lbl_x) +
   scale_y_continuous(lbl_y) +
   scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'U' = 'Undetermined')) +
@@ -134,10 +128,12 @@ p <- ggplot(df_stats, aes_string(x = col_x, y = col_y, color = 'computed_gender'
   theme(legend.position = 'bottom', legend.box = 'horizontal')
 print(p)
 
-df_merge <- merge(df_stats[df_stats$computed_gender=="M", c('sample_id', 'y_nonpar_lrr_median')], df_calls[df_calls$computed_gender == "M" & df_calls$chrom == "X" & df_calls$length > 2e6, c("sample_id", "bdev")], all.x = TRUE)
+df_merge <- merge(df_stats[df_stats$computed_gender=="M" & df_stats$call_rate >= args$`call-rate-thr` & df_stats$baf_auto <= args$`baf-auto-thr`, c('sample_id', 'y_nonpar_adj_lrr_median')],
+                  df_calls[df_calls$computed_gender == "M" & df_calls$chrom == "X" & df_calls$length > 2e6, c("sample_id", "bdev")], all.x = TRUE)
+df_merge$mloy <- !is.na(df_merge$bdev)
 df_merge$bdev[is.na(df_merge$bdev)] <- 0
-p <- ggplot(df_merge, aes(x=bdev, y=y_nonpar_lrr_median, color = bdev != 0)) +
-  geom_point(size = .5, alpha = 1/2) +
+p <- ggplot(df_merge, aes(x=bdev, y=y_nonpar_adj_lrr_median, color = mloy)) +
+  geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_continuous('PAR1/PAR2 BAF deviation') +
   scale_y_continuous('Y nonPAR median LRR (autosome corrected)') +
   scale_color_manual('mLOY', values = c('FALSE' = 'gray', 'TRUE' = 'red'), labels = c('FALSE' = 'no', 'TRUE' = 'yes')) +
@@ -145,10 +141,12 @@ p <- ggplot(df_merge, aes(x=bdev, y=y_nonpar_lrr_median, color = bdev != 0)) +
   theme(legend.position = 'bottom', legend.box = 'horizontal')
 print(p)
 
-df_merge <- merge(df_stats[df_stats$computed_gender=="F", c('sample_id', 'x_nonpar_lrr_median')], df_calls[df_calls$computed_gender == "F" & df_calls$chrom == "X" & df_calls$length > 1e8, c("sample_id", "bdev")], all.x = TRUE)
+df_merge <- merge(df_stats[df_stats$computed_gender=="F" & df_stats$call_rate >= args$`call-rate-thr` & df_stats$baf_auto <= args$`baf-auto-thr`, c('sample_id', 'x_nonpar_adj_lrr_median')],
+                  df_calls[df_calls$computed_gender == "F" & df_calls$chrom == "X" & df_calls$length > 1e8, c("sample_id", "bdev")], all.x = TRUE)
+df_merge$mlox <- !is.na(df_merge$bdev)
 df_merge$bdev[is.na(df_merge$bdev)] <- 0
-p <- ggplot(df_merge, aes(x=bdev, y=x_nonpar_lrr_median, color = bdev != 0)) +
-  geom_point(size = .5, alpha = 1/2) +
+p <- ggplot(df_merge, aes(x=bdev, y=x_nonpar_adj_lrr_median, color = mlox)) +
+  geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_continuous('X BAF deviation') +
   scale_y_continuous('X nonPAR median LRR (autosome corrected)') +
   scale_color_manual('mLOX', values = c('FALSE' = 'gray', 'TRUE' = 'red'), labels = c('FALSE' = 'no', 'TRUE' = 'yes')) +

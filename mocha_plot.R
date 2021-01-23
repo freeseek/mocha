@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2020 Giulio Genovese
+#  Copyright (C) 2017-2021 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-mocha_plot_version <- '2020-09-01'
+mocha_plot_version <- '2021-01-20'
 
 library(optparse)
 library(data.table)
@@ -152,7 +152,7 @@ if (args$wgs) {
 }
 df$gts <- 'NC'
 df$gts[allele_0 == df$allele_a & allele_1 == df$allele_a] <- 'AA'
-df$gts[allele_0 == df$allele_a & allele_1 == df$allele_b | 
+df$gts[allele_0 == df$allele_a & allele_1 == df$allele_b |
        allele_0 == df$allele_b & allele_1 == df$allele_a] <- 'AB'
 df$gts[allele_0 == df$allele_b & allele_1 == df$allele_b] <- 'BB'
 df$phase <- 0
@@ -165,7 +165,7 @@ if (!args$wgs && args$mocha && !args$no_adjust) {
     df$LRR[idx] <- df$LRR[idx] - df[idx, paste0(gt, '_LRR0')]
   }
 }
-if (!is.null(args$stats)) {
+if (!args$wgs && !is.null(args$stats)) {
   df_stats <- read.table(args$stats, sep = '\t', header = TRUE)
   lrr_gc_order <- sum(grepl('^lrr_gc_[0-9]', names(df_stats))) - 1
   df <- merge(df, df_stats[, c('sample_id', paste0('lrr_gc_', 0:lrr_gc_order))])

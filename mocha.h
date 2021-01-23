@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2018-2020 Giulio Genovese
+   Copyright (C) 2018-2021 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -203,8 +203,8 @@ int bcf_get_genotype_phase(const bcf_fmt_t *fmt, int8_t *gt_phase_arr, int nsmpl
                 || bcf_gt_is_missing(p[1])) {                                                                          \
                 gt_phase_arr[i] = bcf_int8_missing;                                                                    \
             } else {                                                                                                   \
-                type_t gt0 = bcf_gt_allele(p[0]) > 0;                                                                  \
-                type_t gt1 = bcf_gt_allele(p[1]) > 0;                                                                  \
+                type_t gt0 = bcf_gt_allele(p[0]);                                                                      \
+                type_t gt1 = bcf_gt_allele(p[1]);                                                                      \
                 if (gt0 == gt1)                                                                                        \
                     gt_phase_arr[i] = bcf_int8_vector_end;                                                             \
                 else if (!bcf_gt_is_phased(p[1]))                                                                      \
