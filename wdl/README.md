@@ -847,7 +847,7 @@ RUN sed -i 's/^# deb-src \(.*\) hirsute universe/deb-src \1 hirsute universe/' /
 
 Dockerfile for Illumina AutoConvert Software:
 ```
-FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210120
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -859,8 +859,8 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev \
                  libmono-system-windows-forms4.0-cil && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210106_amd64.deb && \
-    dpkg -i gtc2vcf_1.11-20210106_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210120_amd64.deb && \
+    dpkg -i gtc2vcf_1.11-20210120_amd64.deb && \
 #   wget https://support.illumina.com/content/dam/illumina-support/documents/downloads/software/beeline/autoconvert-software-v2-0-1-installer.zip && \
     wget --no-check-certificate https://www.dropbox.com/s/tm02cu6t0ib1us7/autoconvert-software-v2-0-1-installer.zip && \
     unzip autoconvert-software-v2-0-1-installer.zip && \
@@ -881,7 +881,7 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.11-20210106_amd64.deb \
+    rm -rf gtc2vcf_1.11-20210120_amd64.deb \
            autoconvert-software-v2-0-1-installer.zip \
            AutoConvertInstaller.msi \
            genomestudio-software-v2-0-4-5-installer.zip \
@@ -894,15 +894,15 @@ RUN apt-get -qqy update --fix-missing && \
 
 Dockerfile for Illumina Array Analysis Platform Genotyping Command Line Interface:
 ```
-FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210120
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
                  bcftools \
                  icu-devtools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210106_amd64.deb && \
-    dpkg -i gtc2vcf_1.11-20210106_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210120_amd64.deb && \
+    dpkg -i gtc2vcf_1.11-20210120_amd64.deb && \
     wget ftp://webdata2:webdata2@ussd-ftp.illumina.com/downloads/software/iaap/iaap-cli-linux-x64-1.1.0.tar.gz && \
     mkdir /opt/iaap-cli && \
     tar xzvf iaap-cli-linux-x64-1.1.0.tar.gz -C /opt iaap-cli-linux-x64-1.1.0/iaap-cli --strip-components=1 && \
@@ -910,36 +910,36 @@ RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.11-20210106_amd64.deb \
+    rm -rf gtc2vcf_1.11-20210120_amd64.deb \
            iaap-cli-linux-x64-1.1.0.tar.gz \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for Affymetrix Power Tools:
 ```
-FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210120
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
                  bcftools \
                  unzip && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210106_amd64.deb && \
-    dpkg -i gtc2vcf_1.11-20210106_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210120_amd64.deb && \
+    dpkg -i gtc2vcf_1.11-20210120_amd64.deb && \
     wget --no-check-certificate https://downloads.thermofisher.com/APT/2.11.3/apt_2.11.3_linux_64_bit_x86_binaries.zip && \
     unzip -ojd /usr/local/bin apt_2.11.3_linux_64_bit_x86_binaries.zip apt_2.11.3_linux_64_bit_x86_binaries/bin/apt-probeset-genotype && \
     chmod a+x /usr/local/bin/apt-probeset-genotype && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.11-20210106_amd64.deb \
+    rm -rf gtc2vcf_1.11-20210120_amd64.deb \
            apt_2.11.3_linux_64_bit_x86_binaries.zip \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for gtc2vcf and MoChA:
 ```
-FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210120
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -947,21 +947,21 @@ RUN apt-get -qqy update --fix-missing && \
                  bwa \
                  samtools \
                  bcftools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210106_amd64.deb && \
-    dpkg -i gtc2vcf_1.11-20210106_amd64.deb && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-20210106_amd64.deb && \
-    dpkg -i bio-mocha_1.11-20210106_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210120_amd64.deb && \
+    dpkg -i gtc2vcf_1.11-20210120_amd64.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-20210120_amd64.deb && \
+    dpkg -i bio-mocha_1.11-20210120_amd64.deb && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.11-20210106_amd64.deb \
-           bio-mocha_1.11-20210106_amd64.deb \
+    rm -rf gtc2vcf_1.11-20210120_amd64.deb \
+           bio-mocha_1.11-20210120_amd64.deb \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for ggplot2 and scripts to plot MoChA calls:
 ```
-FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210120
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -970,18 +970,18 @@ RUN apt-get -qqy update --fix-missing && \
                  r-cran-optparse \
                  r-cran-ggplot2 \
                  r-cran-data.table && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-20210106_amd64.deb && \
-    dpkg -i bio-mocha_1.11-20210106_amd64.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-20210120_amd64.deb && \
+    dpkg -i bio-mocha_1.11-20210120_amd64.deb && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf bio-mocha_1.11-20210106_amd64.deb \
+    rm -rf bio-mocha_1.11-20210120_amd64.deb \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for Eagle:
 ```
-FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210120
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -1025,7 +1025,7 @@ RUN apt-get -qqy update --fix-missing && \
 
 Dockerfile for SHAPEIT4:
 ```
-FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210120
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -1064,7 +1064,7 @@ RUN apt-get -qqy update --fix-missing && \
 
 Dockerfile for IMPUTE5:
 ```
-FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210120
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -1085,7 +1085,7 @@ RUN apt-get -qqy update --fix-missing && \
 
 Dockerfile for Beagle:
 ```
-FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210106
+FROM us.gcr.io/mccarroll-mocha/bcftools:1.11-20210120
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
