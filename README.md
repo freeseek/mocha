@@ -1,6 +1,6 @@
 ![](mocha_logo.png)
 
-A bcftools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following papers from <a href="http://doi.org/10.1038/s41586-018-0321-x">2018</a> and <a href="http://doi.org/10.1038/s41586-020-2430-6">2020</a>:
+A BCFtools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following papers from <a href="http://doi.org/10.1038/s41586-018-0321-x">2018</a> and <a href="http://doi.org/10.1038/s41586-020-2430-6">2020</a>
 ```
 Loh P., Genovese G., McCarroll S., Price A. et al. Insights about clonal expansions from 8,342 mosaic
 chromosomal alterations. Nature 559, 350–355 (2018). [PMID: 29995854] [DOI: 10.1038/s41586-018-0321-x]
@@ -93,12 +93,12 @@ Examples:
 Installation
 ============
 
-Install basic tools (Debian/Ubuntu specific if you have admin privileges):
+Install basic tools (Debian/Ubuntu specific if you have admin privileges)
 ```
 sudo apt install wget unzip git g++ zlib1g-dev samtools bedtools bcftools bio-eagle shapeit4
 ```
 
-Optionally, you can install these libraries to activate further HTSlib features:
+Optionally, you can install these libraries to activate further HTSlib features
 ```
 sudo apt install libbz2-dev libssl-dev liblzma-dev libgsl0-dev
 ```
@@ -128,9 +128,9 @@ cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 -
 cd bcftools && make && cd ..
 /bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,extendFMT}.so} $HOME/bin/
 ```
-Notice that you will need some functionalities missing from the base version of bcftools to run the pipeline
+Notice that you will need some functionalities missing from the base version of BCFtools to run the pipeline
 
-Make sure the directory with the plugins is available to bcftools
+Make sure the directory with the plugins is available to BCFtools
 ```
 export PATH="$HOME/bin:$PATH"
 export BCFTOOLS_PLUGINS="$HOME/bin"
@@ -138,19 +138,19 @@ export BCFTOOLS_PLUGINS="$HOME/bin"
 
 Alternatively, you can download MoChA's binaries using the following code
 ```
-wget http://ftp.us.debian.org/debian/pool/main/h/htslib/libhts3_1.11-2_amd64.deb
+wget http://ftp.us.debian.org/debian/pool/main/h/htslib/libhts3_1.11-4_amd64.deb
 wget http://ftp.us.debian.org/debian/pool/main/b/bcftools/bcftools_1.11-1_amd64.deb
 wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-dev_amd64.deb
-sudo apt install ./{libhts3_1.11-2,bcftools_1.11-1,bio-mocha_1.11-dev}_amd64.deb
+sudo apt install ./{libhts3_1.11-4,bcftools_1.11-1,bio-mocha_1.11-dev}_amd64.deb
 ```
 
-Install beagle5 and impute5 (optional for array data)
+Install Beagle5 and IMPUTE5 (optional for array data)
 ```
-wget -O impute5_v1.1.2.zip https://www.dropbox.com/sh/mwnceyhir8yze2j/AAAx6_Fp0nYhs7Wivlybs8M0a/impute5_v1.1.2.zip?dl=0
-unzip -d $HOME/bin -o impute5_v1.1.2.zip imp{ute5,5Converter}_v1.1.2_static
-/bin/mv $HOME/bin/impute5_v1.1.2_static $HOME/bin/impute5
-/bin/mv $HOME/bin/imp5Converter_v1.1.2_static $HOME/bin/imp5Converter
-wget -P $HOME/bin http://faculty.washington.edu/browning/beagle/bref3.18May20.d20.jar                                                                    
+wget -O impute5_v1.1.4.zip https://www.dropbox.com/sh/mwnceyhir8yze2j/AAAPJVJv3kI2glXGDdc3sSHga/impute5_v1.1.4.zip?dl=0
+unzip -d $HOME/bin -o impute5_v1.1.4.zip impute5_v1.1.4/imp{ute5,5Converter}_1.1.4_static
+/bin/mv $HOME/bin/impute5_1.1.4_static $HOME/bin/impute5
+/bin/mv $HOME/bin/imp5Converter_1.1.4_static $HOME/bin/imp5Converter
+wget -P $HOME/bin http://faculty.washington.edu/browning/beagle/bref3.18May20.d20.jar
 ```
 
 Download resources for GRCh37
@@ -339,7 +339,7 @@ dir="..." # directory where output files will be generated
 mkdir -p $dir
 ```
 
-If you want to process <b>genotype array</b> data you need a VCF file with ALLELE_A, ALLELE_B, GC, GT, BAF, and LRR information:
+If you want to process <b>genotype array</b> data you need a VCF file with ALLELE_A, ALLELE_B, GC, GT, BAF, and LRR information
 ```
 ##fileformat=VCFv4.2
 ##INFO=<ID=ALLELE_A,Number=1,Type=Integer,Description="A allele">
@@ -365,7 +365,7 @@ bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf $vcf \
   bcftools index -f $dir/$pfx.unphased.bcf
 ```
 
-If you want to process <b>whole-genome sequence</b> data you need a VCF file with GC, GT and AD information:
+If you want to process <b>whole-genome sequence</b> data you need a VCF file with GC, GT and AD information
 ```
 ##fileformat=VCFv4.2
 ##INFO=<ID=GC,Number=1,Type=Float,Description="GC ratio content around the variant">
@@ -419,64 +419,70 @@ bcftools index -f $dir/$pfx.xcl.bcf
 Phasing pipeline
 ================
 
-Phase VCF file by chromosome with Eagle
+Extract genotypes and split by autosomes and chromosome X
+```
+bcftools isec --no-version -Ou --complement --exclude "N_ALT>1" --write 1 $dir/$pfx.unphased.bcf $dir/$pfx.xcl.bcf | \
+  bcftools annotate --no-version -Ou --remove ID,QUAL,INFO,^FMT/GT  | \
+  bcftools +scatter --no-version -Ob --output $dir --scatter $(echo chr{{1..22},X} | tr ' ' ',') --prefix $pfx.
+```
+If you are using GRCh37 rather than GRCh38, use `--scatter $(echo {{1..22},X} | tr ' ' ',') --prefix $pfx.chr` instead
+
+Phase VCF file by chromosome with SHAPEIT4
 ```
 for chr in {1..22} X; do
-  eagle \
-    --geneticMapFile $map \
-    --outPrefix $dir/$pfx.chr$chr \
-    --numThreads $thr \
-    --vcfRef $panel_pfx${chr}$panel_sfx.bcf \
-    --vcfTarget $dir/$pfx.unphased.bcf \
-    --vcfOutFormat b \
-    --noImpMissing \
-    --outputUnphased \
-    --vcfExclude $dir/$pfx.xcl.bcf \
-    --chrom $chr \
-    --pbwtIters 3 && \
   bcftools index --force $dir/$pfx.chr$chr.bcf
+  zcat $map | sed 's/^23/X/' | awk -v chr=$chr '$1==chr {print $2,$3,$4}' > $dir/genetic_map.chr$chr.txt
+  shapeit4 \
+    --thread $thr \
+    --input $dir/$pfx.chr$chr.bcf \
+    --reference $panel_pfx${chr}$panel_sfx.bcf \
+    --map $dir/genetic_map.chr$chr.txt \
+    --region chr$chr \
+    --output $dir/$pfx.chr$chr.pgt.bcf
 done
 ```
+If you are using GRCh37 rather than GRCh38, use `--region $chr` instead
+
 Eagle's <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-100003.2">memory requirements</a> will depend on the number of samples in the target (Nt) and in the reference panel (Nr=2504), and the number of variants (M) in the largest contig, and will amount to 1.5(Nt+Nr)M bytes. The <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-110003.3">running time</a> will be ~1 minute of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">reference-based phasing</a> with a small target and reference panel (see Supplementary Tables 2,3) and ~5 minutes of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">non-reference-based phasing</a> with a large cohort (see Supplementary Tables 7,8). Also, by default, if the option --pbwtIters is not used, Eagle will perform one phasing iteration if Nt<Nr/2=1252, two if 1252=Nr/2<Nt<2Nr=5008, and three if 5008=2Nr<Nt and in the second and third iterations both target and reference panel haplotypes will be used as references for phasing (see <a href="https://www.nature.com/articles/ng.3679#Sec10"here</a>).
 
 Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions. Notice also that phasing can also be performed across overlapping windows rather than entire chromosomes to achieve better parallelization
 
-Extract chromosomes that do not require phasing
+Concatenate phased output into a single VCF file
 ```
-bcftools view --no-version -Ob -o $dir/$pfx.other.bcf $dir/$pfx.unphased.bcf \
-  -t ^$(seq -s, 1 22),X,$(seq -f chr%.0f -s, 1 22),chrX && \
-bcftools index -f $dir/$pfx.other.bcf
+bcftools concat --no-version -Ob -o $dir/$pfx.pgt.bcf $dir/$pfx.chr{{1..22},X}.pgt.bcf && \
+bcftools index -f $dir/$pfx.pgt.bcf
 ```
+Notice that if the phasing was made in overlapping windows rather than chromosomes, the overlapping windows should be concatenated using the `--ligate` option in bcftools concat
 
-Concatenate eagle output into a single VCF file and add GC/CpG content information
+If pedigree information with duos or trios is available, you can improve the phased haplotypes by running the following command instead of the previous one
 ```
-bcftools concat --no-version -Ob -o $dir/$pfx.bcf $dir/$pfx.{chr{{1..22},X},other}.bcf && \
-bcftools index -f $dir/$pfx.bcf
-```
-Notice that if the phasing was made in overlapping windows rather than chromosomes, the overlapping windows should be concatenated using the --ligate option in bcftools concat
-
-If pedigree information with duos or trios is available, you can improve the phased haplotypes from `eagle` by running the following command instead of the previous one:
-```
-bcftools concat --no-version -Ou $dir/$pfx.{chr{{1..22},X},other}.bcf | \
-bcftools +trio-phase --no-version -Ob -o $dir/$pfx.bcf -- -p $ped && \
-bcftools index -f $dir/$pfx.bcf
+bcftools concat --no-version -Ou $dir/$pfx.chr{{1..22},X}.pgt.bcf | \
+bcftools +trio-phase --no-version -Ob -o $dir/$pfx.pgt.bcf -- -p $ped && \
+bcftools index -f $dir/$pfx.pgt.bcf
 ```
 (it requires a ped file)
+
+Import phased genotypes in the original VCF without changing missing genotypes
+```
+bcftools annotate --no-version -Ob -o $dir/$pfx.bcf --annotations $dir/$pfx.pgt.bcf --columns -FMT/GT $dir/$pfx.unphased.bcf && \
+bcftools index -f $dir/$pfx.bcf
+```
 
 Impute variants using impute5 (optional for array data)
 ```
 for chr in {1..22} X; do
-  zcat $map | sed 's/^23/X/' | awk -v chr=$chr '$1==chr {print chr,.,$4,$2}' > $dir/genetic_map.chr$chr.txt
+  zcat $map | sed 's/^23/X/' | awk -v chr=$chr '$1==chr {print chr,".",$4,$2}' > $dir/genetic_map.chr$chr.txt
   impute5 \
-    --h $panel_pfx${chr}$panel_sfx.imp5 \
+    --h $panel_pfx${chr}$panel_sfx.bcf \
     --m $dir/genetic_map.chr$chr.txt \
-    --g $dir/$pfx.bcf \
-    --r $chr \
+    --g $dir/$pfx.pgt.bcf \
+    --r chr$chr \
     --o $dir/$pfx.chr$chr.imp.bcf \
     --l $dir/$pfx.chr$chr.log \
     --threads $thr
 done
 ```
+If you are using GRCh37 rather than GRCh38, use `--r $chr` instead
 
 Concatenate imputed genotypes into a single VCF file (optional for array data)
 ```
@@ -486,7 +492,7 @@ bcftools index -f $dir/$pfx.imp.bcf
 
 Remove unphased VCF and single chromosome files (optional)
 ```
-/bin/rm $dir/$pfx.{unphased,chr{{1..22},X},other}.bcf{,.csi} $dir/$pfx.chr{{1..22},X}.imp.bcf
+/bin/rm $dir/{genetic_map.chr{{1..22},X}.txt,$pfx.{unphased.bcf{,.csi},chr{{1..22},X}.{bcf{,.csi},{pgt,imp}.bcf,log}}}
 ```
 
 Chromosomal alterations pipeline
@@ -522,9 +528,9 @@ bcftools +mocha \
   $dir/$pfx.bcf && \
 bcftools index -f $dir/$pfx.mocha.bcf
 ```
-Notice that MoChA will read input computed gender and call rate if provided, otherwise these will be estimated from the VCF. For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms 
+Notice that MoChA will read input computed gender and call rate if provided, otherwise these will be estimated from the VCF. For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms
 
-The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns:
+The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns
 ```
             sample_id - sample ID
       computed_gender - estimated sample gender from X nonPAR region (not heterozygous sites count)
@@ -545,7 +551,7 @@ x_nonpar_baf_sd/_corr - BAF standard deviation or beta-binomial overdispersion f
              lrr_gc_X - coefficient X for polynomial in GC content fitting LRR estimates
 ```
 
-The mosaic calls file contains information about each mosaic and germline chromosomal alteration called and it includes the following columns:
+The mosaic calls file contains information about each mosaic and germline chromosomal alteration called and it includes the following columns
 ```
       sample_id - sample ID
 computed_gender - inferred sample gender
@@ -571,7 +577,7 @@ computed_gender - inferred sample gender
              cf - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
 ```
 
-The output VCF will contain the following extra FORMAT fields:
+The output VCF will contain the following extra FORMAT fields
 ```
       Ldev - LRR deviation estimate
       Bdev - BAF deviation estimate
@@ -580,7 +586,7 @@ Bdev_Phase - for heterozygous calls: 1/-1 if the alternate allele is over/under 
 
 For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to 9NM bytes. For example, if you are running 4,000 samples and chromosome 1 has ~80K variants, you will need approximately 2-3GB to run MoChA. It will take ~1/3 second of CPU time per genome to process samples genotyped on the Illumina GSA DNA microarray. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the --min-dist parameter (D, 400 by default) and the length of the longest contig (L) and will amount to no more than 9NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter --min-dist 400 and chromosome 1 is ~250Mbp long, you might need up to 5-6GB to run MoChA. For whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use options --adjust-BAF-LRR -1 and --regress-BAF-LRR -1). Notice that the CPU requirements for MoChA will be negligible compared to the CPU requirements for phasing with Eagle
 
-Depending on your application, you might want to filter the calls from MoChA. For example, the following code:
+Depending on your application, you might want to filter the calls from MoChA. For example, the following code
 ```
 awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
   NR==FNR && FNR>1 {sample_id=$(f["sample_id"]); call_rate=$(f["call_rate"]); baf_auto=$(f["baf_auto"])}
@@ -602,7 +608,7 @@ will generate a new table after removing samples with `call_rate` lower than 0.9
 Allelic imbalance pipeline
 ==========================
 
-import results from MoChA into VCF file with imputed genotypes (optional for array data)
+Import results from MoChA into VCF file with imputed genotypes (optional for array data)
 ```
 bcftools annotate \
   --no-version -Ob \
@@ -645,7 +651,7 @@ bcftools query \
 Plot results
 ============
 
-Install basic tools (Debian/Ubuntu specific if you have admin privileges):
+Install basic tools (Debian/Ubuntu specific if you have admin privileges)
 ```
 sudo apt install r-cran-optparse r-cran-ggplot2 r-cran-data.table
 ```
