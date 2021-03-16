@@ -18,7 +18,7 @@ and this website. For any feedback or questions, contact the <a href="mailto:giu
    * [Data preparation](#data-preparation)
    * [Phasing pipeline](#phasing-pipeline)
    * [Chromosomal alterations pipeline](#chromosomal-alterations-pipeline)
-   * [Allelic imbalance pipeline](#allelic-imbalance-pipeline)
+   * [Allelic shift pipeline](#allelic-shift-pipeline)
    * [Plot results](#plot-results)
    * [Acknowledgements](#acknowledgements)
 <!--te-->
@@ -86,7 +86,7 @@ HMM Options:
         --LRR-cutoff <float>       cutoff between LRR for haploid and diploid used to infer gender [estimated from X nonPAR]
 
 Examples:
-    bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnp.grch37.bed
+    bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnps.bed
     bcftools +mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv --LRR-weight 0.5
 ```
 
@@ -112,7 +112,7 @@ We recommend compiling the source code but, wherever this is not possible, Linux
 
 Download latest version of <a href="https://github.com/samtools/htslib">HTSlib</a> and <a href="https://github.com/samtools/bcftools">BCFtools</a> (if not downloaded already)
 ```
-git clone --branch=develop git://github.com/samtools/htslib.git
+git clone --branch=develop --recurse-submodules git://github.com/samtools/htslib.git
 git clone --branch=develop git://github.com/samtools/bcftools.git
 ```
 
@@ -174,6 +174,7 @@ cd $HOME/GRCh37
 wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr{{1..22}.phase3_shapeit2_mvncall_integrated_v5a,X.phase3_shapeit2_mvncall_integrated_v1b,Y.phase3_integrated_v2a}.20130502.genotypes.vcf.gz{,.tbi}
 for chr in {1..22} X Y; do
   bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][ab].20130502.genotypes.vcf.gz | \
+  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,^FMT/GT | \
   bcftools norm --no-version -Ou -m -any | \
   bcftools norm --no-version -Ob -o ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf -d none -f $HOME/GRCh37/human_g1k_v37.fasta && \
   bcftools index -f ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf
@@ -184,7 +185,7 @@ List of common germline duplications and deletions
 ```
 wget -P $HOME/GRCh37 ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz{,.tbi}
 bcftools query -i 'AC>1 && END-POS+1>10000 && SVTYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
-  -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh37/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/GRCh37/cnp.grch37.bed
+  -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh37/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/GRCh37/cnps.bed
 ```
 
 Minimal divergence intervals from segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
@@ -200,8 +201,8 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
   bedtools groupby -c 4 -o min | \
   awk 'BEGIN {i=0; s[0]="+"; s[1]="-"} {if ($4!=x) i=(i+1)%2; x=$4; print $0"\t0\t"s[i]}' | \
   bedtools merge -s -c 4 -o distinct | \
-  sed 's/^chr//' | grep -v gl | bgzip > $HOME/GRCh37/dup.grch37.bed.gz && \
-  tabix -f -p bed $HOME/GRCh37/dup.grch37.bed.gz
+  sed 's/^chr//' | grep -v gl | bgzip > $HOME/GRCh37/segdups.bed.gz && \
+  tabix -f -p bed $HOME/GRCh37/segdups.bed.gz
 ```
 
 1000 Genomes project phase 3 imputation panel for beagle5 and impute5
@@ -218,7 +219,7 @@ chr=X; bcftools +fixploidy --no-version $pfx$chr$sfx.bcf | \
 
 Download cytoband file
 ```
-wget -O $HOME/GRCh37/cytoBand.hg19.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/cytoBand.txt.gz
+wget -P $HOME/GRCh37 http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/cytoBand.txt.gz
 ```
 
 Setup variables
@@ -230,9 +231,9 @@ map="$HOME/GRCh37/genetic_map_hg19_withX.txt.gz"
 panel_pfx="$HOME/GRCh37/ALL.chr"
 panel_sfx=".phase3_integrated.20130502.genotypes"
 rule="GRCh37"
-cnp="$HOME/GRCh37/cnp.grch37.bed"
-dup="$HOME/GRCh37/dup.grch37.bed.gz"
-cyto="$HOME/GRCh37/cytoBand.hg19.txt.gz"
+cnp="$HOME/GRCh37/cnps.bed"
+dup="$HOME/GRCh37/segdups.bed.gz"
+cyto="$HOME/GRCh37/cytoBand.txt.gz"
 ```
 
 Download resources for GRCh38
@@ -250,29 +251,28 @@ Genetic map
 wget -P $HOME/GRCh38 https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz
 ```
 
-1000 Genomes project phase 3 (fixing contig names, removing duplicate variants, removing incomplete variants)
+1000 Genomes project phase 3
 ```
 cd $HOME/GRCh38
-wget http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/ALL.chr{{1..22},X,Y}_GRCh38.genotypes.20170504.vcf.gz{,.tbi}
-ref="$HOME/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
-for chr in {1..22} X Y; do
-  (bcftools view --no-version -h ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
-    grep -v "^##contig=<ID=[GNh]" | sed 's/^##contig=<ID=MT/##contig=<ID=chrM/;s/^##contig=<ID=\([0-9XY]\)/##contig=<ID=chr\1/'; \
-  bcftools annotate --no-version -x INFO/END ALL.chr${chr}_GRCh38.genotypes.20170504.vcf.gz | \
-  bcftools view --no-version -H -c 2 | \
-  grep -v "[0-9]|\.\|\.|[0-9]" | sed 's/^/chr/') | \
-  bcftools norm --no-version -Ou -m -any | \
-  bcftools norm --no-version -Ob -o ALL.chr${chr}_GRCh38.genotypes.20170504.bcf -d none -f $ref && \
-  bcftools index -f ALL.chr${chr}_GRCh38.genotypes.20170504.bcf
+wget http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr{{1..22}.filtered.shapeit2-duohmm,X.filtered.eagle2}-phased.vcf.gz
+for chr in {1..22}; do
+  bcftools view --no-version -Ou -c 2 CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.shapeit2-duohmm-phased.vcf.gz | \
+  bcftools annotate --no-version -Ob -o CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf -x ID,QUAL,FILTER,INFO,^FMT/GT && \
+  bcftools index -f CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf
 done
+bcftools view --no-version -h CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.vcf.gz | \
+  sed 's/^#CHROM/##INFO=<ID=ME,Number=1,Type=Float,Description="Mendelian genotype errors">\n#CHROM/' | \
+  bcftools reheader -h /dev/stdin CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.vcf.gz | \
+  bcftools view --no-version -Ou -c 2 | \
+  bcftools annotate --no-version -Ob -o CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf -x ID,QUAL,FILTER,INFO,^FMT/GT &&
+  bcftools index -f CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf
 ```
-Do notice though that the 1000 Genomes project team incorrectly lifted over chromosome X genotypes over PAR1 and PAR2 regions, despite this issue not being reported in the <a href="http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/GRCh38_positions/README_GRCh38_liftover_20170504.txt">README</a>. This will directly affect the ability to detect chromosome Y loss events
 
 List of common germline duplications and deletions
 ```
-wget -P $HOME/GRCh38 ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/supporting/GRCh38_positions/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.GRCh38.vcf.gz{,.tbi}
-bcftools query -i 'AC>1 && END-POS+1>10000 && SVTYPE!="INDEL" && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
-  -f "chr%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh38/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.GRCh38.vcf.gz > $HOME/GRCh38/cnp.grch38.bed
+wget -P $HOME/GRCh38 http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20210124.SV_Illumina_Integration/1KGP_3202.Illumina_ensemble_callset.freeze_V1.vcf.gz{,.tbi}
+bcftools query -i 'AC>1 && END-POS+1>10000 && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
+  -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh38/1KGP_3202.Illumina_ensemble_callset.freeze_V1.vcf.gz > $HOME/GRCh38/cnps.bed
 ```
 
 Minimal divergence intervals from segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
@@ -288,8 +288,8 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
   bedtools groupby -c 4 -o min | \
   awk 'BEGIN {i=0; s[0]="+"; s[1]="-"} {if ($4!=x) i=(i+1)%2; x=$4; print $0"\t0\t"s[i]}' | \
   bedtools merge -s -c 4 -o distinct | \
-  grep -v "GL\|KI" | bgzip > $HOME/GRCh38/dup.grch38.bed.gz && \
-  tabix -f -p bed $HOME/GRCh38/dup.grch38.bed.gz
+  grep -v "GL\|KI" | bgzip > $HOME/GRCh38/segdups.bed.gz && \
+  tabix -f -p bed $HOME/GRCh38/segdups.bed.gz
 ```
 
 1000 Genomes project phase 3 imputation panel for beagle5 and impute5
@@ -306,7 +306,7 @@ chr=chrX; bcftools +fixploidy --no-version $pfx$chr$sfx.bcf | \
 
 Download cytoband file
 ```
-wget -O $HOME/GRCh38/cytoBand.hg38.txt.gz http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/cytoBand.txt.gz
+wget -P $HOME/GRCh38 http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/cytoBand.txt.gz
 ```
 
 Setup variables
@@ -315,12 +315,12 @@ ref="$HOME/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 mhc_reg="chr6:27518932-33480487"
 kir_reg="chr19:54071493-54992731"
 map="$HOME/GRCh38/genetic_map_hg38_withX.txt.gz"
-panel_pfx="$HOME/GRCh38/ALL.chr"
-panel_sfx="_GRCh38.genotypes.20170504"
+panel_pfx="$HOME/GRCh38/CCDG_14151_B01_GRM_WGS_2020-08-05_chr"
+panel_sfx=".filtered.phased.bcf"
 rule="GRCh38"
-cnp="$HOME/GRCh38/cnp.grch38.bed"
-dup="$HOME/GRCh38/dup.grch38.bed.gz"
-cyto="$HOME/GRCh38/cytoBand.hg38.txt.gz"
+cnp="$HOME/GRCh38/cnps.bed"
+dup="$HOME/GRCh38/segdups.bed.gz"
+cyto="$HOME/GRCh38/cytoBand.txt.gz"
 ```
 
 Data preparation
@@ -398,15 +398,13 @@ echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
   bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
   bcftools view --no-version -Ou -S ^samples_xcl_list.txt | \
   bcftools +fill-tags --no-version -Ou -t ^Y,MT,chrY,chrM -- -t ExcHet,F_MISSING | \
-  bcftools +mochatools --no-version -Ou -- -x $sex -G | \
   bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
-    -i 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-.97 ||
-    INFO/AC_Sex_Test<1e-6 && CHROM!="X" && CHROM!="chrX" && CHROM!="Y" && CHROM!="chrY"' \
-    -x ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING,^INFO/AC_Sex_Test && \
+    -i 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-.97' \
+    -x ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING && \
   bcftools index -f $dir/$pfx.xcl.bcf;
 /bin/rm samples_xcl_list.txt
 ```
-This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>2%), variants with excess heterozygosity (p<1e-6), and variants that correlate with sex in an unexpected way (p<1e-6). If you are using WGS data and you don't have a file with sex information, you can skip the quality control line using this information. When later running MoChA, sex will be imputed and a sex file can be computed from MoChA's output
+This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>3%), variants with excess heterozygosity (p<1e-6). If you are using WGS data and you don't have a file with sex information, you can skip the quality control line using this information. When later running MoChA, sex will be imputed and a sex file can be computed from MoChA's output
 
 If a file with additional variants to be excluded is available, further merge it with the generated list
 ```
@@ -443,7 +441,7 @@ done
 ```
 If you are using GRCh37 rather than GRCh38, use `--region $chr` instead
 
-Eagle's <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-100003.2">memory requirements</a> will depend on the number of samples in the target (Nt) and in the reference panel (Nr=2504), and the number of variants (M) in the largest contig, and will amount to 1.5(Nt+Nr)M bytes. The <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-110003.3">running time</a> will be ~1 minute of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">reference-based phasing</a> with a small target and reference panel (see Supplementary Tables 2,3) and ~5 minutes of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">non-reference-based phasing</a> with a large cohort (see Supplementary Tables 7,8). Also, by default, if the option --pbwtIters is not used, Eagle will perform one phasing iteration if Nt<Nr/2=1252, two if 1252=Nr/2<Nt<2Nr=5008, and three if 5008=2Nr<Nt and in the second and third iterations both target and reference panel haplotypes will be used as references for phasing (see <a href="https://www.nature.com/articles/ng.3679#Sec10"here</a>).
+Eagle's <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-100003.2">memory requirements</a> will depend on the number of samples in the target (Nt) and in the reference panel (Nr=2504), and the number of variants (M) in the largest contig, and will amount to 1.5(Nt+Nr)M bytes. The <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-110003.3">running time</a> will be ~1 minute of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">reference-based phasing</a> with a small target and reference panel (see Supplementary Tables 2,3) and ~5 minutes of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">non-reference-based phasing</a> with a large cohort (see Supplementary Tables 7,8). Also, by default, if the option --pbwtIters is not used, Eagle will perform one phasing iteration if Nt<Nr/2=1252, two if 1252=Nr/2<Nt<2Nr=5008, and three if 5008=2Nr<Nt and in the second and third iterations both target and reference panel haplotypes will be used as references for phasing (see <a href="https://www.nature.com/articles/ng.3679#Sec10"here</a>)
 
 Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions. Notice also that phasing can also be performed across overlapping windows rather than entire chromosomes to achieve better parallelization
 
@@ -517,7 +515,7 @@ bcftools +mocha \
   --call-rate $crt \
   --no-version \
   --output-type b \
-  --output $dir/$pfx.mocha.bcf \
+  --output $dir/$pfx.bdev.bcf \
   --variants ^$dir/$pfx.xcl.bcf \
   --mosaic-calls $dir/$pfx.calls.tsv \
   --genome-stats $dir/$pfx.stats.tsv \
@@ -526,7 +524,7 @@ bcftools +mocha \
   --mhc $mhc_reg \
   --kir $kir_reg \
   $dir/$pfx.bcf && \
-bcftools index -f $dir/$pfx.mocha.bcf
+bcftools index -f $dir/$pfx.bdev.bcf
 ```
 Notice that MoChA will read input computed gender and call rate if provided, otherwise these will be estimated from the VCF. For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms
 
@@ -576,12 +574,13 @@ computed_gender - inferred sample gender
            type - Type of call based on LRR / relative coverage
              cf - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
 ```
+Notice that the cell fraction is computed as either `2 bdev` for CN-LOH events or using the formulas `| 1/cn - 1/2 | = bdev` with `cn` the copy number and `cf = | 2 - cn |` for gains and losses. If the type of event cannot be determined, it will be determined as `4 bdev` if `bdev < 0.05` otherwise it will not be estimated
 
 The output VCF will contain the following extra FORMAT fields
 ```
-      Ldev - LRR deviation estimate
-      Bdev - BAF deviation estimate
-Bdev_Phase - for heterozygous calls: 1/-1 if the alternate allele is over/under represented
+Ldev - LRR deviation estimate
+Bdev - BAF deviation estimate
+  AS - Allelic shift for heterozygous calls: 1/-1 if the alternate allele is over/under represented
 ```
 
 For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to 9NM bytes. For example, if you are running 4,000 samples and chromosome 1 has ~80K variants, you will need approximately 2-3GB to run MoChA. It will take ~1/3 second of CPU time per genome to process samples genotyped on the Illumina GSA DNA microarray. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the --min-dist parameter (D, 400 by default) and the length of the longest contig (L) and will amount to no more than 9NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter --min-dist 400 and chromosome 1 is ~250Mbp long, you might need up to 5-6GB to run MoChA. For whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use options --adjust-BAF-LRR -1 and --regress-BAF-LRR -1). Notice that the CPU requirements for MoChA will be negligible compared to the CPU requirements for phasing with Eagle
@@ -605,46 +604,49 @@ awk 'NR==FNR {x[$1"_"$3"_"$4"_"$5]++} NR>FNR && ($0~"^track" || $4"_"$1"_"$2"_"$
 ```
 will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls with less than a `lod_baf_phase` score of 10 unless they are larger than 5Mbp (or 10Mbp if they span the centromere) for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UKBB</a>
 
-Allelic imbalance pipeline
-==========================
+Allelic shift pipeline
+======================
 
-Import results from MoChA into VCF file with imputed genotypes (optional for array data)
+Some mosaic chromosomal alterations have been observed to affect preferentially some haplotypes causing biased allelic shifts at several loci (MPL, FH, NBN, JAK2, FRA10B, MRE11, ATM, SH2B3, TINF2, TCL1A, DLK1, TM2D3, CTU2). This type of analysis for DNA microarray data requires information about the mosaic chromosomal alterations to be extended across imputed heterozygous genotypes and a binomial test for biased allelic shift to be performed, as hs been done before (see Table 1 of <a href="https://doi.org/10.1038/s41586-018-0321-x">Loh et al. 2018</a>, Extended Data Table 1 of <a href="https://doi.org/10.1038/s41586-020-2430-6">Loh et al. 2020</a>, and Table 1 of <a href="https://doi.org/10.1038/s41586-020-2426-2">Terao et al. 2020</a>)
+
+Import allelic shift information from the MoChA output VCF into a VCF file with imputed genotypes (optional for array data)
 ```
 bcftools annotate \
   --no-version -Ob \
-  --columns FMT/Ldev,FMT/Bdev,FMT/Bdev_Phase \
+  --columns FMT/AS \
   $dir/$pfx.imp.bcf \
-  --annotations $dir/$pfx.mocha.bcf \
-  --output $dir/$pfx.imp.mocha.bcf && \
-bcftools index --force $dir/$pfx.imp.mocha.bcf
+  --annotations $dir/$pfx.bdev.bcf \
+  --output $dir/$pfx.imp.bdev.bcf && \
+bcftools index --force $dir/$pfx.imp.bdev.bcf
 ```
 
 Run asymmetry analyses (subset cohort, run binomial test, discard genotypes)
 ```
 bcftools +extendFMT \
   --no-version -Ou \
-  --format Bdev_Phase \
+  --format AS \
   --phase \
   --dist 500000 \
   --regions $reg \
   --samples $lst \
-  $dir/$pfx.imp.mocha.bcf | \
+  $dir/$pfx.imp.bdev.bcf | \
 bcftools +mochatools \
   --no-version \
   --output-type b \
   --output $dir/$pfx.bal.bcf \
-  -- --balance Bdev_Phase \
+  -- --summary AS \
+  --test AS \
   --drop-genotypes && \
-bcftools index --force $dir/$pfx.bal.bcf
+bcftools index --force $dir/$pfx.as.bcf
 ```
 
 Observe results for asymmetry analyses in table format
 ```
-fmt="%CHROM\t%POS\t%ID\t%Bal{0}\t%Bal{1}\t%Bal_Test\n"
+fmt="%CHROM\t%POS\t%ID\t%AS{0}\t%AS{1}\t%binom_AS\n"
 bcftools query \
-  --include "Bal_Test>6" \
+  --include "binom_AS<1e-6" \
   --format "$fmt" \
-  $dir/$pfx.bal.bcf | \
+  $dir/$pfx.as.bcf | \
   column -ts $'\t'
 ```
 
@@ -677,7 +679,7 @@ pileup_plot.R \
   --pdf $dir/$pfx.pdf \
   --stats $dir/$pfx.stats.tsv \
   --calls $dir/$pfx.calls.tsv \
-  --cytoband $HOME/GRCh37/cytoBand.hg19.txt.gz
+  --cytoband $HOME/GRCh37/cytoBand.txt.gz
 ```
 
 Plot mosaic chromosomal alterations (for array data)
@@ -685,11 +687,11 @@ Plot mosaic chromosomal alterations (for array data)
 mocha_plot.R \
   --mocha \
   --stats $dir/$pfx.stats.tsv \
-  --vcf $dir/$pfx.mocha.bcf \
+  --vcf $dir/$pfx.bdev.bcf \
   --png MH0145622.png \
   --samples MH0145622 \
   --regions 11:81098129-115077367 \
-  --cytoband $HOME/GRCh37/cytoBand.hg19.txt.gz
+  --cytoband $HOME/GRCh37/cytoBand.txt.gz
 ```
 Notice that by default MoChA will perform internal BAF (for array data) and LRR adjustments that will not be performed by the plotter so the visualized data might actually look noisier than what was actually processed
 
@@ -702,11 +704,11 @@ mocha_plot.R \
   --wgs \
   --mocha \
   --stats $dir/$pfx.stats.tsv
-  --vcf $dir/$pfx.mocha.bcf \
+  --vcf $dir/$pfx.bdev.bcf \
   --png CSES15_P26_140611.png \
   --samples CSES15_P26_140611 \
   --regions 1:202236354-211793505 \
-  --cytoband $HOME/GRCh37/cytoBand.hg19.txt.gz
+  --cytoband $HOME/GRCh37/cytoBand.txt.gz
 ```
 
 ![](CSES15_P26_140611.png)
@@ -715,4 +717,4 @@ Complex duplication overlapping the MDM4 gene (GRCh37 coordinates). Signal over 
 Acknowledgements
 ================
 
-This work is supported by NIH grant <a href="http://grantome.com/grant/NIH/R01-HG006855">R01 HG006855</a>, NIH grant <a href="http://grantome.com/grant/NIH/R01-MH104964">R01 MH104964</a>, US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244), and the Stanley Center for Psychiatric Research. This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> in building HTSlib and BCFtools and Po-Ru Loh <poruloh@broadinstitute.org> in building the Eagle phasing software
+This work is supported by NIH grant <a href="http://grantome.com/grant/NIH/R01-HG006855">R01 HG006855</a>, NIH grant <a href="http://grantome.com/grant/NIH/R01-MH104964">R01 MH104964</a>, US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244), and the Stanley Center for Psychiatric Research. This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> for writing HTSlib and BCFtools, Po-Ru Loh <poruloh@broadinstitute.org> for writing the Eagle phasing software, Olivier Delaneau <olivier.delaneau@gmail.com> for writing the SHAPEIT4 phasing software, and Simone Rubinacci <rubinacci.simone@gmail.com> for writing the IMPUTE5 imputation software

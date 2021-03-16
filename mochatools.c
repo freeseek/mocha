@@ -33,27 +33,45 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2021-01-20"
+#define MOCHATOOLS_VERSION "2021-03-15"
 
+#define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
+
+#define INFO_GC (1 << 0)
+#define INFO_CPG (1 << 1)
+#define INFO_ALLELE_A (1 << 2)
+#define INFO_ALLELE_B (1 << 3)
+#define INFO_AC_SEX (1 << 4)
+#define INFO_MISSING_SEX (1 << 5)
+#define INFO_pAC_HET (1 << 6)
+#define INFO_AD_HET (1 << 7)
+#define INFO_pBAF_STATS (1 << 8)
+#define INFO_COR_BAF_LRR (1 << 9)
 
 static inline double sq(double x) { return x * x; }
 
 typedef struct {
-    int phase;    // whether to include genotype phase in the asymmetry test
-    int ad;       // whether to perform the allelic depth test
-    int gc_win;   // length of window to compute GC and CpG content
-    char *format; // format field for sign balance test
-    int infer_baf_alleles;
-    int cor_baf_lrr;
-    int nsmpl, gt_id, ad_id, baf_id, lrr_id, fmt_id, allele_a_id, allele_b_id;
+    int flags;
+    int adjust; // whether to adjust BAF and LRR
+    int gc_win; // length of window to compute GC and CpG content
     int *gender;
-    int8_t *gt_phase_arr, *fmt_sign_arr;
+    char *as_str;   // format field ID to summarize for allelic shift count summary
+    int phase;      // whether phase information should be included in the allelic shift
+    char *info_str; // info field for binomial or Fisher's exact test
+    int phred;      // whether the test result should be phred scaled
+    int nsmpl, allele_a_id, allele_b_id, adjust_id, gt_id, ad_id, baf_id, lrr_id, info_id, as_id;
+    int8_t *gt_phase_arr, *as_arr;
     int16_t *gt0_arr, *gt1_arr, *ad0_arr, *ad1_arr;
+    int32_t *info_arr;
+    int m_info;
+    float *adjust_arr;
+    int m_adjust;
     float *baf_arr[2];
     int *imap_arr;
     faidx_t *fai;
     bcf_hdr_t *in_hdr, *out_hdr;
+    kstring_t summary_str, test_str;
 } args_t;
 
 args_t *args;
@@ -71,82 +89,152 @@ const char *usage(void) {
            "   run \"bcftools plugin\" for a list of common options\n"
            "\n"
            "Plugin options:\n"
-           "   -b, --balance <ID>            performs binomial test for sign balance of format field ID\n"
-           "   -p, --phase                   integrates genotype phase in the balance tests\n"
-           "   -a, --ad-het                  performs binomial test for reference / alternate allelic depth (AD)\n"
-           "   -x, --sex <file>              file including information about the gender of the samples\n"
+           "   -l, --list-tags               list available INFO tags with description for VCF output\n"
+           "   -t, --tags LIST               list of output INFO tags [" TAG_LIST_DFLT
+           "]\n"
+           "       --adjust                  adjust BAF and LRR using INFO/ADJ_COEFF\n"
            "   -f, --fasta-ref <file>        reference sequence to compute GC and CpG content\n"
            "       --gc-window-size <int>    window size in bp used to compute the GC and CpG content [" GC_WIN_DFLT
            "]\n"
-           "       --infer-BAF-alleles       infer from genotypes and BAF which ones are the A and B alleles\n"
-           "       --cor-BAF-LRR             computes Pearson correlation between BAF and LRR at heterozygous sites\n"
+           "   -x, --sex <file>              file including information about the gender of the samples\n"
+           "       --summary <tag>           allelic shift format field ID to summarize\n"
+           "       --phase                   whether phase information should be included in the allelic shift\n"
+           "       --test <tag>              performs binomial or Fisher's exact test for INFO field ID\n"
+           "       --phred                   reports p-values as phred scaled\n"
            "   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with \"^\" "
            "prefix)\n"
            "   -S, --samples-file [^]<file>  file of samples to include (or exclude with \"^\" prefix)\n"
            "       --force-samples           only warn about unknown subset samples\n"
            "   -G, --drop-genotypes          drop individual genotype information (after running statistical tests)\n"
            "\n"
-           "Example:\n"
-           "    bcftools +mochatools file.bcf -- --balance Bdev_Phase --drop-genotypes\n"
+           "Examples:\n"
+           "    bcftools +mochatools -- -l\n"
+           "    bcftools +mochatools file.bcf -Ob -o output.bcf -- -t GC -f human_g1k_v37.fasta\n"
+           "    bcftools +mochatools file.bcf -Ob -o output.bcf -- -t ALLELE_A,ALLELE_B\n"
+           "    bcftools +mochatools file.bcf -- --summary AS --test AS --drop-genotypes\n"
+           "    bcftools +mochatools file.bcf -- --summary AS --phase --test pAS --drop-genotypes\n"
            "\n";
+}
+
+static int parse_tags(const char *str) {
+    if (!args->in_hdr) error("%s", usage());
+
+    int flags = 0, n_tags;
+    if (!strcasecmp(str, "none")) return flags;
+    char **tags = hts_readlist(str, 0, &n_tags);
+    for (int i = 0; i < n_tags; i++) {
+        if (!strcasecmp(tags[i], "GC"))
+            flags |= INFO_GC;
+        else if (!strcasecmp(tags[i], "CpG"))
+            flags |= INFO_CPG;
+        else if (!strcasecmp(tags[i], "ALLELE_A"))
+            flags |= INFO_ALLELE_A;
+        else if (!strcasecmp(tags[i], "ALLELE_B"))
+            flags |= INFO_ALLELE_B;
+        else if (!strcasecmp(tags[i], "AC_Sex"))
+            flags |= INFO_AC_SEX;
+        else if (!strcasecmp(tags[i], "MISSING_Sex"))
+            flags |= INFO_MISSING_SEX;
+        else if (!strcasecmp(tags[i], "pAC_Het"))
+            flags |= INFO_pAC_HET;
+        else if (!strcasecmp(tags[i], "AD_Het"))
+            flags |= INFO_AD_HET;
+        else if (!strcasecmp(tags[i], "pBAF_Stats"))
+            flags |= INFO_pBAF_STATS;
+        else if (!strcasecmp(tags[i], "Cor_BAF_LRR"))
+            flags |= INFO_COR_BAF_LRR;
+        else
+            error("Error parsing \"--tags %s\": the tag \"%s\" is not supported\n", str, tags[i]);
+        free(tags[i]);
+    }
+    if (n_tags) free(tags);
+    return flags;
+}
+
+static void list_tags(void) {
+    error(
+        "INFO/GC           Number:1  Type:Float    ..  GC ratio content around the marker\n"
+        "INFO/CpG          Number:1  Type:Float    ..  CpG ratio content around the marker\n"
+        "INFO/ALLELE_A     Number:1  Type:Integer  ..  A allele\n"
+        "INFO/ALLELE_B     Number:1  Type:Integer  ..  B allele\n"
+        "INFO/AC_Sex       Number:4  Type:Integer  ..  Number of homozygous and heterozygous genotypes by gender\n"
+        "INFO/MISSING_Sex  Number:4  Type:Integer  ..  Number of non-missing and missing genotypes by gender\n"
+        "INFO/pAC_Het      Number:2  Type:Integer  ..  Number of heterozygous genotypes by transmission type\n"
+        "INFO/AD_Het       Number:2  Type:Integer  ..  Allelic depths for the reference and alternate alleles across "
+        "heterozygous genotypes\n"
+        "INFO/pBAF_Stats   Number:4  Type:Float    ..  Welch's t-test and Mann-Whitney U test for BAF by transmission "
+        "type across heterozygous genotypes\n"
+        "INFO/Cor_BAF_LRR  Number:3  Type=Float    ..  Pearson correlation for BAF and LRR at AA, AB, and BB "
+        "genotypes\n");
 }
 
 int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     args = (args_t *)calloc(1, sizeof(args_t));
+    const char *tag_list = TAG_LIST_DFLT;
     char *tmp;
     args->gc_win = (int)strtol(GC_WIN_DFLT, NULL, 0);
     args->in_hdr = in;
     args->out_hdr = out;
-    args->format = NULL;
+    args->info_str = NULL;
+    args->as_str = NULL;
     int sample_is_file = 0;
     int force_samples = 0;
     int sites_only = 0;
     char *sample_names = NULL;
     char *gender_fname = NULL;
     char *ref_fname = NULL;
+    kstring_t str = {0, 0, NULL};
 
     int c;
-    static struct option loptions[] = {{"balance", required_argument, NULL, 'b'},
-                                       {"ad-het", no_argument, NULL, 'a'},
-                                       {"sex", required_argument, NULL, 'x'},
-                                       {"phase", no_argument, NULL, 'p'},
+    static struct option loptions[] = {{"list-tags", no_argument, NULL, 'l'},
+                                       {"tags", required_argument, NULL, 't'},
+                                       {"adjust", no_argument, NULL, 1},
                                        {"fasta-ref", required_argument, NULL, 'f'},
-                                       {"gc-window-size", required_argument, NULL, 'w'},
-                                       {"infer-BAF-alleles", no_argument, NULL, 1},
-                                       {"cor-BAF-LRR", no_argument, NULL, 2},
+                                       {"gc-window-size", required_argument, NULL, 2},
+                                       {"sex", required_argument, NULL, 'x'},
+                                       {"summary", required_argument, NULL, 3},
+                                       {"phase", no_argument, NULL, 4},
+                                       {"test", required_argument, NULL, 5},
+                                       {"phred", no_argument, NULL, 6},
                                        {"samples", required_argument, NULL, 's'},
                                        {"samples-file", required_argument, NULL, 'S'},
-                                       {"force-samples", no_argument, NULL, 3},
+                                       {"force-samples", no_argument, NULL, 7},
                                        {"drop-genotypes", no_argument, NULL, 'G'},
                                        {NULL, 0, NULL, 0}};
 
-    while ((c = getopt_long(argc, argv, "h?b:ax:pf:w:s:S:G", loptions, NULL)) >= 0) {
+    while ((c = getopt_long(argc, argv, "h?lt:f:x:s:S:G", loptions, NULL)) >= 0) {
         switch (c) {
-        case 'b':
-            args->format = optarg;
+        case 'l':
+            list_tags();
             break;
-        case 'a':
-            args->ad = 1;
+        case 't':
+            tag_list = optarg;
             break;
-        case 'x':
-            gender_fname = optarg;
-            break;
-        case 'p':
-            args->phase = 1;
+        case 1:
+            args->adjust = 1;
             break;
         case 'f':
             ref_fname = optarg;
             break;
-        case 'w':
+        case 2:
             args->gc_win = (int)strtol(optarg, &tmp, 0);
             if (*tmp) error("Could not parse: -w %s\n", optarg);
             if (args->gc_win <= 0) error("Window size is not positive: -w %s\n", optarg);
             break;
-        case 1:
-            args->infer_baf_alleles = 1;
+        case 'x':
+            gender_fname = optarg;
             break;
-        case 2:
-            args->cor_baf_lrr = 1;
+        case 3:
+            args->as_str = optarg;
+            break;
+        case 4:
+            args->phase = 1;
+            break;
+        case 5:
+            args->info_str = optarg;
+            break;
+        case 6:
+            args->phred = 1;
             break;
         case 's':
             sample_names = optarg;
@@ -155,7 +243,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
             sample_names = optarg;
             sample_is_file = 1;
             break;
-        case 3:
+        case 7:
             force_samples = 1;
             break;
         case 'G':
@@ -168,6 +256,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
             break;
         }
     }
+    args->flags |= parse_tags(tag_list);
 
     // this ugly workaround is required to make sure we can set samples on both headers even
     // when sample_is_file is true and sample_names is stdin
@@ -204,98 +293,119 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
 
     if (gender_fname) args->gender = mocha_parse_gender(args->in_hdr, gender_fname);
 
-    if (ref_fname) {
+    if (args->flags & (INFO_GC | INFO_CPG)) {
+        if (!ref_fname) error("Reference sequence not provided, cannot infer GC or CpG content\n");
         args->fai = fai_load(ref_fname);
         if (!args->fai) error("Failed to load the fai index: %s\n", ref_fname);
         bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=GC,Number=1,Type=Float,Description=\"GC ratio content "
-                       "around the variant\">");
+                       "##INFO=<ID=GC,Number=1,Type=Float,Description=\"GC ratio content around the marker\">");
         bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=CpG,Number=1,Type=Float,Description=\"CpG ratio content "
-                       "around the variant\">");
+                       "##INFO=<ID=CpG,Number=1,Type=Float,Description=\"CpG ratio content around the marker\">");
     }
 
+    args->allele_a_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_A");
+    if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_INFO, args->allele_a_id)) args->allele_a_id = -1;
+    if (args->allele_a_id >= 0 && bcf_hdr_id2type(args->in_hdr, BCF_HL_INFO, args->allele_a_id) != BCF_HT_INT)
+        error("Error: input VCF file ALLELE_A info field is not of integer type\n");
+
+    args->allele_b_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_B");
+    if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_INFO, args->allele_a_id)) args->allele_b_id = -1;
+    if (args->allele_b_id >= 0 && bcf_hdr_id2type(args->in_hdr, BCF_HL_INFO, args->allele_b_id) != BCF_HT_INT)
+        error("Error: input VCF file ALLELE_B info field is not of float type\n");
+
+    args->adjust_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ADJ_COEFF");
+    if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_INFO, args->adjust_id)) args->adjust_id = -1;
+    if (args->adjust_id >= 0 && bcf_hdr_id2type(args->in_hdr, BCF_HL_INFO, args->adjust_id) != BCF_HT_REAL)
+        error("Error: input VCF file ADJ_COEFF info field is not of integer type\n");
+    if (args->adjust_id >= 0
+        && (bcf_hdr_id2length(args->in_hdr, BCF_HL_INFO, args->adjust_id) != BCF_VL_FIXED
+            || bcf_hdr_id2number(args->in_hdr, BCF_HL_INFO, args->adjust_id) != 9))
+        error("Error: input VCF file ADJ_COEFF info field has wrong number of values\n");
+
+    if (args->adjust && args->adjust_id < 0)
+        error("Error: ADJ_COEFF field is not present, cannot perform --adjust correction\n");
+
     args->nsmpl = bcf_hdr_nsamples(args->in_hdr);
-    if (args->nsmpl == 0) return 0;
+    if (args->nsmpl == 0) goto ret;
 
     args->gt_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "GT");
+    if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->gt_id)) args->gt_id = -1;
+
     args->ad_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "AD");
+    if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->ad_id)) args->ad_id = -1;
+    if (args->ad_id >= 0 && bcf_hdr_id2type(args->in_hdr, BCF_HL_FMT, args->ad_id) != BCF_HT_INT)
+        error("Error: input VCF file AD format field is not of integer type\n");
+    if (args->ad_id >= 0 && bcf_hdr_id2length(args->in_hdr, BCF_HL_FMT, args->ad_id) != BCF_VL_R)
+        error("Error: input VCF file AD format field has wrong number of values\n");
+
     args->baf_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "BAF");
+    if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->baf_id)) args->baf_id = -1;
+    if (args->baf_id >= 0 && bcf_hdr_id2type(args->in_hdr, BCF_HL_FMT, args->baf_id) != BCF_HT_REAL)
+        error("Error: input VCF file BAF format field is not of float type\n");
+
     args->lrr_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "LRR");
-    args->fmt_id = args->format ? bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, args->format) : -1;
-    args->allele_a_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_A");
-    args->allele_b_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_B");
+    if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->lrr_id)) args->lrr_id = -1;
+    if (args->lrr_id >= 0 && bcf_hdr_id2type(args->in_hdr, BCF_HL_FMT, args->lrr_id) != BCF_HT_REAL)
+        error("Error: input VCF file LRR format field is not of float type\n");
 
-    if (args->format && args->fmt_id < 0)
-        error("Error: %s format field is not present, cannot perform --balance analysis\n", args->format);
-    if (args->ad && (args->gt_id < 0 || args->ad_id < 0))
-        error("Error: Either GT or AD format fields are not present, cannot perform --ad-het analysis\n");
-    if (args->phase && (args->gt_id < 0 || (args->ad_id < 0 && args->baf_id < 0 && args->fmt_id < 0)))
-        error("Error: Either GT or AD/BAF/%s format fields are not present, cannot perform --phase analysis\n",
-              args->format);
-    if (args->infer_baf_alleles && (args->gt_id < 0 || args->baf_id < 0))
-        error("Error: Either GT or BAF format fields are not present, cannot perform --infer-baf-alleles analysis\n");
-
-    if (args->format) {
-        bcf_hdr_append(
-            args->out_hdr,
-            "##INFO=<ID=Bal,Number=2,Type=Integer,Description=\"Reference alternate allelic shift counts\">");
-        bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=Bal_Test,Number=1,Type=Float,Description=\"Binomial test for reference alternate "
-                       "allelic shift\">");
-        if (args->phase) {
-            bcf_hdr_append(
-                args->out_hdr,
-                "##INFO=<ID=Bal_Phase,Number=2,Type=Integer,Description=\"Paternal maternal allelic shift counts\">");
-            bcf_hdr_append(args->out_hdr,
-                           "##INFO=<ID=Bal_Phase_Test,Number=1,Type=Float,Description=\"Binomial test for paternal "
-                           "maternal allelic shift\">");
+    if (args->flags & (INFO_ALLELE_A | INFO_ALLELE_B)) {
+        if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->gt_id))
+            error("Error: GT format field is not present, cannot infer ALLELE_A or ALLELE_B\n");
+        if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->baf_id))
+            error("Error: BAF format field is not present, cannot infer ALLELE_A or ALLELE_B\n");
+        if (args->flags & INFO_ALLELE_A) {
+            if (bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_A") >= 0)
+                error("Field ALLELE_A already present in the VCF.\n");
+            bcf_hdr_append(args->out_hdr, "##INFO=<ID=ALLELE_A,Number=1,Type=Integer,Description=\"A allele\">");
+        }
+        if (args->flags & INFO_ALLELE_B) {
+            if (bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_B") >= 0)
+                error("Field ALLELE_B already present in the VCF.\n");
+            if (args->flags & INFO_ALLELE_B)
+                bcf_hdr_append(args->out_hdr, "##INFO=<ID=ALLELE_B,Number=1,Type=Integer,Description=\"B allele\">");
         }
     }
 
-    bcf_hdr_append(args->out_hdr,
-                   "##INFO=<ID=AC_Het,Number=1,Type=Integer,Description=\"Number of heterozygous genotypes\">");
-    if (args->gender) {
-        bcf_hdr_append(
-            args->out_hdr,
-            "##INFO=<ID=AC_Het_Sex,Number=2,Type=Integer,Description=\"Number of heterozygous genotypes by gender\">");
+    if (args->flags & (INFO_AC_SEX)) {
+        if (!args->gender) error("Error: AC_Sex require --sex\n");
         bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AC_Sex_Test,Number=1,Type=Float,Description=\"Fisher's exact test for alternate "
-                       "alleles and gender\">");
+                       "##INFO=<ID=AC_Sex,Number=4,Type=Integer,Description=\"Number of homozygous and heterozygous "
+                       "genotypes by gender\">");
     }
 
-    if (args->ad && args->ad_id >= 0) {
+    if (args->flags & (INFO_MISSING_SEX)) {
+        if (!args->gender) error("Error: MISSING_Sex require --sex\n");
+        bcf_hdr_append(args->out_hdr,
+                       "##INFO=<ID=MISSING_Sex,Number=4,Type=Integer,Description=\"Number of non-missing and missing "
+                       "genotypes by gender\">");
+    }
+
+    if (args->flags & INFO_pAC_HET) {
+        if (args->gt_id < 0) error("Error: GT format field is not present, cannot compute pAC_Het\n");
+        bcf_hdr_append(args->out_hdr,
+                       "##INFO=<ID=pAC_Het,Number=2,Type=Integer,Description=\"Number of heterozygous genotypes "
+                       "by transmission type\">");
+    }
+
+    if (args->flags & INFO_AD_HET) {
+        if (args->gt_id < 0) error("Error: GT format field is not present, cannot compute AD_Het\n");
+        if (args->ad_id < 0) error("Error: AD format field is not present, cannot compute AD_Het\n");
         bcf_hdr_append(args->out_hdr,
                        "##INFO=<ID=AD_Het,Number=2,Type=Integer,Description=\"Allelic depths for the reference and "
                        "alternate alleles across heterozygous genotypes\">");
-        bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AD_Het_Test,Number=1,Type=Float,Description=\"Binomial test for reference and "
-                       "alternate allelic depth across heterozygous genotypes\">");
-    }
-    if (args->phase) {
-        bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AC_Het_Phase,Number=2,Type=Integer,Description=\"Number of heterozygous genotypes "
-                       "by transmission type\">");
-        bcf_hdr_append(args->out_hdr,
-                       "##INFO=<ID=AC_Het_Phase_Test,Number=1,Type=Float,Description=\"Binomial test for allelic "
-                       "transmission bias across heterozygous genotypes\">");
-        if (args->ad_id >= 0 || args->baf_id >= 0)
-            bcf_hdr_append(
-                args->out_hdr,
-                "##INFO=<ID=BAF_Phase_Test,Number=4,Type=Float,Description=\"Welch'"
-                "s t-test and Mann-Whitney U test for allelic transmission ratios across heterozygous genotypes\">");
     }
 
-    if (args->infer_baf_alleles) {
-        if (bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_A") >= 0)
-            error("Field ALLELE_A already present in the VCF.\n");
-        bcf_hdr_append(args->out_hdr, "##INFO=<ID=ALLELE_A,Number=1,Type=Integer,Description=\"A allele\">");
-        if (bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "ALLELE_B") >= 0)
-            error("Field ALLELE_B already present in the VCF.\n");
-        bcf_hdr_append(args->out_hdr, "##INFO=<ID=ALLELE_B,Number=1,Type=Integer,Description=\"B allele\">");
+    if (args->flags & INFO_pBAF_STATS) {
+        if (args->gt_id < 0) error("Error: GT format field is not present, cannot compute pBAF_Stats\n");
+        if (args->ad_id < 0 && args->baf_id < 0)
+            error("Error: Neither AD nor BAF format fields are present, cannot compute pBAF_Stats\n");
+        bcf_hdr_append(
+            args->out_hdr,
+            "##INFO=<ID=pBAF_Stats,Number=4,Type=Float,Description=\"Welch'"
+            "s t-test and Mann-Whitney U test for allelic transmission ratios across heterozygous genotypes\">");
     }
 
-    if (args->cor_baf_lrr) {
+    if (args->flags & INFO_COR_BAF_LRR) {
         if (args->allele_a_id < 0)
             error("Error: ALLELE_A field is not present, cannot perform --cor-BAF-LRR analysis\n");
         if (args->allele_b_id < 0)
@@ -307,11 +417,47 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
                        "correlation for BAF and LRR at AA, AB, and BB genotypes\">");
     }
 
-    if (sites_only)
+    if (args->as_str) {
+        args->as_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, args->as_str);
+        if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->as_id))
+            error("Error: %s format field is not present, cannot perform --summary\n", args->as_str);
+        if (args->phase) kputc('p', &args->summary_str);
+        kputs(args->as_str, &args->summary_str);
+        ksprintf(&str, "##INFO=<ID=%s,Number=2,Type=Integer,Description=\"%sAllelic shift counts for %s\">",
+                 args->summary_str.s, args->phase ? "phased " : "", args->as_str);
+        bcf_hdr_append(args->out_hdr, str.s);
+    }
+
+ret:
+    // this analysis is performed using a field that can be added by the previous analyses
+    if (args->info_str) {
+        args->info_id = bcf_hdr_id2int(args->out_hdr, BCF_DT_ID, args->info_str);
+        if (bcf_hdr_sync(args->out_hdr) < 0) error_errno("[%s] Failed to update header", __func__);
+        if (!bcf_hdr_idinfo_exists(args->out_hdr, BCF_HL_INFO, args->info_id))
+            error("Error: %s info field is not present, cannot perform --test\n", args->info_str);
+        int number = bcf_hdr_id2number(args->out_hdr, BCF_HL_INFO, args->info_id);
+        if (args->phred) kputc('p', &args->test_str);
+        if (number == 2)
+            kputs("binom_", &args->test_str);
+        else if (number == 4)
+            kputs("fisher_", &args->test_str);
+        else
+            error("Error: %s info field must contain 2 or 4 elements but it contains %d\n", args->info_str, number);
+        kputs(args->info_str, &args->test_str);
+        str.l = 0;
+        ksprintf(&str, "##INFO=<ID=%s,Number=1,Type=%s,Description=\"%s%s test for %s\">", args->test_str.s,
+                 args->phred ? "Integer" : "Float", args->phred ? "Phred scaled " : "",
+                 number == 2 ? "Binomial" : "Fisher's exact", args->info_str);
+        bcf_hdr_append(args->out_hdr, str.s);
+    }
+
+    if (sites_only) {
         if (bcf_hdr_set_samples(args->out_hdr, NULL, 0) < 0) error("Error parsing the sample list\n");
+        bcf_hdr_remove(args->out_hdr, BCF_HL_FMT, NULL);
+    }
 
     args->gt_phase_arr = (int8_t *)malloc(args->nsmpl * sizeof(int8_t));
-    args->fmt_sign_arr = (int8_t *)malloc(args->nsmpl * sizeof(int8_t));
+    args->as_arr = (int8_t *)malloc(args->nsmpl * sizeof(int8_t));
     args->gt0_arr = (int16_t *)malloc(args->nsmpl * sizeof(int16_t));
     args->gt1_arr = (int16_t *)malloc(args->nsmpl * sizeof(int16_t));
     args->ad0_arr = (int16_t *)malloc(args->nsmpl * sizeof(int16_t));
@@ -320,6 +466,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     args->baf_arr[1] = (float *)malloc(args->nsmpl * sizeof(float));
     args->imap_arr = (int *)malloc(args->nsmpl * sizeof(int));
 
+    free(str.s);
     return 0;
 }
 
@@ -473,7 +620,7 @@ static double mann_whitney_u(float *a, float *b, int na, int nb) {
 
 // retrieve phase information from BCF record
 // assumes little endian architecture
-static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *fmt_sign_arr, int nsmpl) {
+static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *as_arr, int nsmpl) {
     if (!fmt || fmt->n != 1) return 0;
 
 #define BRANCH(type_t, bcf_type_vector_end, bcf_type_missing)                                                          \
@@ -481,13 +628,13 @@ static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *fmt_sign_arr, int nsmpl) 
         type_t *p = (type_t *)fmt->p;                                                                                  \
         for (int i = 0; i < nsmpl; i++) {                                                                              \
             if (p[i] == bcf_type_vector_end || p[i] == bcf_type_missing)                                               \
-                fmt_sign_arr[i] = bcf_int8_missing;                                                                    \
+                as_arr[i] = bcf_int8_missing;                                                                          \
             else if (p[i] == (type_t)0)                                                                                \
-                fmt_sign_arr[i] = (int8_t)0;                                                                           \
+                as_arr[i] = (int8_t)0;                                                                                 \
             else if (p[i] > (type_t)0)                                                                                 \
-                fmt_sign_arr[i] = (int8_t)1;                                                                           \
+                as_arr[i] = (int8_t)1;                                                                                 \
             else                                                                                                       \
-                fmt_sign_arr[i] = (int8_t)-1;                                                                          \
+                as_arr[i] = (int8_t)-1;                                                                                \
         }                                                                                                              \
     }
     switch (fmt->type) {
@@ -513,7 +660,7 @@ static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *fmt_sign_arr, int nsmpl) 
 
 bcf1_t *process(bcf1_t *rec) {
     // compute GC and CpG content for each site
-    if (args->fai) {
+    if (args->flags & (INFO_GC | INFO_CPG)) {
         int fa_len;
         int at_cnt = 0, cg_cnt = 0, cpg_cnt = 0;
         const char *ref = rec->d.allele[0];
@@ -529,115 +676,41 @@ bcf1_t *process(bcf1_t *rec) {
                 if (fa[i - 1] == 'C' && fa[i] == 'G') cpg_cnt += 2;
         }
         free(fa);
-        float ratio = (float)(cg_cnt) / (float)(at_cnt + cg_cnt);
-        bcf_update_info_float(args->out_hdr, rec, "GC", &ratio, 1);
-        ratio = (float)cpg_cnt / (float)(fa_len);
-        bcf_update_info_float(args->out_hdr, rec, "CpG", &ratio, 1);
+        float ratio;
+        if (args->flags & INFO_GC) {
+            ratio = (float)(cg_cnt) / (float)(at_cnt + cg_cnt);
+            bcf_update_info_float(args->out_hdr, rec, "GC", &ratio, 1);
+        }
+        if (args->flags & INFO_CPG) {
+            ratio = (float)cpg_cnt / (float)(fa_len);
+            bcf_update_info_float(args->out_hdr, rec, "CpG", &ratio, 1);
+        }
     }
-    if (args->nsmpl == 0) return rec;
+
+    float ret[4];
 
     // extract format information from VCF format records
     bcf_fmt_t *gt_fmt = bcf_get_fmt_id(rec, args->gt_id);
     int gt_phase = bcf_get_genotype_phase(gt_fmt, args->gt_phase_arr, args->nsmpl);
-    if (!bcf_get_genotype_alleles(gt_fmt, args->gt0_arr, args->gt1_arr, args->nsmpl)) goto ret;
-    bcf_fmt_t *fmt = bcf_get_fmt_id(rec, args->fmt_id);
-    int fmt_sign = (args->format && fmt) ? bcf_get_format_sign(fmt, args->fmt_sign_arr, args->nsmpl) : 0;
+
+    // if samples or genotypes are not present, skip to the end
+    if (args->nsmpl == 0 || !bcf_get_genotype_alleles(gt_fmt, args->gt0_arr, args->gt1_arr, args->nsmpl)) goto ret;
+
+    bcf_fmt_t *as_fmt = bcf_get_fmt_id(rec, args->as_id);
+    int as_sign = (args->as_str && as_fmt) ? bcf_get_format_sign(as_fmt, args->as_arr, args->nsmpl) : 0;
+
     bcf_fmt_t *ad_fmt = bcf_get_fmt_id(rec, args->ad_id);
-    int ad =
-        ad_fmt ? bcf_get_allelic_depth(ad_fmt, args->gt0_arr, args->gt1_arr, args->ad0_arr, args->ad1_arr, args->nsmpl)
-               : 0;
+    int ad = ad_fmt && ad_fmt->n == rec->n_allele ? bcf_get_allelic_depth(ad_fmt, args->gt0_arr, args->gt1_arr,
+                                                                          args->ad0_arr, args->ad1_arr, args->nsmpl)
+                                                  : 0;
+
     bcf_fmt_t *baf_fmt = bcf_get_fmt_id(rec, args->baf_id);
     int baf = baf_fmt && baf_fmt->n == 1 && baf_fmt->type == BCF_BT_FLOAT ? 1 : 0;
+
     bcf_fmt_t *lrr_fmt = bcf_get_fmt_id(rec, args->lrr_id);
     int lrr = lrr_fmt && lrr_fmt->n == 1 && lrr_fmt->type == BCF_BT_FLOAT ? 1 : 0;
 
-    float ret[4];
-    int ac_het = 0, ac_sex[] = {0, 0, 0, 0}, ac_het_sex[] = {0, 0}, ac_het_phase[] = {0, 0}, fmt_bal[] = {0, 0},
-        fmt_bal_phase[] = {0, 0}, ad_het[] = {0, 0};
-
-    for (int i = 0; i < args->nsmpl; i++) {
-        float curr_baf = NAN;
-
-        // if genotype is missing, skip
-        if (args->gt0_arr[i] == bcf_int16_missing || args->gt0_arr[i] == bcf_int16_missing) continue;
-
-        int idx_fmt_sign = (fmt_sign && args->fmt_sign_arr[i] != bcf_int8_missing && args->fmt_sign_arr[i] != 0)
-                               ? (1 - args->fmt_sign_arr[i]) / 2
-                               : -1;
-        if (idx_fmt_sign >= 0) fmt_bal[idx_fmt_sign]++;
-
-        if (args->gender && (args->gender[i] == 1 || args->gender[i] == 2)) {
-            if (args->gt0_arr[i] == 0 && args->gt1_arr[i] == 0)
-                ac_sex[args->gender[i] - 1]++;
-            else if (args->gt0_arr[i] > 0 && args->gt1_arr[i] > 0)
-                ac_sex[2 + args->gender[i] - 1]++;
-        }
-
-        // if genotype is not heterozygous, skip
-        if (args->gt0_arr[i] == args->gt1_arr[i] || (args->gt0_arr[i] != 0 && args->gt1_arr[i] != 0)) continue;
-
-        int idx_gt_phase = gt_phase && (args->gt_phase_arr[i] == -1 || args->gt_phase_arr[i] == 1)
-                               ? (1 - args->gt_phase_arr[i]) / 2
-                               : -1;
-        ac_het++;
-        if (args->gender && (args->gender[i] == 1 || args->gender[i] == 2)) ac_het_sex[args->gender[i] - 1]++;
-        if (idx_gt_phase >= 0) ac_het_phase[idx_gt_phase]++;
-
-        int idx_fmt_phase =
-            (idx_gt_phase >= 0 && idx_fmt_sign >= 0) ? (1 - args->fmt_sign_arr[i] * args->gt_phase_arr[i]) / 2 : -1;
-        if (idx_fmt_phase >= 0) fmt_bal_phase[idx_fmt_phase]++;
-
-        if (ad) {
-            int ref_cnt = args->ad0_arr[i];
-            int alt_cnt = args->ad1_arr[i];
-            ad_het[0] += ref_cnt;
-            ad_het[1] += alt_cnt;
-            curr_baf = ((float)alt_cnt + 0.5f) / ((float)ref_cnt + (float)alt_cnt + 1.0f);
-        }
-        if (baf) curr_baf = ((float *)baf_fmt->p)[i];
-        if (idx_gt_phase >= 0 && !isnan(curr_baf)) {
-            args->baf_arr[idx_gt_phase][ac_het_phase[idx_gt_phase] - 1] = curr_baf;
-        }
-    }
-
-    bcf_update_info_int32(args->out_hdr, rec, "AC_Het", &ac_het, 1);
-    if (args->gender) {
-        bcf_update_info_int32(args->out_hdr, rec, "AC_Het_Sex", &ac_het_sex, 2);
-        double left, right, fisher;
-        ret[0] = kt_fisher_exact(ac_sex[0], ac_sex[1], ac_sex[2], ac_sex[3], &left, &right, &fisher);
-        bcf_update_info_float(args->out_hdr, rec, "AC_Sex_Test", &ret, 1);
-    }
-    if (args->phase) {
-        bcf_update_info_int32(args->out_hdr, rec, "AC_Het_Phase", &ac_het_phase, 2);
-        ret[0] = binom_exact(ac_het_phase[0], ac_het_phase[0] + ac_het_phase[1]);
-        bcf_update_info_float(args->out_hdr, rec, "AC_Het_Phase_Test", &ret, 1);
-    }
-    if (args->format) {
-        bcf_update_info_int32(args->out_hdr, rec, "Bal", &fmt_bal, 2);
-        ret[0] = binom_exact(fmt_bal[0], fmt_bal[0] + fmt_bal[1]);
-        bcf_update_info_float(args->out_hdr, rec, "Bal_Test", &ret, 1);
-        if (args->phase) {
-            bcf_update_info_int32(args->out_hdr, rec, "Bal_Phase", &fmt_bal_phase, 2);
-            ret[0] = binom_exact(fmt_bal_phase[0], fmt_bal_phase[0] + fmt_bal_phase[1]);
-            bcf_update_info_float(args->out_hdr, rec, "Bal_Phase_Test", &ret, 1);
-        }
-    }
-    if (args->ad) {
-        bcf_update_info_int32(args->out_hdr, rec, "AD_Het", &ad_het, 2);
-        ret[0] = binom_exact(ad_het[0], ad_het[0] + ad_het[1]);
-        bcf_update_info_float(args->out_hdr, rec, "AD_Het_Test", &ret, 1);
-    }
-    if (args->phase && ac_het_phase[0] && ac_het_phase[1]) {
-        ret[0] = get_median(args->baf_arr[0], ac_het_phase[0], NULL);
-        ret[1] = get_median(args->baf_arr[1], ac_het_phase[1], NULL);
-        ret[2] = welch_t_test(args->baf_arr[0], args->baf_arr[1], ac_het_phase[0], ac_het_phase[1]);
-        ret[3] = mann_whitney_u(args->baf_arr[0], args->baf_arr[1], ac_het_phase[0], ac_het_phase[1]);
-        bcf_update_info_float(args->out_hdr, rec, "BAF_Phase_Test", &ret, 4);
-    }
-
-    if (!baf || !lrr) goto ret;
-
-    if (args->infer_baf_alleles) {
+    if ((args->flags & (INFO_ALLELE_A | INFO_ALLELE_B)) && baf) {
         int alleles[2];
         switch (rec->n_allele) {
         case 1:
@@ -678,16 +751,118 @@ bcf1_t *process(bcf1_t *rec) {
         } else if (alleles_idx[1] == -1) {
             alleles_idx[1] = alleles_idx[0] == alleles[0] ? alleles[1] : alleles[0];
         }
-        bcf_update_info_int32(args->out_hdr, rec, "ALLELE_A", &alleles_idx[0], 1);
-        bcf_update_info_int32(args->out_hdr, rec, "ALLELE_B", &alleles_idx[1], 1);
+        if (args->flags & INFO_ALLELE_A) bcf_update_info_int32(args->out_hdr, rec, "ALLELE_A", &alleles_idx[0], 1);
+        if (args->flags & INFO_ALLELE_B) bcf_update_info_int32(args->out_hdr, rec, "ALLELE_B", &alleles_idx[1], 1);
     }
 
-    if (args->cor_baf_lrr) {
-        bcf_info_t *allele_a_info = bcf_get_info_id(rec, args->allele_a_id);
-        int8_t allele_a = ((int8_t *)allele_a_info->vptr)[0];
-        bcf_info_t *allele_b_info = bcf_get_info_id(rec, args->allele_b_id);
-        int8_t allele_b = ((int8_t *)allele_b_info->vptr)[0];
+    // determine ALLELE_A and ALLELE_B from VCF record
+    bcf_info_t *allele_a_info = bcf_get_info_id(rec, args->allele_a_id);
+    int8_t allele_a = allele_a_info ? ((int8_t *)allele_a_info->vptr)[0] : -1;
+    bcf_info_t *allele_b_info = bcf_get_info_id(rec, args->allele_b_id);
+    int8_t allele_b = allele_b_info ? ((int8_t *)allele_b_info->vptr)[0] : -1;
 
+    // adjust BAF and LRR values
+    if (args->adjust && baf && lrr) {
+        if (bcf_get_info_float(args->in_hdr, rec, "ADJ_COEFF", &args->adjust_arr, &args->m_adjust) < 0)
+            error("Could not retrieve adjusting coefficients at %s:%" PRId64 "\n",
+                  bcf_hdr_id2name(args->in_hdr, rec->rid), rec->pos + 1);
+        if (args->m_adjust < 9)
+            error("Not enough adjusting coefficients at %s:%" PRId64 "\n", bcf_hdr_id2name(args->in_hdr, rec->rid),
+                  rec->pos + 1);
+        for (int i = 0; i < args->nsmpl; i++) {
+            int n_a = (args->gt0_arr[i] == allele_a) + (args->gt1_arr[i] == allele_a);
+            int n_b = (args->gt0_arr[i] == allele_b) + (args->gt1_arr[i] == allele_b);
+            if (n_a + n_b != 2) continue;
+            ((float *)baf_fmt->p)[i] -=
+                args->adjust_arr[3 * n_b + 1] * ((float *)lrr_fmt->p)[i] - args->adjust_arr[3 * n_b];
+            ((float *)lrr_fmt->p)[i] -= args->adjust_arr[3 * n_b + 2];
+        }
+    }
+
+    int ac_sex[] = {0, 0, 0, 0};
+    int missing_sex[] = {0, 0, 0, 0};
+    int pac_het[] = {0, 0};
+    int ad_het[] = {0, 0};
+    int summary[] = {0, 0};
+    int psummary[] = {0, 0};
+
+    for (int i = 0; i < args->nsmpl; i++) {
+        float curr_baf = NAN;
+
+        int is_missing = args->gt0_arr[i] == bcf_int16_missing || args->gt1_arr[i] == bcf_int16_missing;
+        if (args->gender) {
+            switch (args->gender[i]) {
+            case 1: // male
+                missing_sex[is_missing]++;
+                break;
+            case 2: // female
+                missing_sex[2 + is_missing]++;
+                break;
+            default:
+                break;
+            }
+        }
+
+        // if genotype is missing, skip
+        if (is_missing) continue;
+
+        int idx_as_sign =
+            (as_sign && args->as_arr[i] != bcf_int8_missing && args->as_arr[i] != 0) ? (1 - args->as_arr[i]) / 2 : -1;
+        if (idx_as_sign >= 0) summary[idx_as_sign]++;
+
+        int is_het = args->gt0_arr[i] != args->gt1_arr[i];
+        if (args->gender) {
+            switch (args->gender[i]) {
+            case 1: // male
+                ac_sex[is_het]++;
+                break;
+            case 2: // female
+                ac_sex[2 + is_het]++;
+                break;
+            default:
+                break;
+            }
+        }
+
+        // if genotype is not heterozygous reference / alternate, skip
+        if (!is_het || (args->gt0_arr[i] != 0 && args->gt1_arr[i] != 0)) continue;
+
+        int idx_gt_phase = gt_phase && (args->gt_phase_arr[i] == -1 || args->gt_phase_arr[i] == 1)
+                               ? (1 - args->gt_phase_arr[i]) / 2
+                               : -1;
+        if (idx_gt_phase >= 0) pac_het[idx_gt_phase]++;
+
+        int idx_fmt_phase =
+            (idx_gt_phase >= 0 && idx_as_sign >= 0) ? (1 - args->as_arr[i] * args->gt_phase_arr[i]) / 2 : -1;
+        if (idx_fmt_phase >= 0) psummary[idx_fmt_phase]++;
+
+        if (ad) {
+            int ref_cnt = args->ad0_arr[i];
+            int alt_cnt = args->ad1_arr[i];
+            ad_het[0] += ref_cnt;
+            ad_het[1] += alt_cnt;
+            curr_baf = ((float)alt_cnt + 0.5f) / ((float)ref_cnt + (float)alt_cnt + 1.0f);
+        }
+        if (baf) curr_baf = ((float *)baf_fmt->p)[i];
+        if (idx_gt_phase >= 0 && !isnan(curr_baf)) {
+            args->baf_arr[idx_gt_phase][pac_het[idx_gt_phase] - 1] = curr_baf;
+        }
+    }
+
+    if (args->flags & INFO_AC_SEX) bcf_update_info_int32(args->out_hdr, rec, "AC_Sex", &ac_sex, 4);
+    if (args->flags & INFO_MISSING_SEX) bcf_update_info_int32(args->out_hdr, rec, "MISSING_Sex", &missing_sex, 4);
+    if (args->flags & INFO_pAC_HET) bcf_update_info_int32(args->out_hdr, rec, "pAC_Het", &pac_het, 2);
+    if ((args->flags & INFO_AD_HET) && ad) bcf_update_info_int32(args->out_hdr, rec, "AD_Het", &ad_het, 2);
+
+    if ((args->flags & INFO_pBAF_STATS) && (ad || baf)) {
+        ret[0] = get_median(args->baf_arr[0], pac_het[0], NULL);
+        ret[1] = get_median(args->baf_arr[1], pac_het[1], NULL);
+        ret[2] = welch_t_test(args->baf_arr[0], args->baf_arr[1], pac_het[0], pac_het[1]);
+        ret[3] = mann_whitney_u(args->baf_arr[0], args->baf_arr[1], pac_het[0], pac_het[1]);
+        bcf_update_info_float(args->out_hdr, rec, "pBAF_Stats", &ret, 4);
+    }
+
+    if ((args->flags & INFO_COR_BAF_LRR) && baf && lrr) {
         float rho[3];
         for (int i = 0; i < 3; i++) {
             int n = 0;
@@ -705,6 +880,33 @@ bcf1_t *process(bcf1_t *rec) {
     }
 
 ret:
+    if (args->as_str)
+        bcf_update_info_int32(args->out_hdr, rec, args->summary_str.s, args->phase ? &psummary : &summary, 2);
+
+    // perform binomial or Fisher's exact test on existing INFO field
+    if (args->info_str) {
+        bcf_info_t *info = bcf_get_info_id(rec, args->info_id);
+        if (!(info->type & (BCF_BT_INT8 | BCF_BT_INT16 | BCF_BT_INT32)) || (info->len != 2 && info->len != 4))
+            error("INFO field %s at %s:%" PRId64 " should contain two or four integers\n", args->info_str,
+                  bcf_hdr_id2name(args->in_hdr, rec->rid), rec->pos + 1);
+        bcf_get_info_int32(args->out_hdr, rec, args->info_str, &args->info_arr, &args->m_info);
+        double pval;
+        if (info->len == 2) {
+            pval = binom_exact(args->info_arr[0], args->info_arr[0] + args->info_arr[1]);
+        } else {
+            double left, right, fisher;
+            pval = kt_fisher_exact(args->info_arr[0], args->info_arr[1], args->info_arr[2], args->info_arr[3], &left,
+                                   &right, &fisher);
+        }
+        if (args->phred) {
+            int phred = (int)(-10.0 * M_LOG10E * log(pval) + 0.5);
+            bcf_update_info_int32(args->out_hdr, rec, args->test_str.s, &phred, 1);
+        } else {
+            ret[0] = (float)pval;
+            bcf_update_info_float(args->out_hdr, rec, args->test_str.s, &ret, 1);
+        }
+    }
+
     // remove all samples if sites_only was selected
     if (bcf_hdr_nsamples(args->out_hdr) == 0) bcf_subset(args->out_hdr, rec, 0, NULL);
     return rec;
@@ -714,13 +916,17 @@ void destroy(void) {
     binom_exact(-1, -1);
     free(args->gender);
     free(args->gt_phase_arr);
-    free(args->fmt_sign_arr);
+    free(args->as_arr);
     free(args->gt0_arr);
     free(args->gt1_arr);
     free(args->ad0_arr);
     free(args->ad1_arr);
+    free(args->info_arr);
+    free(args->adjust_arr);
     free(args->baf_arr[0]);
     free(args->baf_arr[1]);
     free(args->imap_arr);
+    free(args->summary_str.s);
+    free(args->test_str.s);
     free(args);
 }

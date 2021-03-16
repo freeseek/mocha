@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-mocha_plot_version <- '2021-01-20'
+mocha_plot_version <- '2021-03-15'
 
 library(optparse)
 library(data.table)
@@ -103,16 +103,16 @@ if (!is.null(args$cytoband)) {
 }
 
 # load main table from VCF file
-fmt <- '"[%CHROM\\t%POS\\t%REF\\t%ALT\\t%INFO/GC\\t%SAMPLE\\t%GT'
-names <- c('chrom', 'pos', 'ref', 'alt', 'gc', 'sample_id', 'gt')
+fmt <- '"[%CHROM\\t%POS\\t%REF\\t%ALT\\t%SAMPLE\\t%GT'
+names <- c('chrom', 'pos', 'ref', 'alt', 'sample_id', 'gt')
 if (!args$wgs) {
   if (args$mocha && !args$no_adjust)
   {
     fmt <- paste0(fmt, paste0('\\t%INFO/ADJ_COEFF{', 0:8, '}', collapse = ''))
     names <- c(names, c(outer(c('BAF0', 'BAF1', 'LRR0'), c('AA_', 'AB_', 'BB_'), FUN=function(x, y) paste0(y, x))))
   }
-  fmt <- paste0(fmt, '\\t%INFO/ALLELE_A\\t%INFO/ALLELE_B\\t%BAF\\t%LRR')
-  names <- c(names, c('allele_a', 'allele_b', 'BAF', 'LRR'))
+  fmt <- paste0(fmt, '\\t%INFO/GC\\t%INFO/ALLELE_A\\t%INFO/ALLELE_B\\t%BAF\\t%LRR')
+  names <- c(names, c('gc', 'allele_a', 'allele_b', 'BAF', 'LRR'))
 } else {
   fmt <- paste0(fmt, '\\t%AD{0}\\t%AD{1}')
   names <- c(names, c('ad0', 'ad1'))
@@ -141,15 +141,16 @@ if (packageVersion("data.table") < '1.11.6') {
   df <- setNames(fread(cmd = cmd, sep = '\t', header = FALSE, na.strings = '.', colClasses = list(character = c(1,3:6)), data.table = FALSE), names)
 }
 
-allele_0 <- lapply(df$gt, function(x) suppressWarnings(as.numeric(substr(x,1,1))))
-phased <- lapply(df$gt, function(x) substr(x,2,2)) == '|'
-allele_1 <- lapply(df$gt, function(x) suppressWarnings(as.numeric(substr(x,3,3))))
 if (args$wgs) {
   nonref <- grepl(',', df$alt)
   if (any(nonref)) df <- df[!nonref,]
   df$allele_a <- 0
   df$allele_b <- 1
 }
+
+allele_0 <- lapply(df$gt, function(x) suppressWarnings(as.numeric(substr(x,1,1))))
+phased <- lapply(df$gt, function(x) substr(x,2,2)) == '|'
+allele_1 <- lapply(df$gt, function(x) suppressWarnings(as.numeric(substr(x,3,3))))
 df$gts <- 'NC'
 df$gts[allele_0 == df$allele_a & allele_1 == df$allele_a] <- 'AA'
 df$gts[allele_0 == df$allele_a & allele_1 == df$allele_b |

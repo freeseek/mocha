@@ -41,7 +41,7 @@
 #include "beta_binom.h"
 #include "bcftools.h"
 
-#define MOCHA_VERSION "2021-01-20"
+#define MOCHA_VERSION "2021-03-15"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -120,6 +120,7 @@ typedef struct {
 } locus_t;
 
 typedef struct {
+    int allele_a_id, allele_b_id, gc_id, gt_id, ad_id, baf_id, lrr_id;
     float xy_log_prb;
     float err_log_prb;
     float flip_log_prb;
@@ -682,15 +683,15 @@ static double lrr_baf_lod(const float *lrr_arr, const float *baf_arr, int n, con
 }
 
 // return the LOD likelihood for a segment
-static double baf_phase_lod(const float *baf_arr, const int8_t *gt_phase, int n, const int *imap,
-                            const int8_t *bdev_phase, float err_log_prb, float baf_sd, double bdev) {
+static double baf_phase_lod(const float *baf_arr, const int8_t *gt_phase, int n, const int *imap, const int8_t *as,
+                            float err_log_prb, float baf_sd, double bdev) {
     if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
 
     float ret = 0.0f;
     for (int i = 0; i < n; i++) {
         float baf = imap ? baf_arr[imap[i]] : baf_arr[i];
         int8_t p = imap ? gt_phase[imap[i]] : gt_phase[i];
-        if (bdev_phase) p *= (int8_t)SIGN(bdev_phase[i]); // notice bdev_phase has no imap
+        if (as) p *= (int8_t)SIGN(as[i]); // notice as has no imap
         float log_lkl = baf_phase_log_lkl(baf, p, (float)bdev, baf_sd) - baf_phase_log_lkl(baf, 0, 0.0f, baf_sd);
         if (!isnan(err_log_prb)) {
             if (log_lkl < err_log_prb)
@@ -945,7 +946,7 @@ static double lrr_ad_lod(const float *lrr_arr, const int16_t *ad0_arr, const int
 
 // return the LOD likelihood for a segment
 static double ad_phase_lod(const int16_t *ad0_arr, const int16_t *ad1_arr, const int8_t *gt_phase, int n,
-                           const int *imap, const int8_t *bdev_phase, float err_log_prb, float ad_rho, double bdev) {
+                           const int *imap, const int8_t *as, float err_log_prb, float ad_rho, double bdev) {
     if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
 
     int n1, n2;
@@ -957,7 +958,7 @@ static double ad_phase_lod(const int16_t *ad0_arr, const int16_t *ad1_arr, const
         int16_t ad0 = imap ? ad0_arr[imap[i]] : ad0_arr[i];
         int16_t ad1 = imap ? ad1_arr[imap[i]] : ad1_arr[i];
         int8_t p = imap ? gt_phase[imap[i]] : gt_phase[i];
-        if (bdev_phase) p *= (int8_t)SIGN(bdev_phase[i]); // notice bdev_phase has no imap
+        if (as) p *= (int8_t)SIGN(as[i]); // notice as has no imap
         float log_lkl = ad_phase_log_lkl(ad0, ad1, p, beta_binom_alt) - ad_phase_log_lkl(ad0, ad1, 0, beta_binom_null);
         if (!isnan(err_log_prb)) {
             if (log_lkl < err_log_prb)
@@ -1520,7 +1521,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
     else if (model->lrr_gc_order != -1)
         adjust_lrr(lrr, model->gc_arr, n, self->vcf_imap_arr, self->stats.coeffs, 0);
 
-    int8_t *bdev_phase = (int8_t *)calloc(n, sizeof(int8_t));
+    int8_t *as = (int8_t *)calloc(n, sizeof(int8_t));
     int *pos = (int *)malloc(n * sizeof(int));
     for (int i = 0; i < n; i++) pos[i] = model->locus_arr[self->vcf_imap_arr[i]].pos;
     int *imap_arr = (int *)malloc(n * sizeof(int));
@@ -1742,7 +1743,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                                        model->flip_log_prb, tel_log_prb, self->stats.dispersion, model->bdev_baf_phase,
                                        model->bdev_baf_phase_n);
                 }
-                if (mocha.lod_baf_phase > mocha.lod_lrr_baf) continue;
+                if (mocha.lod_baf_phase > 0.8 * mocha.lod_lrr_baf) continue;
 
                 // compute bdev, if possible
                 if (n_hets_imap > 0) {
@@ -1753,8 +1754,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                     mocha.bdev = NAN;
                 }
                 mocha.bdev_se = NAN;
-                for (int j = 0; j < n_hets_imap; j++)
-                    bdev_phase[hets_imap_arr[j]] = (int8_t)SIGN(baf[hets_imap_arr[j]] - 0.5f);
+                for (int j = 0; j < n_hets_imap; j++) as[hets_imap_arr[j]] = (int8_t)SIGN(baf[hets_imap_arr[j]] - 0.5f);
             } else {
                 // penalizes the LOD by the number of phase flips
                 mocha.n_flips = 0;
@@ -1791,8 +1791,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                 for (int j = 0; j < mocha.n_hets; j++)
                     pbaf_arr[j] = (baf[imap_arr[beg[i] + j]] - 0.5f) * (float)SIGN(path[beg[i] + j]);
                 mocha.bdev_se = get_se_mean(pbaf_arr, mocha.n_hets, NULL);
-                for (int j = beg[i]; j <= end[i]; j++)
-                    bdev_phase[imap_arr[j]] = (int8_t)SIGN(path[j]) * gt_phase[imap_arr[j]];
+                for (int j = beg[i]; j <= end[i]; j++) as[imap_arr[j]] = (int8_t)SIGN(path[j]) * gt_phase[imap_arr[j]];
             }
 
             mocha.type = mocha_type(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.n_hets, model->lrr_hap2dip,
@@ -1827,10 +1826,10 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
     free(baf);
     memcpy(self->data_arr[LDEV], ldev, n * sizeof(int16_t));
     memcpy(self->data_arr[BDEV], bdev, n * sizeof(int16_t));
-    memcpy(self->phase_arr, bdev_phase, n * sizeof(int8_t));
+    memcpy(self->phase_arr, as, n * sizeof(int8_t));
     free(ldev);
     free(bdev);
-    free(bdev_phase);
+    free(as);
 }
 
 // computes the medoid contig for LRR regression
@@ -2134,7 +2133,7 @@ static int put_contig(bcf_srs_t *sr, const sample_t *sample, const model_t *mode
     int *synced_iter = (int *)calloc(nsmpl, sizeof(int));
     float *bdev = (float *)calloc(nsmpl, sizeof(float));
     float *ldev = (float *)calloc(nsmpl, sizeof(float));
-    int *bdev_phase = (int *)calloc(nsmpl, sizeof(int));
+    int *as = (int *)calloc(nsmpl, sizeof(int));
 
     int i;
     for (i = 0; bcf_sr_next_line_reader0(sr); i++) {
@@ -2148,7 +2147,7 @@ static int put_contig(bcf_srs_t *sr, const sample_t *sample, const model_t *mode
                     ldev[sample[j].idx] = int16_to_float(sample[j].data_arr[LDEV][synced_iter[j]]);
                 if (sample[j].data_arr[BDEV])
                     bdev[sample[j].idx] = int16_to_float(sample[j].data_arr[BDEV][synced_iter[j]]);
-                if (sample[j].phase_arr) bdev_phase[sample[j].idx] = sample[j].phase_arr[synced_iter[j]];
+                if (sample[j].phase_arr) as[sample[j].idx] = sample[j].phase_arr[synced_iter[j]];
             } else {
                 // if no match variant found, match the end of the contig or keep conservative
                 if (i == 0 && sample[j].data_arr[BDEV])
@@ -2159,7 +2158,7 @@ static int put_contig(bcf_srs_t *sr, const sample_t *sample, const model_t *mode
                     bdev[sample[j].idx] = 0.0f;
                 if (sample[j].data_arr[LDEV] && int16_to_float(sample[j].data_arr[LDEV][synced_iter[j]]) == 0.0f)
                     ldev[sample[j].idx] = 0.0f;
-                if (sample[j].phase_arr) bdev_phase[sample[j].idx] = 0;
+                if (sample[j].phase_arr) as[sample[j].idx] = 0;
             }
         }
         if (!(model->flags & WGS_DATA)) {
@@ -2169,7 +2168,7 @@ static int put_contig(bcf_srs_t *sr, const sample_t *sample, const model_t *mode
             bcf_update_format_float(out_hdr, line, "Ldev", ldev, (int)nsmpl);
             bcf_update_format_float(out_hdr, line, "Bdev", bdev, (int)nsmpl);
         }
-        bcf_update_format_int32(out_hdr, line, "Bdev_Phase", bdev_phase, (int)nsmpl);
+        bcf_update_format_int32(out_hdr, line, "AS", as, (int)nsmpl);
 
         if (bcf_write(out_fh, out_hdr, line) < 0) error("Unable to write to output VCF file\n");
     }
@@ -2177,7 +2176,7 @@ static int put_contig(bcf_srs_t *sr, const sample_t *sample, const model_t *mode
     free(synced_iter);
     free(ldev);
     free(bdev);
-    free(bdev_phase);
+    free(as);
 
     return i;
 }
@@ -2185,25 +2184,30 @@ static int put_contig(bcf_srs_t *sr, const sample_t *sample, const model_t *mode
 // write header
 static bcf_hdr_t *print_hdr(htsFile *out_fh, bcf_hdr_t *hdr, int argc, char *argv[], int record_cmd_line, int flags) {
     bcf_hdr_t *out_hdr = bcf_hdr_dup(hdr);
-    if (!(flags & WGS_DATA) && bcf_hdr_id2int(out_hdr, BCF_DT_ID, "ADJ_COEFF") < 0)
+    int adj_coeff_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ADJ_COEFF");
+    if (!(flags & WGS_DATA) && !bcf_hdr_idinfo_exists(hdr, BCF_HL_INFO, adj_coeff_id))
         bcf_hdr_append(out_hdr,
                        "##INFO=<ID=ADJ_COEFF,Number=9,Type=Float,Description=\"Adjust coefficients "
                        "(order=AA_BAF0,AA_BAF1,AA_LRR0,AB_BAF0,AB_BAF1,AB_LRR0,BB_BAF0,BB_BAF1,BB_LRR0)"
                        "\">");
     if (!(flags & NO_ANNOT)) {
-        if (bcf_hdr_id2int(out_hdr, BCF_DT_ID, "Ldev") < 0)
+        int ldev_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "Ldev");
+        if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, ldev_id))
             bcf_hdr_append(out_hdr,
                            "##FORMAT=<ID=Ldev,Number=1,Type=Float,Description=\"LRR deviation "
                            "due to chromosomal alteration\">");
-        if (bcf_hdr_id2int(out_hdr, BCF_DT_ID, "Bdev") < 0)
+
+        int bdev_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "Bdev");
+        if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, bdev_id))
             bcf_hdr_append(out_hdr,
                            "##FORMAT=<ID=Bdev,Number=1,Type=Float,Description=\"BAF deviation "
                            "due to chromosomal alteration\">");
     }
-    if (bcf_hdr_id2int(out_hdr, BCF_DT_ID, "Bdev_Phase") < 0)
+    int as_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "AS");
+    if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, as_id))
         bcf_hdr_append(out_hdr,
-                       "##FORMAT=<ID=Bdev_Phase,Number=1,Type=Integer,Description=\"BAF "
-                       "deviation phase, if available\">");
+                       "##FORMAT=<ID=AS,Number=1,Type=Integer,Description=\"Allelic "
+                       "shift (1/-1 if the alternate allele is over/under represented)\">");
     if (record_cmd_line) bcf_hdr_append_version(out_hdr, argc, argv, "bcftools_plugin");
     if (bcf_hdr_write(out_fh, out_hdr) < 0) error("Unable to write to output VCF file\n");
     return out_hdr;
@@ -2265,41 +2269,6 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
     int nsmpl = bcf_hdr_nsamples(hdr);
 
     int i;
-    int allele_a_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ALLELE_A");
-    if (allele_a_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, allele_a_id) != BCF_HT_INT)
-        error(
-            "Error: input VCF file ALLELE_A info field is not of integer type\nUse bcftools "
-            "+mochatools -- --infer-BAF-alleles to fix ALLELE_A\n");
-    int allele_b_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ALLELE_B");
-    if (allele_b_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, allele_b_id) != BCF_HT_INT)
-        error(
-            "Error: input VCF file ALLELE_B info field is not of integer type\nUse bcftools "
-            "+mochatools -- --infer-BAF-alleles to fix ALLELE_B\n");
-    int gc_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GC");
-    if (gc_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, gc_id) != BCF_HT_REAL)
-        error("Error: input VCF file GC info field is not of float type\n");
-    int gt_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GT");
-    int baf_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "BAF");
-    if (baf_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_FMT, baf_id) != BCF_HT_REAL)
-        error("Error: input VCF file BAF format field is not of float type\n");
-    int lrr_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "LRR");
-    if (lrr_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_FMT, lrr_id) != BCF_HT_REAL)
-        error("Error: input VCF file LRR format field is not of float type\n");
-    int ad_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "AD");
-    if (ad_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_FMT, ad_id) != BCF_HT_INT)
-        error("Error: input VCF file AD format field is not of integer type\n");
-
-    // maybe this should be assert instead
-    if (gt_id < 0) error("Error: input VCF file has no GT format field\n");
-    if (model->flags & WGS_DATA) {
-        if (ad_id < 0) error("Error: input VCF file has no AD format field\n");
-    } else {
-        if (allele_a_id < 0 || allele_b_id < 0)
-            error(
-                "Error: input VCF file has no ALLELE_A or ALLELE_B info field\nUse bcftools "
-                "+mochatools -- --infer-BAF-alleles to infer ALLELE_A and ALLELE_B\n");
-        if (baf_id < 0 || lrr_id < 0) error("Error: input VCF file has no BAF or LRR format field\n");
-    }
 
     model->n = 0;
     model->n_flipped = 0;
@@ -2329,7 +2298,7 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
         model->locus_arr[i].pos = pos;
 
         hts_expand(float, i + 1, model->m_gc, model->gc_arr);
-        if (gc_id >= 0 && (info = bcf_get_info_id(line, gc_id)))
+        if (model->gc_id >= 0 && (info = bcf_get_info_id(line, model->gc_id)))
             model->gc_arr[i] = info->v1.f;
         else
             model->gc_arr[i] = NAN;
@@ -2353,20 +2322,20 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
             && regidx_overlap(model->kir_idx, bcf_hdr_id2name(hdr, line->rid), line->pos, line->pos + 1, NULL))
             continue;
 
-        bcf_fmt_t *gt_fmt = bcf_get_fmt_id(line, gt_id);
+        bcf_fmt_t *gt_fmt = bcf_get_fmt_id(line, model->gt_id);
         if (!bcf_get_genotype_phase(gt_fmt, phase_arr, nsmpl)) continue;
 
         // if neither AD nor LRR and BAF formats are present, skip line
         if (model->flags & WGS_DATA) {
             if (!bcf_get_genotype_alleles(gt_fmt, gt0, gt1, nsmpl)) continue;
-            if (!bcf_get_allelic_depth(bcf_get_fmt_id(line, ad_id), gt0, gt1, ad0, ad1, nsmpl)) continue;
+            if (!bcf_get_allelic_depth(bcf_get_fmt_id(line, model->ad_id), gt0, gt1, ad0, ad1, nsmpl)) continue;
         } else {
-            if ((info = bcf_get_info_id(line, allele_a_id)))
+            if ((info = bcf_get_info_id(line, model->allele_a_id)))
                 model->locus_arr[i].allele_a = info->v1.i;
             else
                 error("Error: ALLELE_A missing at position %s:%" PRId64 "\n", bcf_hdr_id2name(hdr, line->rid),
                       line->pos + 1);
-            if ((info = bcf_get_info_id(line, allele_b_id)))
+            if ((info = bcf_get_info_id(line, model->allele_b_id)))
                 model->locus_arr[i].allele_b = info->v1.i;
             else
                 error("Error: ALLELE_B missing at position %s:%" PRId64 "\n", bcf_hdr_id2name(hdr, line->rid),
@@ -2379,7 +2348,8 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
                 error("Error: site %s:%" PRId64 " contains non-AB alleles\n", bcf_hdr_id2name(hdr, line->rid),
                       line->pos + 1);
 
-            if (!(lrr_fmt = bcf_get_fmt_id(line, lrr_id)) || !(baf_fmt = bcf_get_fmt_id(line, baf_id))) continue;
+            if (!(lrr_fmt = bcf_get_fmt_id(line, model->lrr_id)) || !(baf_fmt = bcf_get_fmt_id(line, model->baf_id)))
+                continue;
 
             for (int j = 0; j < nsmpl; j++) {
                 if (bcf_float_is_missing(((float *)lrr_fmt->p)[sample[j].idx]))
@@ -2414,7 +2384,7 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
                     for (int j = 0; j < k; j++)
                         ((float *)baf_fmt->p)[imap_arr[j]] -= baf_m * ((float *)lrr_fmt->p)[imap_arr[j]];
                 }
-                if (model->adj_baf_lrr != -1 && k >= model->adj_baf_lrr) {
+                if (model->adj_baf_lrr != -1 && model->adj_baf_lrr <= k) {
                     baf_b = get_median((float *)baf_fmt->p, k, imap_arr) - (float)(gt - 1) * 0.5f;
                     if (isnan(baf_b)) baf_b = 0.0f;
                     for (int j = 0; j < k; j++) ((float *)baf_fmt->p)[imap_arr[j]] -= baf_b;
@@ -2602,8 +2572,7 @@ static const char *usage_text(void) {
            "[estimated from X nonPAR]\n"
            "\n"
            "Examples:\n"
-           "    bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv "
-           "-p cnp.grch37.bed\n"
+           "    bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnps.bed\n"
            "    bcftools +mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m "
            "mocha.tsv --LRR-weight 0.5\n"
            "\n";
@@ -3013,18 +2982,55 @@ int run(int argc, char *argv[]) {
     // check whether the necessary information has been included in the VCF
     hdr = bcf_sr_get_header(sr, 0);
     if (bcf_hdr_nsamples(hdr) == 0) error("Error: input VCF file has no samples\n");
-    if (bcf_hdr_id2int(hdr, BCF_DT_ID, "GT") < 0) error("Error: input VCF file has no GT format field\n");
-    if (!(bcf_hdr_id2int(hdr, BCF_DT_ID, "AD") < 0)) {
+
+    model.allele_a_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ALLELE_A");
+    if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_INFO, model.allele_a_id)) model.allele_a_id = -1;
+    if (model.allele_a_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, model.allele_a_id) != BCF_HT_INT)
+        error("Error: input VCF file ALLELE_A info field is not of integer type\n");
+
+    model.allele_b_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ALLELE_B");
+    if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_INFO, model.allele_a_id)) model.allele_b_id = -1;
+    if (model.allele_b_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_INFO, model.allele_b_id) != BCF_HT_INT)
+        error("Error: input VCF file ALLELE_B info field is not of float type\n");
+
+    model.gc_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GC");
+    if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_INFO, model.gc_id)) model.gc_id = -1;
+    if (model.lrr_gc_order > 0 && model.gc_id < 0)
+        error(
+            "Error: input VCF has no GC info field: use \"--LRR-GC-order 0/-1\" to disable LRR adjustment through GC "
+            "correction\nor use bcftools +mochatools -- -t GC to infer GC content\n");
+
+    model.gt_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GT");
+    if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, model.gt_id)) error("Error: input VCF file has no GT format field\n");
+
+    model.ad_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "AD");
+    if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, model.ad_id)) model.ad_id = -1;
+    if (model.ad_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_FMT, model.ad_id) != BCF_HT_INT)
+        error("Error: input VCF file AD format field is not of integer type\n");
+    if (model.ad_id >= 0 && bcf_hdr_id2length(hdr, BCF_HL_FMT, model.ad_id) != BCF_VL_R)
+        error("Error: input VCF file AD format field has wrong number of values\n");
+
+    model.baf_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "BAF");
+    if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, model.baf_id)) model.baf_id = -1;
+    if (model.baf_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_FMT, model.baf_id) != BCF_HT_REAL)
+        error("Error: input VCF file BAF format field is not of float type\n");
+
+    model.lrr_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "LRR");
+    if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, model.lrr_id)) model.lrr_id = -1;
+    if (model.lrr_id >= 0 && bcf_hdr_id2type(hdr, BCF_HL_FMT, model.lrr_id) != BCF_HT_REAL)
+        error("Error: input VCF file LRR format field is not of float type\n");
+
+    if (model.ad_id >= 0) {
         model.flags |= WGS_DATA;
         model.lrr_hap2dip = (float)M_LN2;
-    } else if ((bcf_hdr_id2int(hdr, BCF_DT_ID, "LRR") < 0 || bcf_hdr_id2int(hdr, BCF_DT_ID, "BAF") < 0))
-        error(
-            "Error: input VCF file must contain either the AD format field or the LRR and BAF "
-            "format fields\n");
-    if (model.lrr_gc_order > 0 && (bcf_hdr_id2int(hdr, BCF_DT_ID, "GC") < 0))
-        error(
-            "Error: input VCF has no GC info field: use \"--LRR-GC-order 0/-1\" to disable LRR "
-            "adjustment through GC correction\n");
+    } else if (model.baf_id >= 0 && model.lrr_id >= 0) {
+        if (model.allele_a_id < 0 || model.allele_b_id < 0)
+            error(
+                "Error: input VCF file has no ALLELE_A or ALLELE_B info fields\nUse bcftools +mochatools -- -t "
+                "ALLELE_A,ALLELE_B to infer ALLELE_A and ALLELE_B\n");
+    } else {
+        error("Error: input VCF file must contain either the AD format field or the BAF and LRR format fields\n");
+    }
 
     // read gender information if provided
     if (computed_gender_fname) computed_gender = mocha_parse_gender(hdr, computed_gender_fname);
