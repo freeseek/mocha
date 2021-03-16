@@ -2065,6 +2065,7 @@ task mocha_plot {
     Float call_rate_thr = 0.97
     Float baf_auto_thr = 0.03
     String? mocha_plot_extra_args
+    Boolean wgs = false
     Boolean do_not_plot_sex_chromosomes = false
 
     String docker
@@ -2105,6 +2106,7 @@ task mocha_plot {
     while read sample_id chrom beg_pos end_pos; do
       mocha_plot.R \
         --cytoband "~{basename(cyto_file)}" \
+        ~{if wgs then "--wgs" else ""} \
         --mocha \
         --stats "~{basename(stats_tsv)}" \
         --png pngs/${sample_id//[:\\\/ $'\t']/_}.${chrom}_${beg_pos}_$end_pos.png \
