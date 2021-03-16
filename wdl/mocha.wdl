@@ -498,6 +498,7 @@ workflow mocha {
             call_rate_thr = sample_call_rate_thr,
             baf_auto_thr = baf_auto_thr,
             mocha_plot_extra_args = mocha_plot_extra_args,
+            wgs = wgs,
             docker = mocha_plot_docker
         }
       }
