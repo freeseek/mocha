@@ -648,6 +648,13 @@ The `batch_tsv_file` input table should look like this:
 
 The `output_tsv_file` from the imputation pipeline will include these columns
 
+Once successfully run, the allelic shift pipeline will output a VCF named like `hapmap370k.chrX.as.bcf` with an `AS` INFO filed containing allelic shift counts. If you have two (or more) such VCFs (e.g. `hapmapSNP6.chrX.as.bcf`), these can be easily combined with the following command:
+```
+bcftools merge --no-version -Ou -i AS:sum -m none hapmap370k.chrX.as.bcf hapmapSNP6.chrX.as.bcf | \
+  bcftools +mochatools --no-version -Ou -- --test AS | \
+  bcftools query -i 'binom(INFO/AS)<1e-6' -f "%CHROM\t%POS\t%ID\t%REF\t%ALT\t%AS{0}\t%AS{1}\t%binom_AS\n"
+```
+
 Running with Terra
 ==================
 
