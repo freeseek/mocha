@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2021-03-15"
+#define MOCHATOOLS_VERSION "2021-05-14"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
@@ -76,6 +76,37 @@ typedef struct {
 
 args_t *args;
 
+static int *read_computed_gender(bcf_hdr_t *hdr, char *fname) {
+    htsFile *fp = hts_open(fname, "r");
+    if (fp == NULL) error("Could not open %s: %s\n", fname, strerror(errno));
+
+    kstring_t str = {0, 0, NULL};
+    if (hts_getline(fp, KS_SEP_LINE, &str) <= 0) error("Empty file: %s\n", fname);
+    tsv_t *tsv = tsv_init_delimiter(str.s, '\t');
+    int idx, computed_gender;
+    if (tsv_register(tsv, "sample_id", tsv_read_sample_id, (void *)&idx) < 0)
+        error("File %s is missing the sample_id column\n", fname);
+    if (tsv_register(tsv, "computed_gender", tsv_read_computed_gender, (void *)&computed_gender) < 0)
+        error("File %s is missing the computed_gender column\n", fname);
+
+    int i = 0;
+    int *gender = (int *)calloc((size_t)bcf_hdr_nsamples(hdr), sizeof(int));
+    while (hts_getline(fp, KS_SEP_LINE, &str) > 0) {
+        if (!tsv_parse_delimiter(tsv, (bcf1_t *)hdr, str.s, '\t')) {
+            if (idx < 0) continue;
+            gender[idx] = computed_gender;
+            i++;
+        } else {
+            error("Could not parse line: %s\n", str.s);
+        }
+    }
+
+    tsv_destroy(tsv);
+    free(str.s);
+    hts_close(fp);
+    return gender;
+}
+
 const char *about(void) { return "MOsaic CHromosomal Alterations tools.\n"; }
 
 const char *usage(void) {
@@ -97,9 +128,9 @@ const char *usage(void) {
            "       --gc-window-size <int>    window size in bp used to compute the GC and CpG content [" GC_WIN_DFLT
            "]\n"
            "   -x, --sex <file>              file including information about the gender of the samples\n"
-           "       --summary <tag>           allelic shift format field ID to summarize\n"
+           "       --summary <tag>           allelic shift FORMAT tag to summarize\n"
            "       --phase                   whether phase information should be included in the allelic shift\n"
-           "       --test <tag>              performs binomial or Fisher's exact test for INFO field ID\n"
+           "       --test <tag>              performs binomial or Fisher's exact test for INFO tag\n"
            "       --phred                   reports p-values as phred scaled\n"
            "   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with \"^\" "
            "prefix)\n"
@@ -284,14 +315,14 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
                     "Use \"--force-samples\" to ignore this error.\n",
                     smpl[ret - 1]);
         }
-        if (bcf_hdr_nsamples(args->in_hdr) == 0) error("Error: subsetting has removed all samples\n");
+        if (bcf_hdr_nsamples(args->in_hdr) == 0) fprintf(stderr, "Warn: subsetting has removed all samples\n");
         if (bcf_hdr_set_samples(args->out_hdr, tmp.s, 0) < 0) error("Error parsing the sample list\n");
         free(tmp.s);
         for (int i = 0; i < nsmpl; i++) free(smpl[i]);
         free(smpl);
     }
 
-    if (gender_fname) args->gender = mocha_parse_gender(args->in_hdr, gender_fname);
+    if (gender_fname) args->gender = read_computed_gender(args->in_hdr, gender_fname);
 
     if (args->flags & (INFO_GC | INFO_CPG)) {
         if (!ref_fname) error("Reference sequence not provided, cannot infer GC or CpG content\n");
@@ -326,7 +357,6 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
         error("Error: ADJ_COEFF field is not present, cannot perform --adjust correction\n");
 
     args->nsmpl = bcf_hdr_nsamples(args->in_hdr);
-    if (args->nsmpl == 0) goto ret;
 
     args->gt_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "GT");
     if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->gt_id)) args->gt_id = -1;
@@ -428,7 +458,6 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
         bcf_hdr_append(args->out_hdr, str.s);
     }
 
-ret:
     // this analysis is performed using a field that can be added by the previous analyses
     if (args->info_str) {
         args->info_id = bcf_hdr_id2int(args->out_hdr, BCF_DT_ID, args->info_str);
@@ -445,9 +474,8 @@ ret:
             error("Error: %s info field must contain 2 or 4 elements but it contains %d\n", args->info_str, number);
         kputs(args->info_str, &args->test_str);
         str.l = 0;
-        ksprintf(&str, "##INFO=<ID=%s,Number=1,Type=%s,Description=\"%s%s test for %s\">", args->test_str.s,
-                 args->phred ? "Integer" : "Float", args->phred ? "Phred scaled " : "",
-                 number == 2 ? "Binomial" : "Fisher's exact", args->info_str);
+        ksprintf(&str, "##INFO=<ID=%s,Number=1,Type=Float,Description=\"%s%s test for %s\">", args->test_str.s,
+                 args->phred ? "Phred scaled " : "", number == 2 ? "Binomial" : "Fisher's exact", args->info_str);
         bcf_hdr_append(args->out_hdr, str.s);
     }
 
@@ -470,31 +498,38 @@ ret:
     return 0;
 }
 
-// Petr Danecek's implementation in bcftools/mcall.c (removed after version 1.11)
-double binom_dist(int N, double p, int k) {
-    int mean = (int)(N * p);
-    if (mean == k) return 1.0;
+// Heng Li's implementation in htslib/kfunc.c
+#define KF_GAMMA_EPS 1e-14
+#define KF_TINY 1e-290
 
-    double log_p = (k - mean) * log(p) + (mean - k) * log(1.0 - p);
-    if (k > N - k) k = N - k;
-    if (mean > N - mean) mean = N - mean;
-
-    if (k < mean) {
-        int tmp = k;
-        k = mean;
-        mean = tmp;
+static double log_kf_betai_aux(double a, double b, double x) {
+    double C, D, f;
+    int j;
+    if (x == 0.) return 0.;
+    if (x == 1.) return 1.;
+    f = 1.;
+    C = f;
+    D = 0.;
+    // Modified Lentz's algorithm for computing continued fraction
+    for (j = 1; j < 200; ++j) {
+        double aa, d;
+        int m = j >> 1;
+        aa = (j & 1) ? -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1))
+                     : m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m));
+        D = 1. + aa * D;
+        if (D < KF_TINY) D = KF_TINY;
+        C = 1. + aa / C;
+        if (C < KF_TINY) C = KF_TINY;
+        D = 1. / D;
+        d = C * D;
+        f *= d;
+        if (fabs(d - 1.) < KF_GAMMA_EPS) break;
     }
-    double diff = k - mean;
-
-    double val = 1.0;
-    int i;
-    for (i = 0; i < diff; i++) val = val * (N - mean - i) / (k - i);
-
-    return exp(log_p) / val;
+    return (kf_lgamma(a + b) - kf_lgamma(a) - kf_lgamma(b) + a * log(x) + b * log(1. - x)) - log(a * f);
 }
 
-// returns 2*pbinom(k,n,1/2) if k<n/2 by precomputing values in a table
-static double binom_exact(int k, int n) {
+// returns -10 * (log(2) + pbinom(min(k, n - k), n, 1/2, log.p = TRUE)) / log(10)
+static double phred_pbinom(int k, int n) {
     static double *dbinom = NULL, *pbinom = NULL;
     static size_t n_size = 0, m_dbinom = 0, m_pbinom = 0;
 
@@ -506,11 +541,11 @@ static double binom_exact(int k, int n) {
 
     if (n < 0 || k < 0 || k > n) return NAN;
 
-    if (n > 1000) return binom_dist(n, 0.5, k);
-
-    if (k == n >> 1) return 1.0;
+    if (k == n >> 1) return 0.0;
 
     if (k << 1 > n) k = n - k;
+
+    if (n > 1000) return -10.0 * M_LOG10E * (M_LN2 + log_kf_betai_aux(n - k, k + 1, .5));
 
     if (n >= n_size) {
         size_t len = (size_t)(1 + (1 + (n >> 1)) * ((n + 1) >> 1));
@@ -533,7 +568,7 @@ static double binom_exact(int k, int n) {
     }
 
     int idx = 1 + (n >> 1) * ((n + 1) >> 1) + k;
-    return 2.0 * pbinom[idx];
+    return -10.0 * M_LOG10E * (M_LN2 + log(pbinom[idx]));
 }
 
 static int sample_mean_var(const float *x, int n, double *xm, double *xss) {
@@ -687,6 +722,12 @@ bcf1_t *process(bcf1_t *rec) {
         }
     }
 
+    int ac_sex[] = {0, 0, 0, 0};
+    int missing_sex[] = {0, 0, 0, 0};
+    int pac_het[] = {0, 0};
+    int ad_het[] = {0, 0};
+    int summary[] = {0, 0};
+    int psummary[] = {0, 0};
     float ret[4];
 
     // extract format information from VCF format records
@@ -779,23 +820,16 @@ bcf1_t *process(bcf1_t *rec) {
         }
     }
 
-    int ac_sex[] = {0, 0, 0, 0};
-    int missing_sex[] = {0, 0, 0, 0};
-    int pac_het[] = {0, 0};
-    int ad_het[] = {0, 0};
-    int summary[] = {0, 0};
-    int psummary[] = {0, 0};
-
     for (int i = 0; i < args->nsmpl; i++) {
         float curr_baf = NAN;
 
         int is_missing = args->gt0_arr[i] == bcf_int16_missing || args->gt1_arr[i] == bcf_int16_missing;
         if (args->gender) {
             switch (args->gender[i]) {
-            case 1: // male
+            case GENDER_MALE: // male
                 missing_sex[is_missing]++;
                 break;
-            case 2: // female
+            case GENDER_FEMALE: // female
                 missing_sex[2 + is_missing]++;
                 break;
             default:
@@ -813,10 +847,10 @@ bcf1_t *process(bcf1_t *rec) {
         int is_het = args->gt0_arr[i] != args->gt1_arr[i];
         if (args->gender) {
             switch (args->gender[i]) {
-            case 1: // male
+            case GENDER_MALE: // male
                 ac_sex[is_het]++;
                 break;
-            case 2: // female
+            case GENDER_FEMALE: // female
                 ac_sex[2 + is_het]++;
                 break;
             default:
@@ -890,21 +924,17 @@ ret:
             error("INFO field %s at %s:%" PRId64 " should contain two or four integers\n", args->info_str,
                   bcf_hdr_id2name(args->in_hdr, rec->rid), rec->pos + 1);
         bcf_get_info_int32(args->out_hdr, rec, args->info_str, &args->info_arr, &args->m_info);
-        double pval;
         if (info->len == 2) {
-            pval = binom_exact(args->info_arr[0], args->info_arr[0] + args->info_arr[1]);
+            double phred_pval = phred_pbinom(args->info_arr[0], args->info_arr[0] + args->info_arr[1]);
+            ret[0] = (float)(args->phred ? phred_pval : -0.1 * M_LN10 * phred_pval);
+            bcf_update_info_float(args->out_hdr, rec, args->test_str.s, &ret, 1);
         } else {
             double left, right, fisher;
-            pval = kt_fisher_exact(args->info_arr[0], args->info_arr[1], args->info_arr[2], args->info_arr[3], &left,
-                                   &right, &fisher);
+            double pval = kt_fisher_exact(args->info_arr[0], args->info_arr[1], args->info_arr[2], args->info_arr[3],
+                                          &left, &right, &fisher);
+            ret[0] = (float)(args->phred ? -10.0 * M_LOG10E * log(pval) : pval);
         }
-        if (args->phred) {
-            int phred = (int)(-10.0 * M_LOG10E * log(pval) + 0.5);
-            bcf_update_info_int32(args->out_hdr, rec, args->test_str.s, &phred, 1);
-        } else {
-            ret[0] = (float)pval;
-            bcf_update_info_float(args->out_hdr, rec, args->test_str.s, &ret, 1);
-        }
+        bcf_update_info_float(args->out_hdr, rec, args->test_str.s, &ret, 1);
     }
 
     // remove all samples if sites_only was selected
@@ -913,7 +943,7 @@ ret:
 }
 
 void destroy(void) {
-    binom_exact(-1, -1);
+    phred_pbinom(-1, -1);
     free(args->gender);
     free(args->gt_phase_arr);
     free(args->as_arr);

@@ -25,11 +25,12 @@
 #  THE SOFTWARE.
 ###
 
-mocha_plot_version <- '2021-03-15'
+mocha_plot_version <- '2021-05-14'
 
 library(optparse)
 library(data.table)
 library(ggplot2)
+library(reshape2)
 options(bitmapType = 'cairo')
 
 parser <- OptionParser('usage: mocha_plot.R [options] --rules <GRCh37|GRCh38>|--cytoband <cytoband.txt.gz> --vcf <file.vcf> --samples <list>')
@@ -125,7 +126,7 @@ fmt <- paste0(fmt, '\\n]"')
 cmd <- paste('bcftools query --format', fmt, args$vcf, '--samples', args$samples)
 
 contigs <- unlist(lapply(regions[regions!='all'], function(x) unlist(strsplit(x, ':'))[1]))
-chroms <- gsub('^chr', '',gsub('^chrM', 'MT', contigs))
+chroms <- gsub('^chr', '', gsub('^chrM', 'MT', contigs))
 begs <- as.numeric(unlist(lapply(regions[regions != 'all'], function(x) unlist(strsplit(unlist(strsplit(x, ':'))[2], '-'))[1])))
 ends <- as.numeric(unlist(lapply(regions[regions != 'all'], function(x) unlist(strsplit(unlist(strsplit(x, ':'))[2], '-'))[2])))
 lefts <- round(pmax(1.5 * begs - .5 * ends, 0, na.rm = TRUE))
@@ -135,7 +136,7 @@ if (!('all' %in% regions)) cmd <- paste(cmd, '--regions', paste0(contigs, ':', l
 if (!is.null(args$exclude)) cmd <- paste0(cmd, ' --targets-file ^', args$exclude)
 
 write(paste('Command:', cmd), stderr())
-if (packageVersion("data.table") < '1.11.6') {
+if (packageVersion('data.table') < '1.11.6') {
   df <- setNames(fread(cmd, sep = '\t', header = FALSE, na.strings = '.', colClasses = list(character = c(1,3:6)), data.table = FALSE), names)
 } else {
   df <- setNames(fread(cmd = cmd, sep = '\t', header = FALSE, na.strings = '.', colClasses = list(character = c(1,3:6)), data.table = FALSE), names)
@@ -171,7 +172,7 @@ if (!args$wgs && !is.null(args$stats)) {
   lrr_gc_order <- sum(grepl('^lrr_gc_[0-9]', names(df_stats))) - 1
   df <- merge(df, df_stats[, c('sample_id', paste0('lrr_gc_', 0:lrr_gc_order))])
   for (i in 0:lrr_gc_order) {
-    df$LRR <- df$LRR - as.numeric(df$gc)^i * df[,paste0('lrr_gc_', i)]
+    df$LRR <- df$LRR - as.numeric(df$gc)^i * df[, paste0('lrr_gc_', i)]
   }
 }
 

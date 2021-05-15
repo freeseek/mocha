@@ -34,71 +34,137 @@
 #include <htslib/kseq.h>
 #include <htslib/ksort.h>
 #include <htslib/vcf.h>
+#include "tsv2vcf.h"
 #include "bcftools.h"
+
+#define GENDER_UNKNOWN 0
+#define GENDER_MALE 1
+#define GENDER_FEMALE 2
+
+/****************************************
+ * TSV FUNCTIONS                        *
+ ****************************************/
+
+// adapted from Petr Danecek's implementation of tsv_init() in bcftools/tsv2vcf.c
+static inline tsv_t *tsv_init_delimiter(const char *str, char delimiter) {
+    tsv_t *tsv = (tsv_t *)calloc(1, sizeof(tsv_t));
+    kstring_t tmp = {0, 0, 0};
+    const char *ss = str, *se = ss;
+    tsv->ncols = 0;
+    while (*ss) {
+        if (delimiter == '\0')
+            while (*se && !isspace(*se)) se++;
+        else
+            while (*se && *se != delimiter) se++;
+        tsv->ncols++;
+        tsv->cols = (tsv_col_t *)realloc(tsv->cols, sizeof(tsv_col_t) * tsv->ncols);
+        tsv->cols[tsv->ncols - 1].name = NULL;
+        tsv->cols[tsv->ncols - 1].setter = NULL;
+        tmp.l = 0;
+        kputsn(ss, se - ss, &tmp);
+        if (strcasecmp("-", tmp.s)) tsv->cols[tsv->ncols - 1].name = strdup(tmp.s);
+        if (!*se) break;
+        se++;
+        if (delimiter == '\0')
+            while (*se && isspace(*se)) se++;
+        ss = se;
+    }
+    free(tmp.s);
+    return tsv;
+}
+
+static inline int tsv_parse_delimiter(tsv_t *tsv, bcf1_t *rec, char *str, char delimiter) {
+    int status = 0;
+    tsv->icol = 0;
+    tsv->ss = tsv->se = str;
+    while (*tsv->ss && tsv->icol < tsv->ncols) {
+        if (delimiter == '\0')
+            while (*tsv->se && !isspace(*tsv->se)) tsv->se++;
+        else
+            while (*tsv->se && *tsv->se != delimiter) tsv->se++;
+        if (tsv->cols[tsv->icol].setter) {
+            int ret = tsv->cols[tsv->icol].setter(tsv, rec, tsv->cols[tsv->icol].usr);
+            if (ret < 0) return -1;
+            status++;
+        }
+        if (*tsv->se) {
+            tsv->se++;
+            if (delimiter == '\0')
+                while (*tsv->se && isspace(*tsv->se)) tsv->se++;
+        }
+        tsv->ss = tsv->se;
+        tsv->icol++;
+    }
+    return status ? 0 : -1;
+}
+
+int tsv_read_float(tsv_t *tsv, bcf1_t *rec, void *usr) {
+    float *single = (float *)usr;
+    char tmp = *tsv->se;
+    *tsv->se = 0;
+    char *endptr;
+    *single = (float)strtof(tsv->ss, &endptr);
+    *tsv->se = tmp;
+    return 0;
+}
+
+int tsv_read_integer(tsv_t *tsv, bcf1_t *rec, void *usr) {
+    int *integer = (int *)usr;
+    char tmp = *tsv->se;
+    *tsv->se = 0;
+    char *endptr;
+    *integer = (int)strtol(tsv->ss, &endptr, 0);
+    if (*endptr) error("Could not parse integer %s\n", tsv->ss);
+    *tsv->se = tmp;
+    return 0;
+}
+
+int tsv_read_string(tsv_t *tsv, bcf1_t *rec, void *usr) {
+    char **str = (char **)usr;
+    if (tsv->se == tsv->ss) {
+        *str = NULL;
+    } else {
+        char tmp = *tsv->se;
+        *tsv->se = 0;
+        *str = strdup(tsv->ss);
+        *tsv->se = tmp;
+    }
+    return 0;
+}
+
+int tsv_read_sample_id(tsv_t *tsv, bcf1_t *rec, void *usr) {
+    bcf_hdr_t *hdr = (bcf_hdr_t *)rec;
+    int *idx = (int *)usr;
+    char tmp = *tsv->se;
+    *tsv->se = 0;
+    *idx = bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, tsv->ss);
+    *tsv->se = tmp;
+    return 0;
+}
+
+int tsv_read_computed_gender(tsv_t *tsv, bcf1_t *rec, void *usr) {
+    int *computed_gender = (int *)usr;
+    if (toupper(*tsv->ss) == 'M') {
+        *computed_gender = GENDER_MALE;
+    } else if (toupper(*tsv->ss) == 'F') {
+        *computed_gender = GENDER_FEMALE;
+    } else if (toupper(*tsv->ss) == 'U') {
+        *computed_gender = GENDER_UNKNOWN;
+    } else {
+        char *endptr;
+        *computed_gender = (int)strtol(tsv->ss, &endptr, 0);
+        if (*endptr) error("Could not parse gender %s\n", tsv->ss);
+    }
+    return 0;
+}
+
+/****************************************
+ * BASIC STATISTICS FUNCTIONS           *
+ ****************************************/
 
 // this macro from ksort.h defines the function
 // float ks_ksmall_float(size_t n, float arr[], size_t kk);
 KSORT_INIT_GENERIC(float)
-
-static inline int *mocha_parse_gender(bcf_hdr_t *hdr, char *fname) {
-    htsFile *fp = hts_open(fname, "r");
-    if (!fp) error("Could not read: %s\n", fname);
-
-    kstring_t str = {0, 0, NULL};
-    if (hts_getline(fp, KS_SEP_LINE, &str) <= 0) error("Empty file: %s\n", fname);
-
-    int *gender = (int *)calloc((size_t)bcf_hdr_nsamples(hdr), sizeof(int));
-    int moff = 0, *off = NULL;
-    char *tmp = NULL;
-    do {
-        int ncols = ksplit_core(str.s, 0, &moff, &off);
-        if (ncols < 2) error("Could not parse gender file %s: %s\n", fname, str.s);
-        int sample = bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, &str.s[off[0]]);
-        if (sample >= 0) {
-            if (toupper(str.s[off[1]]) == 'M') {
-                gender[sample] = 1;
-            } else if (toupper(str.s[off[1]]) == 'F') {
-                gender[sample] = 2;
-            } else if (toupper(str.s[off[1]]) == 'U') {
-                gender[sample] = 0;
-            } else {
-                gender[sample] = (int)strtol(&str.s[off[1]], &tmp, 0);
-                if (*tmp) error("Could not parse gender from file %s: %s\n", fname, &str.s[off[1]]);
-            }
-        }
-    } while (hts_getline(fp, KS_SEP_LINE, &str) >= 0);
-
-    free(str.s);
-    free(off);
-    hts_close(fp);
-    return gender;
-}
-
-static inline float *mocha_parse_float(bcf_hdr_t *hdr, char *fname) {
-    htsFile *fp = hts_open(fname, "r");
-    if (!fp) error("Could not read: %s\n", fname);
-
-    kstring_t str = {0, 0, NULL};
-    if (hts_getline(fp, KS_SEP_LINE, &str) <= 0) error("Empty file: %s\n", fname);
-
-    float *float_arr = (float *)calloc((size_t)bcf_hdr_nsamples(hdr), sizeof(float));
-    int moff = 0, *off = NULL;
-    char *tmp = NULL;
-    do {
-        int ncols = ksplit_core(str.s, 0, &moff, &off);
-        if (ncols < 2) error("Could not parse file %s: %s\n", fname, str.s);
-        int sample = bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, &str.s[off[0]]);
-        if (sample >= 0) {
-            float_arr[sample] = (float)strtof(&str.s[off[1]], &tmp);
-            if (*tmp) error("Could not parse float from file %s: %s\n", fname, &str.s[off[1]]);
-        }
-    } while (hts_getline(fp, KS_SEP_LINE, &str) >= 0);
-
-    free(str.s);
-    free(off);
-    hts_close(fp);
-    return float_arr;
-}
 
 // compute the median of a vector using the ksort library (with iterator)
 float get_median(const float *v, int n, const int *imap) {
@@ -147,9 +213,13 @@ static inline int get_cov(const float *x, const float *y, int n, const int *imap
     return 0;
 }
 
+/****************************************
+ * EXTRACT DATA FROM VCF FUNCTIONS      *
+ ****************************************/
+
 // retrieve genotype alleles information from BCF record
 // assumes little endian architecture
-int bcf_get_genotype_alleles(const bcf_fmt_t *fmt, int16_t *gt0_arr, int16_t *gt1_arr, int nsmpl) {
+static inline int bcf_get_genotype_alleles(const bcf_fmt_t *fmt, int16_t *gt0_arr, int16_t *gt1_arr, int nsmpl) {
     if (!fmt || fmt->n != 2) return 0;
 
 #define BRANCH(type_t, bcf_type_vector_end)                                                                            \
@@ -191,7 +261,7 @@ int bcf_get_genotype_alleles(const bcf_fmt_t *fmt, int16_t *gt0_arr, int16_t *gt
 // 1 if higher number allele received from the mother
 // -1 if higher number allele received from the father
 // assumes little endian architecture
-int bcf_get_genotype_phase(const bcf_fmt_t *fmt, int8_t *gt_phase_arr, int nsmpl) {
+static inline int bcf_get_genotype_phase(const bcf_fmt_t *fmt, int8_t *gt_phase_arr, int nsmpl) {
     // bcf_fmt_t *fmt = bcf_get_fmt_id(line, id);
     if (!fmt || fmt->n != 2) return 0;
 
@@ -236,8 +306,8 @@ int bcf_get_genotype_phase(const bcf_fmt_t *fmt, int8_t *gt_phase_arr, int nsmpl
 
 // retrive allelic depth information from BCF record
 // assumes little endian architecture
-int bcf_get_allelic_depth(const bcf_fmt_t *fmt, const int16_t *gt0_arr, const int16_t *gt1_arr, int16_t *ad0_arr,
-                          int16_t *ad1_arr, int nsmpl) {
+static inline int bcf_get_allelic_depth(const bcf_fmt_t *fmt, const int16_t *gt0_arr, const int16_t *gt1_arr,
+                                        int16_t *ad0_arr, int16_t *ad1_arr, int nsmpl) {
     if (!fmt) return 0;
     int nalleles = fmt->n;
 

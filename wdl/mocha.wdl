@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2020-2021 Giulio Genovese
 ##
-## Version 2021-03-15
+## Version 2021-05-14
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs MoChA on a cohort of samples genotyped with either Illumina or Affymetrix DNA microarrays
 ##
 ## Cromwell version support
-## - Successfully tested on v58
+## - Successfully tested on v61
 ##
 ## Distributed under terms of the MIT License
 
@@ -75,13 +75,14 @@ workflow mocha {
     String? mocha_plot_extra_args
     String basic_bash_docker = "ubuntu:latest"
     String pandas_docker = "amancevice/pandas:slim"
-    String bcftools_docker = "us.gcr.io/mccarroll-mocha/bcftools:1.11-20210315"
-    String iaap_cli_docker = "us.gcr.io/mccarroll-mocha/iaap_cli:1.11-20210315"
-    String autoconvert_docker = "us.gcr.io/mccarroll-mocha/autoconvert:1.11-20210315"
-    String apt_docker = "us.gcr.io/mccarroll-mocha/apt:1.11-20210315"
-    String shapeit4_docker = "us.gcr.io/mccarroll-mocha/shapeit4:1.11-20210315"
-    String eagle_docker = "us.gcr.io/mccarroll-mocha/eagle:1.11-20210315"
-    String mocha_plot_docker = "us.gcr.io/mccarroll-mocha/mocha_plot:1.11-20210315"
+    String docker_registry = "us.gcr.io/mccarroll-mocha"
+    String bcftools_docker = "bcftools:1.11-20210514"
+    String iaap_cli_docker = "iaap_cli:1.11-20210514"
+    String autoconvert_docker = "autoconvert:1.11-20210514"
+    String apt_docker = "apt:1.11-20210514"
+    String shapeit4_docker = "shapeit4:1.11-20210514"
+    String eagle_docker = "eagle:1.11-20210514"
+    String r_mocha_docker = "r_mocha:1.11-20210514"
     Boolean autoconvert = false
     Boolean? table_output
     Boolean? do_not_check_bpm
@@ -95,7 +96,9 @@ workflow mocha {
 
   Boolean mode_is_vcf = mode == "vcf" || mode == "pvcf"
 
-  String ref_path_with_sep = if defined(ref_path) then select_first([ref_path]) + (if sub(select_first([ref_path]), "/$", "") != select_first([ref_path]) then "" else "/") else ""
+  String docker_registry_with_sep = docker_registry + if docker_registry != "" && docker_registry == sub(docker_registry, "/$", "") then "/" else ""
+
+  String ref_path_with_sep = select_first([ref_path, ""]) + if defined(ref_path) && select_first([ref_path]) == sub(select_first([ref_path]), "/$", "") then "/" else ""
   Reference ref = object {
     name: ref_name,
     fasta: ref_path_with_sep + select_first([ref_fasta, if ref_name == "GRCh38" then "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna" else if ref_name == "GRCh37" then "human_g1k_v37.fasta" else None]),
@@ -140,7 +143,7 @@ workflow mocha {
           csv_file = manifest_path_with_sep + csv_file,
           ref_fasta = ref.fasta,
           ref_fasta_idxs = prefix(ref.fasta + ".", ["amb", "ann", "bwt", "pac", "sa"]),
-          docker = bcftools_docker,
+          docker = docker_registry_with_sep + bcftools_docker,
       }
     }
     Map[String, File] csv2sam = as_map(zip(csv_files, csv2bam.bam_file))
@@ -175,7 +178,7 @@ workflow mocha {
             red_idat_files = prefix(data_paths_with_sep[(idat.idxs[idx])], idat_batch2red_idat_files[(idat.sub_batches[idx])]),
             autoconvert = autoconvert,
             filebase = sample_set_id + "." + idat.sub_batches[idx],
-            docker = if autoconvert then autoconvert_docker else iaap_cli_docker,
+            docker = if autoconvert then docker_registry_with_sep + autoconvert_docker else docker_registry_with_sep + iaap_cli_docker,
         }
       }
       call tsv_concat as green_idat_tsv { input: tsv_files = idat2gtc.green_idat_tsv, filebase = sample_set_id + ".green_idat", docker = basic_bash_docker }
@@ -207,7 +210,7 @@ workflow mocha {
             sam_file = sams[(gtc.idxs[idx])],
             reheader_file = gtc_reheader.map_files[idx],
             filebase = sample_set_id + "." + gtc.sub_batches[idx],
-            docker = bcftools_docker,
+            docker = docker_registry_with_sep + bcftools_docker,
         }
       }
       call tsv_concat as gtc_tsv { input: tsv_files = gtc2vcf.gtc_tsv, filebase = sample_set_id + ".gtc", docker = basic_bash_docker }
@@ -222,7 +225,7 @@ workflow mocha {
             input:
               vcf_files = idx2gtc2vcf_files[idx],
               filebase = pfxs[idx],
-              docker = bcftools_docker
+              docker = docker_registry_with_sep + bcftools_docker
           }
         }
         File gtc2vcf_files = select_first([gtc2vcf_merge.vcf_file, idx2gtc2vcf_files[idx][0]])
@@ -253,7 +256,7 @@ workflow mocha {
             chip_type = chip_type,
             table_output = table_output,
             filebase = pfxs[idx],
-            docker = apt_docker
+            docker = docker_registry_with_sep + apt_docker
         }
       }
       call tsv_concat as cel_tsv { input: tsv_files = cel2chp.cel_tsv, filebase = sample_set_id + ".cel", docker = basic_bash_docker }
@@ -284,7 +287,7 @@ workflow mocha {
             sam_file = sams[(chp.idxs[idx])],
             reheader_file = chp_reheader.map_files[idx],
             filebase = sample_set_id + "." + chp.sub_batches[idx],
-            docker = bcftools_docker
+            docker = docker_registry_with_sep + bcftools_docker
         }
       }
 
@@ -298,7 +301,7 @@ workflow mocha {
             input:
               vcf_files = idx2chp2vcf_files[idx],
               filebase = pfxs[idx],
-              docker = bcftools_docker
+              docker = docker_registry_with_sep + bcftools_docker
           }
         }
         File chp2vcf_files = select_first([chp2vcf_merge.vcf_file, idx2chp2vcf_files[idx][0]])
@@ -329,7 +332,7 @@ workflow mocha {
             sam_file = sams[idx],
             reheader_file = txt_reheader.map_files[idx],
             filebase = pfxs[idx],
-            docker = bcftools_docker
+            docker = docker_registry_with_sep + bcftools_docker
         }
       }
     }
@@ -342,14 +345,11 @@ workflow mocha {
     Array[File] unphased_vcf_idxs = select_first([gtc2vcf_idxs, chp2vcf_idxs, txt2vcf.vcf_idx])
     Array[Int] unphased_vcf_n_smpls = select_first([gtc2vcf_n_smpls, chp2vcf_n_smpls, txt2vcf.n_smpls])
     call lst_flatten as flatten_sample_id_lines { input: lst_files = select_first([gtc2vcf.sample_id_lines, chp2vcf.sample_id_lines, txt2vcf.sample_id_lines]), filebase = "sample_id", docker = basic_bash_docker }
+    call tsv_column as computed_gender_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "computed_gender", docker = basic_bash_docker }
+    call tsv_column as call_rate_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "call_rate", docker = basic_bash_docker }
+    call lst_paste as sample_tsv { input: lst_files = [flatten_sample_id_lines.file, computed_gender_lines.file, call_rate_lines.file], headers = ['sample_id', 'computed_gender', 'call_rate'], filebase = sample_set_id + ".sample", docker = basic_bash_docker }
   }
 
-  if (mode_is_vcf) {
-    call tsv_column as vcf_sample_id_lines { input: tsv_file = sample_tsv_file, column = "sample_id", docker = basic_bash_docker }
-  }
-
-  call tsv_column as computed_gender_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "computed_gender", docker = basic_bash_docker }
-  call tsv_column as call_rate_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "call_rate", docker = basic_bash_docker }
   if (mode != "pvcf" && target != "vcf") {
     Array[Array[String]] ref_fasta_fai_tbl = transpose(read_tsv(ref.fasta + ".fai"))
     scatter (idx in range(ref.n_chrs)) {
@@ -370,7 +370,7 @@ workflow mocha {
         input:
           vcf_file = if mode_is_vcf then data_paths_with_sep[idx] + batch_tbl["vcf"][idx] else select_first([unphased_vcf_files])[idx],
           intervals_bed = ref_scatter.intervals_bed,
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
     }
     if (defined(extra_xcl_vcf_file)) {
@@ -378,7 +378,7 @@ workflow mocha {
         input:
           vcf_file = select_first([extra_xcl_vcf_file]),
           intervals_bed = ref_scatter.intervals_bed,
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
     }
 
@@ -395,21 +395,19 @@ workflow mocha {
         input:
           vcf_files = interval_slices[idx],
           filebase = sample_set_id + "." + idx,
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
       call vcf_qc {
         input:
           vcf_file = vcf_merge.vcf_file,
           vcf_idx = vcf_merge.vcf_idx,
           dup_file = ref.dup_file,
-          sample_id_file = select_first([flatten_sample_id_lines.file, vcf_sample_id_lines.file]),
-          computed_gender_file = computed_gender_lines.file,
-          call_rate_file = call_rate_lines.file,
+          sample_tsv_file = select_first([sample_tsv.file, sample_tsv_file]),
           sample_call_rate_thr = sample_call_rate_thr,
           variant_call_rate_thr = variant_call_rate_thr,
           duplicate_samples_file = duplicate_samples_file,
           extra_xcl_vcf_file = if defined(extra_xcl_vcf_file) then select_first([xcl_vcf_scatter.vcf_files])[idx] else None,
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
       Int beg = intervals_tbl[1][idx] # cast string to integer
       Int end = intervals_tbl[2][idx] # cast string to integer
@@ -429,7 +427,7 @@ workflow mocha {
           wgs = wgs,
           eagle = eagle,
           phase_extra_args = phase_extra_args,
-          docker = if eagle then eagle_docker else shapeit4_docker
+          docker = if eagle then docker_registry_with_sep + eagle_docker else docker_registry_with_sep + shapeit4_docker
       }
       call vcf_split {
         input:
@@ -438,7 +436,7 @@ workflow mocha {
           sample_id_file = sample_id_split_tsv.file,
           ped_file = ped_file,
           rule = if defined(ped_file) then ref.name else None,
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
     }
 
@@ -446,7 +444,7 @@ workflow mocha {
       input:
         vcf_files = vcf_qc.xcl_vcf_file,
         filebase = sample_set_id + ".xcl",
-        docker = bcftools_docker
+        docker = docker_registry_with_sep + bcftools_docker
     }
 
     Array[Array[File]] batch_slices = transpose(vcf_split.vcf_files)
@@ -455,7 +453,7 @@ workflow mocha {
         input:
           vcf_files = batch_slices[idx],
           filebase = pfxs[idx] + ".pgt",
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
       call vcf_import {
         input:
@@ -463,7 +461,7 @@ workflow mocha {
           pgt_vcf_idx = vcf_concat.vcf_idx,
           unphased_vcf_file = if mode_is_vcf then data_paths_with_sep[idx] + batch_tbl["vcf"][idx] else select_first([unphased_vcf_files])[idx],
           unphased_vcf_idx = if mode_is_vcf then data_paths_with_sep[idx] + batch_tbl["vcf_index"][idx] else select_first([unphased_vcf_idxs])[idx],
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
     }
   }
@@ -472,12 +470,10 @@ workflow mocha {
     scatter (idx in range(n_batches)) {
       call vcf_mocha {
         input:
-          rule = ref.name,
+          assembly = ref.name,
           pvcf_file = if mode == "pvcf" then data_paths_with_sep[idx] + batch_tbl["vcf"][idx] else select_first([vcf_import.vcf_file])[idx],
           pvcf_idx = if mode == "pvcf" then data_paths_with_sep[idx] + batch_tbl["vcf_index"][idx] else select_first([vcf_import.vcf_idx])[idx],
-          sample_id_file = select_first([flatten_sample_id_lines.file, vcf_sample_id_lines.file]),
-          computed_gender_file = computed_gender_lines.file,
-          call_rate_file = call_rate_lines.file,
+          sample_tsv_file = select_first([sample_tsv.file, sample_tsv_file]),
           xcl_vcf_file = if mode == "pvcf" then data_paths_with_sep[idx] + batch_tbl["xcl_vcf"][idx] else xcl_vcf_concat.vcf_file,
           xcl_vcf_idx = if mode == "pvcf" then data_paths_with_sep[idx] + batch_tbl["xcl_vcf_index"][idx] else xcl_vcf_concat.vcf_idx,
           cnp_file = ref.cnp_file,
@@ -485,7 +481,7 @@ workflow mocha {
           kir_reg = if ref.kir_reg != "" then ref.kir_reg else None,
           mocha_extra_args = mocha_extra_args,
           ext_string = ext_string,
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
       if (target == "pngs") {
         call mocha_plot {
@@ -499,7 +495,7 @@ workflow mocha {
             baf_auto_thr = baf_auto_thr,
             mocha_plot_extra_args = mocha_plot_extra_args,
             wgs = wgs,
-            docker = mocha_plot_docker
+            docker = docker_registry_with_sep + r_mocha_docker
         }
       }
     }
@@ -514,7 +510,7 @@ workflow mocha {
         filebase = sample_set_id,
         call_rate_thr = sample_call_rate_thr,
         baf_auto_thr = baf_auto_thr,
-        docker = mocha_plot_docker
+        docker = docker_registry_with_sep + r_mocha_docker
     }
   }
 
@@ -559,14 +555,11 @@ workflow mocha {
     File? gtc_tsv_file = gtc_tsv.file
     File? cel_tsv_file = cel_tsv.file
     File? affy_tsv_file = affy_tsv.file
-    File sample_id_file = select_first([flatten_sample_id_lines.file, vcf_sample_id_lines.file])
-    File computed_gender_file = computed_gender_lines.file
-    File call_rate_file = call_rate_lines.file
-    File? mocha_stats_file = mocha_stats_tsv.file
-    File? mocha_calls_file = mocha_calls_tsv.file
-    File? mocha_ucsc_bed = mocha_summary.ucsc_bed
-    File? mocha_summary_pdf = mocha_summary.summary_pdf
-    File? mocha_pileup_pdf = mocha_summary.pileup_pdf
+    File? stats_file = if defined(mocha_stats_tsv.file) || defined(sample_tsv.file) then select_first([mocha_stats_tsv.file, sample_tsv.file]) else None
+    File? calls_file = mocha_calls_tsv.file
+    File? ucsc_bed = mocha_summary.ucsc_bed
+    File? summary_pdf = mocha_summary.summary_pdf
+    File? pileup_pdf = mocha_summary.pileup_pdf
     Array[File]? png_files = if target == "pngs" then flatten(select_all(select_first([mocha_plot.png_files]))) else None
     Array[File]? mendel_files = if mode != "pvcf" && target != "vcf" && defined(ped_file) then select_all(select_first([vcf_split.mendel_tsv])) else None
     Array[File]? gtc_files = if mode == "idat" && gtc_output then flatten(select_first([idat2gtc.gtc_files])) else None
@@ -764,6 +757,44 @@ task lst_concat {
     cat $lst_files | tr '\n' '\0' | xargs -0 mv -t .
     sed -i 's/^.*\///' $lst_files
     cat $lst_files | tr '\n' '\0' | xargs -0 -n 1 awk '{printf $0"\t"} END {printf "\n"}' | sed 's/\t$//' > "~{filebase}.tsv"
+    cat $lst_files | tr '\n' '\0' | xargs -0 rm
+  >>>
+
+  output {
+    File file = filebase + ".tsv"
+  }
+
+  runtime {
+    docker: docker
+    cpu: cpu
+    disks: "local-disk " + disk_size + " HDD"
+    memory: memory + " GiB"
+    preemptible: preemptible
+    maxRetries: maxRetries
+  }
+}
+
+task lst_paste {
+  input {
+    Array[File] lst_files
+    Array[String] headers
+    String filebase
+
+    String docker
+    Int cpu = 1
+    Int disk_size = 10
+    Float memory = 3.5
+    Int preemptible = 1
+    Int maxRetries = 0
+  }
+
+  command <<<
+    set -euo pipefail
+    headers=~{write_lines(headers)}
+    lst_files=~{write_lines(lst_files)}
+    cat $lst_files | tr '\n' '\0' | xargs -0 mv -t .
+    sed -i 's/^.*\///' $lst_files
+    (cat $headers | tr '\n' '\t' | sed 's/\t$/\n/'; cat $lst_files | tr '\n' '\0' | xargs -0 paste) > "~{filebase}.tsv"
     cat $lst_files | tr '\n' '\0' | xargs -0 rm
   >>>
 
@@ -1490,7 +1521,6 @@ task vcf_scatter {
   input {
     File vcf_file
     File intervals_bed
-    String? extra
     Boolean uncompressed = false
 
     String docker
@@ -1525,8 +1555,7 @@ task vcf_scatter {
       --output vcfs \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       --scatter-file regions.lines \
-      --prefix "~{filebase}." \
-      ~{if defined(extra) then "--extra \"" + extra + "\"" else ""}
+      --prefix "~{filebase}."
     cut -f2 regions.lines | sed 's/^/vcfs\/~{filebase}./;s/$/.bcf/'
     rm "~{basename(vcf_file)}"
     rm "~{basename(intervals_bed)}"
@@ -1538,7 +1567,6 @@ task vcf_scatter {
     Int n_smpls = read_int("n_smpls.int")
     Directory vcfs = "vcfs"
     Array[File] vcf_files = read_lines(stdout())
-    File? extra_vcf_file = if defined(extra) then "vcfs/" + filebase + "." + extra + ".bcf" else None
   }
 
   runtime {
@@ -1612,9 +1640,7 @@ task vcf_qc {
     File vcf_file
     File vcf_idx
     File dup_file
-    File sample_id_file
-    File computed_gender_file
-    File call_rate_file
+    File sample_tsv_file
     Float sample_call_rate_thr = 0.97
     Float variant_call_rate_thr = 0.97
     Float dup_divergence_thr = 0.02
@@ -1639,17 +1665,18 @@ task vcf_qc {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_id_file, computed_gender_file, call_rate_file, duplicate_samples_file, extra_xcl_vcf_file])}" | \
+    echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_tsv_file, duplicate_samples_file, extra_xcl_vcf_file])}" | \
       tr '\n' '\0' | xargs -0 mv -t .
-    paste -d $'\t' "~{basename(sample_id_file)}" "~{basename(computed_gender_file)}" > computed_gender.map
-    paste -d $'\t' "~{basename(sample_id_file)}" "~{basename(call_rate_file)}" | \
-      awk -F"\t" '$2<~{sample_call_rate_thr} {print $1}' ~{if defined(duplicate_samples_file) then "| \\\n" +
+    awk -F"\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+      NR>1 && $(f["call_rate"])<~{sample_call_rate_thr} {print $(f["sample_id"])}' \
+      "~{basename(sample_tsv_file)}" ~{if defined(duplicate_samples_file) then "| \\\n" +
       "  cat - \"" + basename(select_first([duplicate_samples_file])) + "\" | \\\n" +
       "  sort | uniq " else ""}> samples_xcl.lines
     echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
       bcftools annotate --no-version --output-type u --annotations "~{basename(dup_file)}" --columns CHROM,FROM,TO,JK --header-lines /dev/stdin~{if cpu > 1 then " --threads " + (cpu - 1) else ""} "~{basename(vcf_file)}" | \
       bcftools view --no-version --output-type u~{if cpu > 1 then " --threads " + (cpu - 1) else ""} --samples-file ^samples_xcl.lines | \
       bcftools +fill-tags --no-version --output-type u --targets ^Y,MT,chrY,chrM~{if cpu > 1 then " --threads " + (cpu - 1) else ""} -- --tags ExcHet,F_MISSING | \
+      bcftools view --no-version --output-type u --drop-genotypes | \
       bcftools annotate --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.xcl.bcf" \
       --include 'FILTER!="." && FILTER!="PASS" || INFO/JK<~{dup_divergence_thr} || INFO/ExcHet<~{genotype_exc_het_thr} || INFO/F_MISSING>1-~{variant_call_rate_thr}' \
       --remove ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING~{if cpu > 1 then " --threads " + (cpu - 1) else ""}
@@ -1671,9 +1698,9 @@ task vcf_qc {
       "~{filebase}.xcl.bcf"
     bcftools index --force "~{filebase}.qc.bcf"
     bcftools index --nrecords "~{filebase}.qc.bcf"
-    echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_id_file, computed_gender_file, call_rate_file, duplicate_samples_file, extra_xcl_vcf_file])}" | \
+    echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_tsv_file, duplicate_samples_file, extra_xcl_vcf_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
-    rm computed_gender.map samples_xcl.lines
+    rm samples_xcl.lines
   >>>
 
   output {
@@ -1725,9 +1752,9 @@ task vcf_phase {
   Float vcf_size = size(unphased_vcf_file, "GiB")
   Float ref_size = size(ref_vcf_file, "GiB")
   Int disk_size = select_first([disk_size_override, ceil(10.0 + 3.0 * vcf_size + ref_size)])
-  Float mult = select_first([mult_override, if eagle then 1.5 else 10.0]) # requires additional memory if using SHAPEIT4
+  Float mult = select_first([mult_override, if eagle then 1.5 else 12.0 * (if chr == "X" || chr == "chrX" then 1.5 else 1.0)]) # requires additional memory if using SHAPEIT4
   Float memory = select_first([memory_override, 3.5 + mult * n_markers * (n_smpls + select_first([n_panel_smpls, 0])) / 1024 / 1024 / 1024])
-  Int cpu = select_first([cpu_override, 2 * ceil(memory / 13)]) * (if mhc then 2 else 1) # always require at least two CPUs
+  Int cpu = select_first([cpu_override, 2 * ceil(memory / 13)]) * (if mhc then 2 else 1) # always require at least two CPUs (four for MHC windows)
   Int preemptible = select_first([preemptible_override, if mhc then 0 else 1]) # as the MHC phases slowly, do not run as preemptible
 
   String filebase = basename(basename(unphased_vcf_file, ".bcf"), ".vcf.gz")
@@ -1974,12 +2001,10 @@ task vcf_import {
 
 task vcf_mocha {
   input {
-    String rule
+    String assembly
     File pvcf_file
     File pvcf_idx
-    File? sample_id_file
-    File? computed_gender_file
-    File? call_rate_file
+    File? sample_tsv_file
     File? xcl_vcf_file
     File? xcl_vcf_idx
     File? cnp_file
@@ -2006,17 +2031,12 @@ task vcf_mocha {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" select_all([pvcf_file, pvcf_idx, sample_id_file, computed_gender_file, call_rate_file, xcl_vcf_file, xcl_vcf_idx, cnp_file])}" | \
+    echo "~{sep="\n" select_all([pvcf_file, pvcf_idx, sample_tsv_file, xcl_vcf_file, xcl_vcf_idx, cnp_file])}" | \
       tr '\n' '\0' | xargs -0 mv -t .
-    ~{if defined(sample_id_file) && defined(computed_gender_file) then "paste -d $'\\t' \"" + basename(select_first([sample_id_file])) + "\" \"" +
-      basename(select_first([computed_gender_file])) + "\" > computed_gender.map" else ""}
-    ~{if defined(sample_id_file) && defined(call_rate_file) then "paste -d $'\\t' \"" + basename(select_first([sample_id_file])) + "\" \"" +
-      basename(select_first([call_rate_file])) + "\" > call_rate.map" else ""}
     bcftools +mocha \
-      --rules "~{rule}" \
+      --genome "~{assembly}" \
       --no-version \
-      ~{if defined(sample_id_file) && defined(computed_gender_file) then "--sex computed_gender.map" else ""} \
-      ~{if defined(sample_id_file) && defined(call_rate_file) then "--call-rate call_rate.map" else ""} \
+      ~{if defined(sample_tsv_file) then "--input-stats \"" + basename(select_first([sample_tsv_file])) + "\"" else ""} \
       ~{if defined(xcl_vcf_file) then "--variants \"^" + basename(select_first([xcl_vcf_file])) + "\"" else ""} \
       ~{if defined(cnp_file) then "--cnp \"" + basename(select_first([cnp_file])) + "\"" else ""} \
       ~{if defined(mhc_reg) then "--mhc \"" + mhc_reg + "\"" else ""} \
@@ -2024,16 +2044,15 @@ task vcf_mocha {
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       --output-type ~{if uncompressed then "u" else "b"} \
       --output "~{filebase}.~{ext_string}.bcf" \
-      --mosaic-calls "~{filebase}.calls.tsv" \
-      --genome-stats "~{filebase}.stats.tsv" \
+      --calls "~{filebase}.calls.tsv" \
+      --stats "~{filebase}.stats.tsv" \
       --ucsc-bed "~{filebase}.ucsc.bed" \
       "~{basename(pvcf_file)}" \
       ~{mocha_extra_args}
     bcftools index --force "~{filebase}.~{ext_string}.bcf"
     bcftools query --list-samples "~{filebase}.~{ext_string}.bcf" | wc -l
-    echo "~{sep="\n" select_all([pvcf_file, pvcf_idx, sample_id_file, computed_gender_file, call_rate_file, xcl_vcf_file, xcl_vcf_idx, cnp_file])}" | \
+    echo "~{sep="\n" select_all([pvcf_file, pvcf_idx, sample_tsv_file, xcl_vcf_file, xcl_vcf_idx, cnp_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
-    ~{if defined(sample_id_file) && defined(computed_gender_file) then "rm computed_gender.map" else ""}
   >>>
 
   output {
@@ -2092,17 +2111,15 @@ task mocha_plot {
     end_pos=$(head -n1 "~{basename(calls_tsv)}" | tr '\t' '\n' | grep ^end_)
     awk -F"\t" -v OFS="\t" -v beg_pos=$beg_pos -v end_pos=$end_pos '
       NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-      NR==FNR && FNR>1 {sample_id=$(f["sample_id"]); call_rate=$(f["call_rate"]); baf_auto=$(f["baf_auto"])}
-      NR==FNR && FNR>1 && (call_rate<~{call_rate_thr} || baf_auto>~{baf_auto_thr}) {xcl[sample_id]++}
+      NR==FNR && FNR>1 && ($(f["call_rate"])<~{call_rate_thr} || $(f["baf_auto"])>~{baf_auto_thr}) {xcl[$(f["sample_id"])]++}
       NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i}
-      NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); chrom=$(g["chrom"]); beg=$(g[beg_pos]); end=$(g[end_pos]);
-        len=$(g["length"]); p_arm=$(g["p_arm"]); q_arm=$(g["q_arm"]); bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"]);
-        lod_baf_phase=$(g["lod_baf_phase"]); type=$(g["type"]); if (lod_baf_phase=="nan") lod_baf_phase=0}
-      NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&~{if do_not_plot_sex_chromosomes
-        then "\n    chrom!=\"X\" && chrom!=\"chrX\" && chrom!=\"Y\" && chrom!=\"chrY\" &&" else ""}
-        ( len>5e6 + 5e6 * (p_arm!="N" && q_arm!="N") ||
-          len>5e5 && (bdev<1/10 && rel_cov<2.5) && lod_baf_phase>10 ||
-          rel_cov<2.1 && lod_baf_phase>10 ) {print sample_id,chrom,beg,end}' \
+      NR>FNR && FNR>1 {len=$(g["length"]); bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"])}
+      NR>FNR && FNR>1 && !($(g["sample_id"]) in xcl) && $(g["type"])!~"^CNP" &&~{if do_not_plot_sex_chromosomes
+    then "\n    chrom!=\"X\" && chrom!=\"chrX\" && chrom!=\"Y\" && chrom!=\"chrY\" &&" else ""}
+        ( $(g["chrom"])~"X" && $(g["computed_gender"])=="M" || bdev<0.1 || $(g["n50_hets"])<2e5 ) &&
+        ( $(g["bdev_se"])!="nan" || $(g["lod_baf_phase"])!="nan" && $(g["lod_baf_phase"]) > 10.0 ) &&
+        ( rel_cov<2.1 || bdev<0.05 || len>5e5 && bdev<0.1 && rel_cov<2.5 || len>5e6 && bdev<0.15 ) {
+      print $(g["sample_id"]),$(g["chrom"]),$(g[beg_pos]),$(g[end_pos])}' \
       "~{basename(stats_tsv)}" "~{basename(calls_tsv)}" > "~{basename(calls_tsv, ".tsv")}.coords.tsv"
     while read sample_id chrom beg_pos end_pos; do
       mocha_plot.R \
@@ -2160,12 +2177,18 @@ task mocha_summary {
 
   command <<<
     set -euo pipefail
-    ucsc_files=~{write_lines(ucsc_beds)}
     mv "~{calls_tsv}" .
     mv "~{stats_tsv}" .
     mv "~{cyto_file}" .
-    cat $ucsc_files | tr '\n' '\0' | xargs -0 mv -t .
-    sed -i 's/^.*\///' $ucsc_files
+    ucsc_files=~{write_lines(ucsc_beds)}
+    ~{if length(ucsc_beds) > 1 then
+    "cat $ucsc_files | tr '\\n' '\\0' | xargs -0 mv -t .\n" +
+    "sed -i 's/^.*\\///' $ucsc_files\n" +
+    "cat $ucsc_files | tr '\\n' '\\0' | xargs -0 cat | \\\n" +
+    "  awk '{if ($0~\"^track\") track=$0; else bed[track]=bed[track]$0\"\\n\"}\n" +
+    "  END {for (track in bed) printf track\"\\n\"bed[track]}' > \"" + filebase + ".ucsc.bed\"\n" +
+    "cat $ucsc_files | tr '\\n' '\\0' | xargs -0 rm"
+    else "mv \"" + ucsc_beds[0] + "\" \"" + filebase + ".ucsc.bed\""}
     summary_plot.R \
       --stats "~{basename(stats_tsv)}" \
       --calls "~{basename(calls_tsv)}" \
@@ -2173,16 +2196,13 @@ task mocha_summary {
       --baf-auto-thr ~{baf_auto_thr} \
       --pdf "~{filebase}.summary.pdf"
     awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-      NR==FNR && FNR>1 {sample_id=$(f["sample_id"]); call_rate=$(f["call_rate"]); baf_auto=$(f["baf_auto"])}
-      NR==FNR && FNR>1 && (call_rate<~{call_rate_thr} || baf_auto>~{baf_auto_thr}) {xcl[sample_id]++}
+      NR==FNR && FNR>1 && ($(f["call_rate"])<~{call_rate_thr} || $(f["baf_auto"])>~{baf_auto_thr}) {xcl[$(f["sample_id"])]++}
       NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i; print}
-      NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); len=$(g["length"]); p_arm=$(g["p_arm"]); q_arm=$(g["q_arm"]);
-        bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"]); lod_baf_phase=$(g["lod_baf_phase"]); type=$(g["type"]);
-        if (lod_baf_phase=="nan") lod_baf_phase=0}
-      NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&
-        ( len>5e6 + 5e6 * (p_arm!="N" && q_arm!="N") ||
-          len>5e5 && (bdev<1/10 && rel_cov<2.5) && lod_baf_phase>10 ||
-          rel_cov<2.1 && lod_baf_phase>10 )' \
+      NR>FNR && FNR>1 {len=$(g["length"]); bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"])}
+      NR>FNR && FNR>1 && !($(g["sample_id"]) in xcl) && $(g["type"])!~"^CNP" &&
+        ( $(g["chrom"])~"X" && $(g["computed_gender"])=="M" || bdev<0.1 || $(g["n50_hets"])<2e5 ) &&
+        ( $(g["bdev_se"])!="nan" || $(g["lod_baf_phase"])!="nan" && $(g["lod_baf_phase"]) > 10.0 ) &&
+        ( rel_cov<2.1 || bdev<0.05 || len>5e5 && bdev<0.1 && rel_cov<2.5 || len>5e6 && bdev<0.15 )' \
       "~{basename(stats_tsv)}" "~{basename(calls_tsv)}" > "~{basename(calls_tsv, ".tsv")}.filtered.tsv"
     pileup_plot.R \
       --cytoband "~{basename(cyto_file)}" \
@@ -2192,13 +2212,10 @@ task mocha_summary {
       --baf-auto-thr ~{baf_auto_thr} \
       --pdf "~{filebase}.pileup.pdf"
     rm "~{basename(calls_tsv, ".tsv")}.filtered.tsv"
-    cat $ucsc_files | tr '\n' '\0' | xargs -0 cat | \
-      awk '{if ($0~"^track") track=$0; else bed[track]=bed[track]$0"\n"}
-      END {for (track in bed) printf track"\n"bed[track]}' > "~{filebase}.ucsc.bed"
     rm "~{basename(calls_tsv)}"
     rm "~{basename(stats_tsv)}"
     rm "~{basename(cyto_file)}"
-    cat $ucsc_files | tr '\n' '\0' | xargs -0 rm
+
   >>>
 
   output {

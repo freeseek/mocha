@@ -10,6 +10,8 @@ instruments for clonal selection (2020). [PMID: 32581363] [DOI: 10.1038/s41586-0
 ```
 and this website. For any feedback or questions, contact the <a href="mailto:giulio.genovese@gmail.com">author</a>
 
+WARNING: MoChA will not yield useful results for VCFs from whole exome sequencing data as MoChA does not model the reference allele bias in these assays. Furthermore, whole exome sequencing does not include enough heterozygous sites to allow for detection of mosaic chromosomal alterations at low cell fractions
+
 <!--ts-->
    * [Usage](#usage)
    * [Installation](#installation)
@@ -29,23 +31,27 @@ Usage
 NOTICE: Starting from July 2020 a <a href="wdl">WDL</a> pipeline is available to run the entire MoChA pipeline from raw intensity files to final calls
 
 ```
-Usage:   bcftools +mocha [OPTIONS] <in.vcf>
+Usage:   bcftools +mocha [OPTIONS] <in.vcf.gz>
 
 Required options:
-    -r, --rules <assembly>[?]      predefined genome reference rules, 'list' to print available settings, append '?' for details
-    -R, --rules-file <file>        genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE
+    -g, --genome <assembly>[?]      predefined genome reference rules, 'list' to print available settings, append '?' for details
+    -G, --genome-file <file>        genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE
 
 General Options:
-    -x, --sex <file>               file including information about the gender of the samples
-        --call-rate <file>         file including information about the call_rate of the samples
+    -v, --variants [^]<file>       tabix-indexed [compressed] VCF/BCF file containing variants
+    -f, --apply-filters <list>     require at least one of the listed FILTER strings (e.g. "PASS,.")
+                                   to include (or exclude with "^" prefix) in the analysis
+    -e, --exclude <expr>           exclude sites for which the expression is true
+    -i, --include <expr>           select sites for which the expression is true
+    -r, --regions <region>         restrict to comma-separated list of regions
+    -R, --regions-file <file>      restrict to regions listed in a file
+    -t, --targets [^]<region>      restrict to comma-separated list of regions. Exclude regions with "^" prefix
+    -T, --targets-file [^]<file>   restrict to regions listed in a file. Exclude regions with "^" prefix
     -s, --samples [^]<list>        comma separated list of samples to include (or exclude with "^" prefix)
     -S, --samples-file [^]<file>   file of samples to include (or exclude with "^" prefix)
         --force-samples            only warn about unknown subset samples
-    -v, --variants [^]<file>       tabix-indexed [compressed] VCF/BCF file containing variants
-    -t, --targets [^]<region>      restrict to comma-separated list of regions. Exclude regions with "^" prefix
-    -T, --targets-file [^]<file>   restrict to regions listed in a file. Exclude regions with "^" prefix
-    -f, --apply-filters <list>     require at least one of the listed FILTER strings (e.g. "PASS,.")
-                                   to include (or exclude with "^" prefix) in the analysis
+        --input-stats <file>       input samples genome-wide statistics file
+        --only-stats               compute genome-wide statistics without detecting mosaic chromosomal alterations
     -p  --cnp <file>               list of regions to genotype in BED format
         --mhc <region>             MHC region to exclude from analysis (will be retained in the output)
         --kir <region>             KIR region to exclude from analysis (will be retained in the output)
@@ -58,8 +64,8 @@ Output Options:
     -a  --no-annotations           omit Ldev and Bdev FORMAT from output VCF (requires --output)
         --no-log                   suppress progress report on standard error
     -l  --log <file>               write log to file [standard error]
-    -m, --mosaic-calls <file>      write mosaic chromosomal alterations to a file [standard output]
-    -g, --genome-stats <file>      write sample genome-wide statistics to a file [no output]
+    -c, --calls <file>             write chromosomal alterations calls table to a file [standard output]
+    -z  --stats <file>             write samples genome-wide statistics table to a file [no output]
     -u, --ucsc-bed <file>          write UCSC bed track to a file [no output]
 
 HMM Options:
@@ -70,13 +76,13 @@ HMM Options:
         --adjust-BAF-LRR <int>     minimum number of genotypes for a cluster to median adjust BAF and LRR (-1 for no adjustment) [5]
         --regress-BAF-LRR <int>    minimum number of genotypes for a cluster to regress BAF against LRR (-1 for no regression) [15]
         --LRR-GC-order <int>       order of polynomial to regress LRR against local GC content (-1 for no regression) [2]
-        --xy-prob <float>          transition probability [1e-06]
-        --err-prob <float>         uniform error probability [1e-02]
-        --flip-prob <float>        phase flip probability [1e-02]
-        --centromere-loss <float>  penalty to avoid calls spanning centromeres [1e-04]
-        --telomere-gain <float>    telomere advantage to prioritize CN-LOHs [1e-02]
-        --x-telomere-gain <float>  X telomere advantage to prioritize mLOX [1e-03]
-        --y-telomere-gain <float>  Y telomere advantage to prioritize mLOY [1e-04]
+        --xy-major-pl              major transition phred-scaled likelihood [65.0]
+        --xy-minor-pl              minor transition phred-scaled likelihood [35.0]
+        --auto-tel-pl              autosomal telomeres phred-scaled likelihood [20.0]
+        --chrX-tel-pl              chromosome X telomeres phred-scaled likelihood [8.0]
+        --chrY-tel-pl              chromosome Y telomeres phred-scaled likelihood [6.0]
+        --error-pl                 uniform error phred-scaled likelihood [15.0]
+        --flip-pl                  phase flip phred-scaled likelihood [20.0]
         --short-arm-chrs <list>    list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
         --use-short-arms           use variants in short arms [FALSE]
         --use-centromeres          use variants in centromeres [FALSE]
@@ -86,8 +92,8 @@ HMM Options:
         --LRR-cutoff <float>       cutoff between LRR for haploid and diploid used to infer gender [estimated from X nonPAR]
 
 Examples:
-    bcftools +mocha -r GRCh37 input.bcf -v ^exclude.bcf -g stats.tsv -m mocha.tsv -p cnps.bed
-    bcftools +mocha -r GRCh38 input.bcf -Ob -o output.bcf -g stats.tsv -m mocha.tsv --LRR-weight 0.5
+    bcftools +mocha -g GRCh37 -v ^exclude.bcf -p cnps.bed -c calls.tsv -z stats.tsv input.bcf
+    bcftools +mocha -g GRCh38 -o output.bcf -Ob -c calls.tsv -z stats.tsv --LRR-weight 0.5 input.bcf
 ```
 
 Installation
@@ -118,15 +124,15 @@ git clone --branch=develop git://github.com/samtools/bcftools.git
 
 Download plugins code
 ```
-/bin/rm -f bcftools/plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
-wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
+/bin/rm -f bcftools/plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT,score}.c}
+wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT,score}.c}
 ```
 
 Compile latest version of HTSlib (optionally disable bz2, gcs, and lzma) and BCFtools (make sure you are using gcc version 5 or newer)
 ```
 cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-gcs --disable-lzma && make && cd ..
 cd bcftools && make && cd ..
-/bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,extendFMT}.so} $HOME/bin/
+/bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,extendFMT,score}.so} $HOME/bin/
 ```
 Notice that you will need some functionalities missing from the base version of BCFtools to run the pipeline
 
@@ -141,10 +147,11 @@ Alternatively, you can download MoChA's binaries using the following code
 wget http://ftp.us.debian.org/debian/pool/main/h/htslib/libhts3_1.11-4_amd64.deb
 wget http://ftp.us.debian.org/debian/pool/main/b/bcftools/bcftools_1.11-1_amd64.deb
 wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-dev_amd64.deb
-sudo apt install ./{libhts3_1.11-4,bcftools_1.11-1,bio-mocha_1.11-dev}_amd64.deb
+sudo apt remove bio-mocha_1.11-dev_amd64.deb
+sudo apt install --reinstall ./{libhts3_1.11-4,bcftools_1.11-1,bio-mocha_1.11-dev}_amd64.deb
 ```
 
-Install Beagle5 and IMPUTE5 (optional for array data)
+Install Beagle5 and IMPUTE5 (optional for array data) from <a href="https://www.dropbox.com/sh/mwnceyhir8yze2j/AADbzP6QuAFPrj0Z9_I1RSmla?dl=0">here</a>
 ```
 wget -O impute5_v1.1.4.zip https://www.dropbox.com/sh/mwnceyhir8yze2j/AAAPJVJv3kI2glXGDdc3sSHga/impute5_v1.1.4.zip?dl=0
 unzip -d $HOME/bin -o impute5_v1.1.4.zip impute5_v1.1.4/imp{ute5,5Converter}_1.1.4_static
@@ -171,12 +178,13 @@ wget -P $HOME/GRCh37 https://data.broadinstitute.org/alkesgroup/Eagle/downloads/
 1000 Genomes project phase 3
 ```
 cd $HOME/GRCh37
-wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr{{1..22}.phase3_shapeit2_mvncall_integrated_v5a,X.phase3_shapeit2_mvncall_integrated_v1b,Y.phase3_integrated_v2a}.20130502.genotypes.vcf.gz{,.tbi}
+wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr{{1..22}.phase3_shapeit2_mvncall_integrated_v5b,X.phase3_shapeit2_mvncall_integrated_v1c,Y.phase3_integrated_v2b}.20130502.genotypes.vcf.gz{,.tbi}
 for chr in {1..22} X Y; do
-  bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][ab].20130502.genotypes.vcf.gz | \
-  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,^FMT/GT | \
+  bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][bc].20130502.genotypes.vcf.gz | \
+  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
   bcftools norm --no-version -Ou -m -any | \
-  bcftools norm --no-version -Ob -o ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf -d none -f $HOME/GRCh37/human_g1k_v37.fasta && \
+  bcftools norm --no-version -Ou -d none -f $HOME/GRCh37/human_g1k_v37.fasta | \
+  bcftools sort -Ob -o ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf -T ./bcftools-sort.XXXXXX && \
   bcftools index -f ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf
 done
 ```
@@ -230,7 +238,7 @@ kir_reg="19:54574747-55504099"
 map="$HOME/GRCh37/genetic_map_hg19_withX.txt.gz"
 panel_pfx="$HOME/GRCh37/ALL.chr"
 panel_sfx=".phase3_integrated.20130502.genotypes"
-rule="GRCh37"
+assembly="GRCh37"
 cnp="$HOME/GRCh37/cnps.bed"
 dup="$HOME/GRCh37/segdups.bed.gz"
 cyto="$HOME/GRCh37/cytoBand.txt.gz"
@@ -257,14 +265,16 @@ cd $HOME/GRCh38
 wget http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr{{1..22}.filtered.shapeit2-duohmm,X.filtered.eagle2}-phased.vcf.gz
 for chr in {1..22}; do
   bcftools view --no-version -Ou -c 2 CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.shapeit2-duohmm-phased.vcf.gz | \
-  bcftools annotate --no-version -Ob -o CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf -x ID,QUAL,FILTER,INFO,^FMT/GT && \
+  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
+  bcftools sort -Ob -o CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf -T ./bcftools-sort.XXXXXX && \
   bcftools index -f CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf
 done
 bcftools view --no-version -h CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.vcf.gz | \
   sed 's/^#CHROM/##INFO=<ID=ME,Number=1,Type=Float,Description="Mendelian genotype errors">\n#CHROM/' | \
   bcftools reheader -h /dev/stdin CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.vcf.gz | \
   bcftools view --no-version -Ou -c 2 | \
-  bcftools annotate --no-version -Ob -o CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf -x ID,QUAL,FILTER,INFO,^FMT/GT &&
+  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
+  bcftools sort -Ob -o CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf -T ./bcftools-sort.XXXXXX && \
   bcftools index -f CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf
 ```
 
@@ -317,7 +327,7 @@ kir_reg="chr19:54071493-54992731"
 map="$HOME/GRCh38/genetic_map_hg38_withX.txt.gz"
 panel_pfx="$HOME/GRCh38/CCDG_14151_B01_GRM_WGS_2020-08-05_chr"
 panel_sfx=".filtered.phased.bcf"
-rule="GRCh38"
+assembly="GRCh38"
 cnp="$HOME/GRCh38/cnps.bed"
 dup="$HOME/GRCh38/segdups.bed.gz"
 cyto="$HOME/GRCh38/cytoBand.txt.gz"
@@ -398,6 +408,7 @@ echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
   bcftools annotate --no-version -Ou -a $dup -c CHROM,FROM,TO,JK -h /dev/stdin $dir/$pfx.unphased.bcf | \
   bcftools view --no-version -Ou -S ^samples_xcl_list.txt | \
   bcftools +fill-tags --no-version -Ou -t ^Y,MT,chrY,chrM -- -t ExcHet,F_MISSING | \
+  bcftools view --no-version -Ou -G | \
   bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
     -i 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-.97' \
     -x ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING && \
@@ -499,8 +510,7 @@ Chromosomal alterations pipeline
 Preparation steps
 ```
 pfx="..." # output prefix
-sex="..." # file with computed gender information (first column sample ID, second column gender: 1=male; 2=female)
-crt="..." # file with call rate information (first column sample ID, second column call rate)
+tsv="..." # file with sample statistics (sample_id, computed_gender, call_rate)
 lst="..." # file with list of samples to analyze for asymmetries (e.g. samples with 1p CN-LOH)
 cnp="..." # file with list of regions to genotype in BED format
 mhc_reg="..." # MHC region to skip
@@ -510,15 +520,14 @@ kir_reg="..." # KIR region to skip
 Call mosaic chromosomal alterations with MoChA
 ```
 bcftools +mocha \
-  --rules $rule \
-  --sex $sex \
-  --call-rate $crt \
+  --genome $assembly \
+  --input-stats $tsv \
   --no-version \
   --output-type b \
   --output $dir/$pfx.bdev.bcf \
   --variants ^$dir/$pfx.xcl.bcf \
-  --mosaic-calls $dir/$pfx.calls.tsv \
-  --genome-stats $dir/$pfx.stats.tsv \
+  --calls $dir/$pfx.calls.tsv \
+  --stats $dir/$pfx.stats.tsv \
   --ucsc-bed $dir/$pfx.ucsc.bed \
   --cnp $cnp \
   --mhc $mhc_reg \
@@ -526,12 +535,13 @@ bcftools +mocha \
   $dir/$pfx.bcf && \
 bcftools index -f $dir/$pfx.bdev.bcf
 ```
-Notice that MoChA will read input computed gender and call rate if provided, otherwise these will be estimated from the VCF. For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms
+Notice that MoChA will read input computed gender and call rate if provided, otherwise these will be estimated from the VCF. For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms. MoChA should not be run on single chromosome VCFs as median statistics across the autosomes are used to calibrate the likelihoods 
 
 The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns
 ```
             sample_id - sample ID
       computed_gender - estimated sample gender from X nonPAR region (not heterozygous sites count)
+            call_rate - estimated genotype calling rate
            XXX_median - median LRR or sequencing coverage across autosomes
                XXX_sd - standard deviation for LRR or sequencing coverage
              XXX_auto - auto correlation across consecutive sites for LRR or sequencing coverage (after GC correction)
@@ -588,17 +598,14 @@ For array data, MoChA's memory requirements will depend on the number of samples
 Depending on your application, you might want to filter the calls from MoChA. For example, the following code
 ```
 awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-  NR==FNR && FNR>1 {sample_id=$(f["sample_id"]); call_rate=$(f["call_rate"]); baf_auto=$(f["baf_auto"])}
-  NR==FNR && FNR>1 && (call_rate<.97 || baf_auto>.03) {xcl[sample_id]++}
+  NR==FNR && FNR>1 && ($(f["call_rate"])<.97 || $(f["baf_auto"])>.03) {xcl[$(f["sample_id"])]++}
   NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i; print}
-  NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); len=$(g["length"]); p_arm=$(g["p_arm"]); q_arm=$(g["q_arm"]);
-    bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"]); lod_baf_phase=$(g["lod_baf_phase"]); type=$(g["type"]);
-    if (lod_baf_phase=="nan") lod_baf_phase=0}
-  NR>FNR && FNR>1 && !(sample_id in xcl) && rel_cov>0.5 && type!~"^CNP" &&
-    ( len>5e6 + 5e6 * (p_arm!="N" && q_arm!="N") ||
-      len>5e5 && bdev<1/10 && rel_cov<2.5 && lod_baf_phase>10 ||
-      rel_cov<2.1 && lod_baf_phase>10 )' $pfx.stats.tsv $pfx.calls.tsv > $pfx.calls.filtered.tsv
-
+  NR>FNR && FNR>1 {len=$(g["length"]); bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"])}
+  NR>FNR && FNR>1 && !($(g["sample_id"]) in xcl) && $(g["type"])!~"^CNP" &&
+    ( $(g["chrom"])~"X" && $(g["computed_gender"])=="M" || bdev<0.1 || $(g["n50_hets"])<2e5 ) &&
+    ( $(g["bdev_se"])!="nan" || $(g["lod_baf_phase"])!="nan" && $(g["lod_baf_phase"]) > 10.0 ) && 
+    ( rel_cov<2.1 || bdev<0.05 || len>5e5 && bdev<0.1 && rel_cov<2.5 || len>5e6 && bdev<0.15 )' \
+  $pfx.stats.tsv $pfx.calls.tsv > $pfx.calls.filtered.tsv
 awk 'NR==FNR {x[$1"_"$3"_"$4"_"$5]++} NR>FNR && ($0~"^track" || $4"_"$1"_"$2"_"$3 in x)' \
   $pfx.calls.filtered.tsv $pfx.ucsc.bed > $pfx.ucsc.filtered.bed
 ```
@@ -655,7 +662,7 @@ Plot results
 
 Install basic tools (Debian/Ubuntu specific if you have admin privileges)
 ```
-sudo apt install r-cran-optparse r-cran-ggplot2 r-cran-data.table
+sudo apt install r-cran-optparse r-cran-ggplot2 r-cran-data.table r-cran-reshape2
 ```
 
 Download R scripts
@@ -668,19 +675,29 @@ chmod a+x $HOME/bin/{summary,pileup,mocha}_plot.R
 Generate summary plot
 ```
 summary_plot.R \
-  --pdf $dir/$pfx.pdf \
   --stats $dir/$pfx.stats.tsv \
-  --calls $dir/$pfx.calls.tsv
+  --calls $dir/$pfx.calls.tsv \
+  --pdf $dir/$pfx.pdf
 ```
 
 Generate pileup plot
 ```
 pileup_plot.R \
-  --pdf $dir/$pfx.pdf \
+  --cytoband $HOME/GRCh37/cytoBand.txt.gz \
   --stats $dir/$pfx.stats.tsv \
-  --calls $dir/$pfx.calls.tsv \
-  --cytoband $HOME/GRCh37/cytoBand.txt.gz
+  --calls $dir/$pfx.calls.filtered.tsv \
+  --pdf $dir/$pfx.pdf
 ```
+
+If you have a table with columns with encoded age information for each sample in columns headed with `sample_id` and `age`, you can plot the prevalence of events by age
+```
+age_plot.R \
+  --stats $dir/$pfx.stats.tsv \
+  --calls $dir/$pfx.calls.filtered.tsv \
+  --age $dir/$pfx.age.tsv \
+  --pdf $dir/$pfx.pdf
+```
+Prevalences will be separatedly plot among telomeric autosomal mCAs, interstitial autosomal mCAs, mLOX, and mLOY
 
 Plot mosaic chromosomal alterations (for array data)
 ```
@@ -713,6 +730,29 @@ mocha_plot.R \
 
 ![](CSES15_P26_140611.png)
 Complex duplication overlapping the MDM4 gene (GRCh37 coordinates). Signal over heterozygous sites colored in blue shows evidence of a triplication event and signal over heterozygous sites colored in red shows evidence of a duplication event. Multiple phase switch errors can be observed in the shifted phased BAF signal
+
+HMM parameters
+==============
+
+MoChA has a complicated list of parameters that it uses to assign likelihoods and transition probabilities:
+- [xy-major-pl] transition phred-scaled likelihood where the non-alternate state is towards the centromere
+- [xy-minor-pl] transition phred-scaled likelihood where the non-alternate state is away from the centromere
+- [chrY-tel-pl] autosomal telomeres phred-scaled likelihood used to provide a prior for aneuploidy and CN-LOH events reaching the telomere
+- [chrX-tel-pl] chromosome X telomeres phred-scaled likelihood used to provide a prior for mLOX events
+- [chrY-tel-pl] chromosome Y telomeres phred-scaled likelihood used to provide a prior for mLOY events
+- [error-pl] uniform error phred-scaled likelihood used to maximize the amount of evidence a single site can provide in favor of an event
+- [flip-pl] phase flip phred-scaled likelihood used to allow flip between equivalent alternative states corresponding to different phases
+
+The internal HMM used by MoChA is completely symmetrical, but it internally uses two separate transition likelihoods to alternate states, one when transitioning towards an alternate state away from the centromere and one towards the centromere. This allows to include a lower prior for events that span the centromere, with the exception of events that span a whole chromosome, such as mLOX and mLOY. Notice that these priors will only make a difference for events at very low cell fraction, so they should not be relevant if a study is only interested in high cell fraction events
+
+MoChA will also attempt to split events that span a whole chromosome by comparing the median LRR values on the small and long arms as these will occasionally represent isochromosome events
+
+There are a few differences between MoChA and the HMM model used in <a href="http://doi.org/10.1038/s41586-018-0321-x">Loh et al. 2018</a>, <a href="http://doi.org/10.1038/s41598-020-59963-8">Thompson et al. 2019</a>, <a href="https://doi.org/10.1038/s41586-020-2430-6">Loh et al. 2020</a>, and <a href="https://doi.org/10.1038/s41586-020-2426-2">Terao et al. 2020</a>. The most important is that, the latter model used a likelihood ratio test statistic with likelihoods deriving from a 3-state forward-backward HMM model. MoChA instead uses a Viterbi HMM model with multiple alternate states and it increases the number of alternate states dynamically when trying to assess multiple calls. While MoChA's HMM transition probabilities are symmetrical with respect to centromeres, the HMM in Loh et al. use non-symmetrical transitions and different likelihoods for other parameters:
+- transition likelihood to the diploid state was 0.0003 (PL~35.2) on the autosome and 0.0001 (PL=40.0) on chromosome X
+- transition likelihood to an alternative state was 0.004 (PL~24.0) on the autosome and 0.08 (PL~11.0) on chromosome X
+- no penalty for telomeres likelihood (PL=0.0) except for acrocentric chromosomes where the penalty was 0.2 (PL~7.0) 
+- flip error probability was 0.001 (PL=30.0)
+Another difference is that MoChA performs a BAF correction by regressing BAF values against LRR values (similarly to what done in <a href="http://doi.org/10.1101/gr.5686107">Oosting et al\. 2007</a>, <a href="http://doi.org/10.1186/1471-2105-9-409">Staaf et al\. 2008</a>, and <a href="http://doi.org/10.1038/srep36158">Mayrhofer et al\. 2016</a>). A similar correction was separately performed in <a href="https://doi.org/10.1038/s41586-020-2426-2">Terao et al. 2020</a>
 
 Acknowledgements
 ================

@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-pileup_plot_version <- '2021-03-15'
+pileup_plot_version <- '2021-05-14'
 
 library(optparse)
 library(ggplot2)
@@ -91,8 +91,8 @@ for (chr in c(1:22, 'X')) {
   if ( sum(idx) == 0 ) next
   df_calls$index[idx] <- rank(df_calls[idx, beg_pos] - df_calls[idx, 'length']/chrlen[chr] + 1e9 * (3 * (df_calls$type[idx]=='Loss') + 2 * (df_calls$type[idx]=='CN-LOH') + (df_calls$type[idx]=='Gain')) , ties.method = 'first') - .5
 
-  p <- ggplot(data=df_calls[idx,], aes_string(x=paste0(beg_pos, '/1e6'), y='index', color='type')) +
-    geom_segment(aes_string(x=paste0(beg_pos, '/1e6'), xend=paste0(end_pos, '/1e6'), y='index', yend='index')) +
+  p <- ggplot(data = df_calls[idx,], aes_string(x = paste0(beg_pos, '/1e6'), y = 'index', color = 'type')) +
+    geom_segment(aes_string(x = paste0(beg_pos, '/1e6'), xend = paste0(end_pos, '/1e6'), y = 'index', yend = 'index')) +
     theme_bw() +
     scale_x_continuous(paste('Chromosome', chr, '(Mbp position)')) +
     scale_y_continuous(NULL, breaks = NULL) +
@@ -101,43 +101,43 @@ for (chr in c(1:22, 'X')) {
                                         'CN-LOH' = paste0('CN-LOH (n=', sum(df_calls$type[idx] == 'CN-LOH'), ')'),
                                         'Loss' = paste0('Loss (n=', sum(df_calls$type[idx] == 'Loss'), ')'),
                                         'Gain' = paste0('Gain (n=', sum(df_calls$type[idx] == 'Gain'), ')'))) +
-    theme(legend.position='bottom', legend.box = 'horizontal')
+    theme(legend.position = 'bottom', legend.box = 'horizontal')
 
-  loss_cumulative <- args$loss_cumulative && sum(idx & df_calls$type=='Loss') > 0
-  cn_loh_cumulative <- args$cn_loh_cumulative && sum(idx & df_calls$type=='CN-LOH') > 0
-  gain_cumulative <- args$gain_cumulative && sum(idx & df_calls$type=='Gain') > 0
+  loss_cumulative <- args$loss_cumulative && sum(idx & df_calls$type == 'Loss') > 0
+  cn_loh_cumulative <- args$cn_loh_cumulative && sum(idx & df_calls$type == 'CN-LOH') > 0
+  gain_cumulative <- args$gain_cumulative && sum(idx & df_calls$type == 'Gain') > 0
   if (loss_cumulative || cn_loh_cumulative || gain_cumulative) {
     if (loss_cumulative) {
-      begs <- as.data.frame(table(df_calls[idx & df_calls$type=='Loss', beg_pos]))
+      begs <- as.data.frame(table(df_calls[idx & df_calls$type == 'Loss', beg_pos]))
       begs$Var1 <- as.numeric(as.character(begs$Var1))
-      ends <- as.data.frame(table(df_calls[idx & df_calls$type=='Loss', end_pos]))
+      ends <- as.data.frame(table(df_calls[idx & df_calls$type == 'Loss', end_pos]))
       ends$Var1 <- as.numeric(as.character(ends$Var1))
-      df <- merge(begs, ends, by='Var1', all=TRUE)
+      df <- merge(begs, ends, by = 'Var1', all = TRUE)
       df[is.na(df)] <- 0
-      df_loss <- data.frame(x=rep(df$Var1, each=2), y=c(0, head(rep(cumsum(df$Freq.x-df$Freq.y), each=2), -1)))
-      p <- p + geom_line(data=df_loss, aes(x=x/1e6, y=sum(idx) / 20 * (21 + 4 * y/max(y))), color = 'blue')
+      df_loss <- data.frame(x = rep(df$Var1, each = 2), y = c(0, head(rep(cumsum(df$Freq.x-df$Freq.y), each = 2), -1)))
+      p <- p + geom_line(data = df_loss, aes(x = x/1e6, y = sum(idx) / 20 * (21 + 4 * y/max(y))), color = 'blue')
     }
 
     if (cn_loh_cumulative) {
-      begs <- as.data.frame(table(df_calls[idx & df_calls$type=='CN-LOH', beg_pos]))
+      begs <- as.data.frame(table(df_calls[idx & df_calls$type == 'CN-LOH', beg_pos]))
       begs$Var1 <- as.numeric(as.character(begs$Var1))
-      ends <- as.data.frame(table(df_calls[idx & df_calls$type=='CN-LOH', end_pos]))
+      ends <- as.data.frame(table(df_calls[idx & df_calls$type == 'CN-LOH', end_pos]))
       ends$Var1 <- as.numeric(as.character(ends$Var1))
-      df <- merge(begs, ends, by='Var1', all=TRUE)
+      df <- merge(begs, ends, by = 'Var1', all = TRUE)
       df[is.na(df)] <- 0
-      df_cnloh <- data.frame(x=rep(df$Var1, each=2), y=c(0, head(rep(cumsum(df$Freq.x-df$Freq.y), each=2), -1)))
-      p <- p + geom_line(data=df_cnloh, aes(x=x/1e6, y=sum(idx) / 20 * (21 + 4 * y/max(y))), color = 'orange')
+      df_cnloh <- data.frame(x = rep(df$Var1, each = 2), y = c(0, head(rep(cumsum(df$Freq.x-df$Freq.y), each = 2), -1)))
+      p <- p + geom_line(data = df_cnloh, aes(x = x/1e6, y = sum(idx) / 20 * (21 + 4 * y/max(y))), color = 'orange')
     }
 
     if (gain_cumulative) {
-      begs <- as.data.frame(table(df_calls[idx & df_calls$type=='Gain', beg_pos]))
+      begs <- as.data.frame(table(df_calls[idx & df_calls$type == 'Gain', beg_pos]))
       begs$Var1 <- as.numeric(as.character(begs$Var1))
-      ends <- as.data.frame(table(df_calls[idx & df_calls$type=='Gain', end_pos]))
+      ends <- as.data.frame(table(df_calls[idx & df_calls$type == 'Gain', end_pos]))
       ends$Var1 <- as.numeric(as.character(ends$Var1))
-      df <- merge(begs, ends, by='Var1', all=TRUE)
+      df <- merge(begs, ends, by = 'Var1', all = TRUE)
       df[is.na(df)] <- 0
-      df_cnloh <- data.frame(x=rep(df$Var1, each=2), y=c(0, head(rep(cumsum(df$Freq.x-df$Freq.y), each=2), -1)))
-      p <- p + geom_line(data=df_cnloh, aes(x=x/1e6, y=sum(idx) / 20 * (21 + 4 * y/max(y))), color = 'red')
+      df_cnloh <- data.frame(x = rep(df$Var1, each = 2), y = c(0, head(rep(cumsum(df$Freq.x-df$Freq.y), each = 2), -1)))
+      p <- p + geom_line(data = df_cnloh, aes(x = x/1e6, y = sum(idx) / 20 * (21 + 4 * y/max(y))), color = 'red')
     }
 
     p <- p  +

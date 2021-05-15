@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2021-03-15"
+#define EXTENDFMT_VERSION "2021-05-14"
 
 /******************************************
  * CIRCULAR BUFFER                        *
@@ -231,7 +231,7 @@ static const char *usage_text(void) {
            "Usage: bcftools +extendFMT [options] --format <ID> <in.vcf.gz>\n"
            "\n"
            "Plugin options:\n"
-           "    -f, --format <tag>                 ID of format field to be extended\n"
+           "    -f, --format <tag>                 FORMAT tag to be extended\n"
            "    -p, --phase                        whether the format to be extended is for phased heterozygotes\n"
            "    -d, --dist <int>                   maximum distance used to extend the calls [1e6]\n"
            "        --no-version                   do not append version and command line to the header\n"
@@ -364,7 +364,6 @@ int run(int argc, char **argv) {
         case 8:
             record_cmd_line = 0;
             break;
-
         case 't':
             targets_list = optarg;
             break;
@@ -379,7 +378,6 @@ int run(int argc, char **argv) {
             regions_list = optarg;
             regions_is_file = 1;
             break;
-
         case 's':
             sample_names = optarg;
             break;

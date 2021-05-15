@@ -13,6 +13,7 @@ This page contains instructions for how to run the <a href="mocha.wdl">MoChA WDL
    * [Affymetrix Example](#affymetrix-example)
    * [Imputation Pipeline](#imputation-pipeline)
    * [Allelic Shift Pipeline](#allelic-shift-pipeline)
+   * [Polygenic Score Pipeline](#polygenic-score-pipeline)
    * [Running with Terra](#running-with-terra)
    * [Running with Cromwell on Google Cloud Platform](#running-with-cromwell-on-google-cloud-platform)
    * [Filtering Output Calls](#filtering-output-calls)
@@ -132,7 +133,7 @@ Allowed columns in the batch table:
 
 Some files in this table can be provided in gzip format and the **sam** alignment file can be provided either as a SAM or as a BAM file. The pipeline will process these seamlessly
 
-It is extremely important that the **batch_id** column contains unique IDs. Repeated IDs will cause undefined behavior. It is also equally important that, if the boolean **realign** variable is left to its default **false** value, then the **csv** manifest files must be provided with respect to the same reference genome as the one selected in the **ref_name** variable. A mismatch in the two references will cause undefined behavior. For newer DNA microarrays, Illumina follows a convention of providing manifest files ending with the **1** suffix for GRCh37 (e.g\. `Multi-EthnicGlobal_D1.csv`) amd ending with the **2** suffix for GRCh38 (e.g\. `Multi-EthnicGlobal_D2.csv`). We recommend to always use GRCh38 with the latter type of manifest files and, whenever GRCh38 manifests are not available from Illumina, to still use GRCh38 by setting the boolean **realign** variable to **true**
+It is extremely important that the **batch_id** column contains unique IDs. Repeated IDs will cause undefined behavior. You can use `awk -F"\t" 'x[$1]++' batch.tsv` to verify that the first column contains unique IDs. It is also equally important that, if the boolean **realign** variable is left to its default **false** value, then the **csv** manifest files must be provided with respect to the same reference genome as the one selected in the **ref_name** variable. A mismatch in the two references will cause undefined behavior. For newer DNA microarrays, Illumina follows a convention of providing manifest files ending with the **1** suffix for GRCh37 (e.g\. `Multi-EthnicGlobal_D1.csv`) amd ending with the **2** suffix for GRCh38 (e.g\. `Multi-EthnicGlobal_D2.csv`). We recommend to always use GRCh38 with the latter type of manifest files and, whenever GRCh38 manifests are not available from Illumina, to still use GRCh38 by setting the boolean **realign** variable to **true**
 
 If you are running the pipeline in **idat** mode, it is important that the **bpm** file name matches the internal descriptor file name or a safety check during the conversion from GTC to VCF will fail. You can verify the internal descriptor file name with the command `bcftools +gtc2vcf -b $bpm_file`. We have observed discrepancies only in old Illumina BPM manifest files. If necessary, you can use set the boolean flag **do_not_check_bpm** to turn off this safety check
 
@@ -178,7 +179,7 @@ The following are the primary options that you can set in the main input json fi
 | cnp_file               | String?  | file with location of copy number polymorphism [cnps.bed]                                         |
 | cyto_file              | String?  | file with location of cytoband regions [cytoBand.txt.gz]                                          |
 | panel_pfx              | String?  | prefix for phasing reference [CCDG_14151_B01_GRM_WGS_2020-08-05_/ALL.chr]                         |
-| panel_sfx              | String?  | suffix for phasing reference [.filtered.phased.bcf/.phase3_integrated.20130502.genotypes]         |
+| panel_sfx              | String?  | suffix for phasing reference [.filtered.phased.bcf/.phase3_integrated.20130502.genotypes.bcf]     |
 | panel_idx              | String?  | index extension for phasing reference [.bcf]                                                      |
 | n_panel_smpls          | Int?     | number of samples in phasing reference [3202/2504]                                                |
 | manifest_path          | String?  | path for manifest file resources if these are provided without path []                            |
@@ -189,22 +190,25 @@ The following are the primary options that you can set in the main input json fi
 | duplicate_samples_file | File?    | optional file with list of duplicate samples that should not be use in task vcf_qc                |
 | extra_xcl_vcf_file     | File?    | optional VCF file with list of additional variants to exclude from analysis, mostly for WGS data  |
 | phase_extra_args       | String?  | extra arguments for SHAPEIT4/Eagle                                                                |
-| mocha_extra_args       | String?  | extra arguments for MoChA                                                                         |
+| mocha_extra_args       | String?  | extra arguments for the MoChA plugin                                                              |
 | basic_bash_docker      | String?  | docker to run basic bash scripts [ubuntu:latest]                                                  |
 | pandas_docker          | String?  | docker to run task ref_scatter [amancevice/pandas:slim]                                           |
-| bcftools_docker        | String?  | docker to run tasks requiring BCFtools [us.gcr.io/mccarroll-mocha/bcftools:1.11-yyyymmdd]         |
-| iaap_cli_docker        | String?  | docker to run task idat2gtc [us.gcr.io/mccarroll-mocha/iaap_cli:1.11-yyyymmdd]                    |
-| autoconvert_docker     | String?  | docker to run task idat2gtc [us.gcr.io/mccarroll-mocha/autoconvert:1.11-yyyymmdd]                 |
-| apt_docker             | String?  | docker to run task cel2chp [us.gcr.io/mccarroll-mocha/apt:1.11-yyyymmdd]                          |
-| shapeit4_docker        | String?  | docker to run task vcf_phase [us.gcr.io/mccarroll-mocha/shapeit4:1.11-yyyymmdd]                   |
-| eagle_docker           | String?  | docker to run task vcf_phase [us.gcr.io/mccarroll-mocha/eagle:1.11-yyyymmdd]                      |
-| mocha_plot_docker      | String?  | docker to run tasks mocha_{plot,summary} [us.gcr.io/mccarroll-mocha/mocha_plot:1.11-yyyymmdd]     |
+| docker_registry        | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                             |
+| bcftools_docker        | String?  | docker to run tasks requiring BCFtools [bcftools:1.11-yyyymmdd]                                   |
+| iaap_cli_docker        | String?  | docker to run task idat2gtc [iaap_cli:1.11-yyyymmdd]                                              |
+| autoconvert_docker     | String?  | docker to run task idat2gtc [autoconvert:1.11-yyyymmdd]                                           |
+| apt_docker             | String?  | docker to run task cel2chp [apt:1.11-yyyymmdd]                                                    |
+| shapeit4_docker        | String?  | docker to run task vcf_phase [shapeit4:1.11-yyyymmdd]                                             |
+| eagle_docker           | String?  | docker to run task vcf_phase [eagle:1.11-yyyymmdd]                                                |
+| r_mocha_docker         | String?  | docker to run tasks mocha_{plot,summary} [r_mocha:1.11-yyyymmdd]                                  |
 
 The **ref_path** variable should contain the path to the genome reference resources. These are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a> for either the GRCh37 or GRCh38 human genome reference
 
 However, if you do not provide the **ref_path** variable, variables **ref_fasta**, **dup_file**, **genetic_map_file**, **cnp_file**, **cyto_file**, and **panel_pfx** will need to be provided with their full path. Also notice that the reference genome file should come with the fasta index file and, if you request the manifest files to be realigned, you will need to make sure it also comes with the five corresponding bwa index files. The fasta index file needs to be such that the first 23 entries correspond to the 22 human autosomes and chromosome X, in no specific order
 
 The **manifest_path** variable should contain the path to all the CSV/BPM/EGT/XML/ZIP/SAM files necessary to run the analyses. If these manifest files are located in different directories, then provide them with their full path and leave the **manifest_path** variable empty
+
+Docker images will be automatically pulled by the specified **docker_registry** Google bucket. As these GCR buckets are Requester pays buckets, if you run computations in locations separate from where these buckets are localized, you will incur some additional costs. Docker images are located in **us.gcr.io/mccarroll-mocha**, **eu.gcr.io/mccarroll-mocha**, and **asia.gcr.io/mccarroll-mocha** covering, respectively, US, EU, and ASIA <a href="https://cloud.google.com/storage/docs/locations">locations</a>. If you are planning to run the pipeline with resources other than Google Cloud, then you can also use your own container registry. If you are running Cromwell on a computational framework that will simply download the images once and then reuse them, then you can also use **gcr.io/mccarroll-mocha**
 
 Secondary Options
 =================
@@ -282,7 +286,7 @@ Then make sure you copy all the IDAT files in the `gs://{google-bucket}/idats` G
 Define options to run the WDL:
 ```json
 {
-  "mocha.sample_set": "hapmap370k",
+  "mocha.sample_set_id": "hapmap370k",
   "mocha.mode": "idat",
   "mocha.realign": true,
   "mocha.max_win_size_cm": 300.0,
@@ -291,9 +295,10 @@ Define options to run the WDL:
   "mocha.ref_path": "gs://{google-bucket}/GRCh38",
   "mocha.manifest_path": "gs://{google-bucket}/manifests",
   "mocha.data_path": "gs://{google-bucket}/idats",
-  "mocha.batch_tsv_file": "gs://{google-bucket}/hapmap370k.batch.tsv",
-  "mocha.sample_tsv_file": "gs://{google-bucket}/hapmap370k.sample.tsv",
+  "mocha.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
+  "mocha.sample_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.sample.tsv",
   "mocha.ped_file": "gs://{google-bucket}/hapmap370k.ped",
+  "mocha.docker_registry": "us.gcr.io/mccarroll-mocha",
   "mocha.do_not_check_bpm": true
 }
 ```
@@ -411,7 +416,7 @@ Then make sure you copy all the CEL files in the `gs://{google-bucket}/cels` Goo
 Define options to run the WDL:
 ```json
 {
-  "mocha.sample_set": "hapmapSNP6",
+  "mocha.sample_set_id": "hapmapSNP6",
   "mocha.mode": "cel",
   "mocha.realign": true,
   "mocha.max_win_size_cm": 100.0,
@@ -420,9 +425,10 @@ Define options to run the WDL:
   "mocha.ref_path": "gs://{google-bucket}/GRCh38",
   "mocha.manifest_path": "gs://{google-bucket}/manifests",
   "mocha.data_path": "gs://{google-bucket}/cels",
-  "mocha.batch_tsv_file": "gs://{google-bucket}/hapmapSNP6.batch.tsv",
-  "mocha.sample_tsv_file": "gs://{google-bucket}/hapmapSNP6.sample.tsv",
+  "mocha.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmapSNP6.batch.tsv",
+  "mocha.sample_tsv_file": "gs://{google-bucket}/tsvs/hapmapSNP6.sample.tsv",
   "mocha.ped_file": "gs://{google-bucket}/hapmapSNP6.ped",
+  "mocha.docker_registry": "us.gcr.io/mccarroll-mocha",
   "mocha.chip_type": ["GenomeWideEx_6"]
 }
 ```
@@ -519,11 +525,12 @@ The following are the primary options that you can set in the main input json fi
 | ref_n_chrs        | Int?           | number of chromosomes [23]                                                                             |
 | genetic_map_file  | String?        | genetic map [genetic_map_hg38_withX.txt.gz/genetic_map_hg19_withX.txt.gz]                              |
 | panel_pfx         | String?        | prefix for phasing reference [CCDG_14151_B01_GRM_WGS_2020-08-05_/ALL.chr]                              |
-| panel_sfx         | String?        | Suffix for phasing reference [.filtered.phased.bcf/.phase3_integrated.20130502.genotypes]              |
+| panel_sfx         | String?        | Suffix for phasing reference [.filtered.phased.bcf/.phase3_integrated.20130502.genotypes.bcf]          |
 | panel_idx         | String?        | index extension for phasing reference [.bcf]                                                           |
 | n_panel_smpls     | Int?           | number of samples in phasing reference [3202/2504]                                                     |
 | data_path         | String?        | path for data files (overrides **path** column in **batch_tsv_file**)                                  |
 | batch_tsv_file    | File           | TSV file with batch information                                                                        |
+| convert_panel     | Boolean?       | whether to convert the reference panel to IMP5 format [true]                                           |
 | beagle            | Boolean?       | whether to run Beagle5 rather than IMPUTE5 [false]                                                     |
 | out_ds            | Boolean?       | whether imputation VCFs should contain the FORMAT/DS field (Genotype dosages) [true]                   |
 | out_gp            | Boolean?       | whether imputation VCFs should contain the FORMAT/GP field (Genotype probabilities) [false]            |
@@ -531,9 +538,10 @@ The following are the primary options that you can set in the main input json fi
 | impute_extra_args | String?        | extra arguments for IMPUTE5/Beagle5                                                                    |
 | basic_bash_docker | String?        | docker to run basic bash scripts [ubuntu:latest]                                                       |
 | pandas_docker     | String?        | docker to run task ref_scatter [amancevice/pandas:slim]                                                |
-| bcftools_docker   | String?        | docker to run tasks requiring BCFtools [us.gcr.io/mccarroll-mocha/bcftools:1.11-yyyymmdd]              |
-| impute5_docker    | String?        | docker to run tasks requiring IMPUTE5 [us.gcr.io/mccarroll-mocha/impute5:1.11-yyyymmdd]                |
-| beagle5_docker    | String?        | docker to run tasks requiring Beagle5 [us.gcr.io/mccarroll-mocha/beagle5:1.11-yyyymmdd]                |
+| docker_registry   | String?        | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
+| bcftools_docker   | String?        | docker to run tasks requiring BCFtools [bcftools:1.11-yyyymmdd]                                        |
+| impute5_docker    | String?        | docker to run tasks requiring IMPUTE5 [impute5:1.11-yyyymmdd]                                          |
+| beagle5_docker    | String?        | docker to run tasks requiring Beagle5 [beagle5:1.11-yyyymmdd]                                          |
 
 Make sure all the `pgt_vcf_files` from the MoChA pipeline are first available in the `gs://{google-bucket}/vcfs` directory, together with the `vcf_files` including the MoChA calls. We strongly advise to use **max_win_size_cm** smaller than **30.0** as imputation of large chromosome windows can be prohibitevely memory intensive due to the high density of variants in the reference panels
 
@@ -543,14 +551,15 @@ Define options to run the WDL:
   "impute.sample_set_id": "hapmap370k",
   "impute.mode": "pgt",
   "impute.target": "ext",
-  "impute.batch_tsv_file": "gs://{google-bucket}/hapmap370k.batch.tsv",
+  "impute.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
   "impute.max_win_size_cm": 50.0,
   "impute.overlap_size_cm": 5.0,
   "impute.target_chrs": ["chr12", "chrX"],
   "impute.ref_name": "GRCh38",
   "impute.ref_path": "gs://{google-bucket}/GRCh38",
   "impute.data_path": "gs://{google-bucket}/vcfs",
-  "impute.beagle": false
+  "impute.beagle": false,
+  "mocha.docker_registry": "us.gcr.io/mccarroll-mocha"
 }
 ```
 
@@ -607,13 +616,12 @@ The following are the primary options that you can set in the main input json fi
 | batch_tsv_file    | File     | TSV file with batch information                                                               |
 | samples_file      | File?    | list of samples to include in the allelic shift analysis                                      |
 | drop_genotypes    | Boolean? | whether to drop genotypes after computing allelic shift counts [true]                         |
-| phred_score       | Boolean? | whether the binomial p-values should be recorded as phred scores [false]                      |
+| phred_score       | Boolean? | whether the binomial p-values should be recorded as phred scores [true]                       |
 | plot              | Boolean? | whether to generate a summary plot [true]                                                     |
 | basic_bash_docker | String?  | docker to run basic bash scripts [ubuntu:latest]                                              |
-| bcftools_docker   | String?  | docker to run tasks requiring BCFtools [us.gcr.io/mccarroll-mocha/bcftools:1.11-yyyymmdd]     |
-| mocha_plot_docker | String?  | docker to run tasks mocha_{plot,summary} [us.gcr.io/mccarroll-mocha/mocha_plot:1.11-yyyymmdd] |
-
-Make sure all the `chr#_imp_vcf_files` from the imputation pipeline are first available in the `gs://{google-bucket}/imp_vcfs` directory
+| docker_registry   | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                         |
+| bcftools_docker   | String?  | docker to run tasks requiring BCFtools [bcftools:1.11-yyyymmdd]                               |
+| r_mocha_docker    | String?  | docker to run tasks mocha_{plot,summary} [r_mocha:1.11-yyyymmdd]                              |
 
 If you wanted to study allelic shift for mosaic loss of chromosomes X (mLOX), you could define individuals with putative mLOX as follows:
 ```
@@ -632,10 +640,11 @@ Define options to run the WDL:
 {
   "shift.sample_set_id": "hapmap370k",
   "shift.region": "chrX",
-  "shift.samples_file": "gs://{google-bucket}/hapmap370k.mLOX.lines",
-  "shift.batch_tsv_file": "gs://{google-bucket}/hapmap370k.batch.tsv",
+  "shift.samples_file": "gs://{google-bucket}/tsvs/hapmap370k.mLOX.lines",
+  "shift.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
   "shift.ref_path": "gs://mccarroll-mocha/GRCh38",
-  "shift.data_path": "gs://{google-bucket}/imp_vcfs"
+  "shift.data_path": "gs://{google-bucket}/imp_vcfs",
+  "mocha.docker_registry": "us.gcr.io/mccarroll-mocha"
 }
 ```
 
@@ -654,6 +663,114 @@ bcftools merge --no-version -Ou -i AS:sum -m none hapmap370k.chrX.as.bcf hapmapS
   bcftools +mochatools --no-version -Ou -- --test AS | \
   bcftools query -i 'binom(INFO/AS)<1e-6' -f "%CHROM\t%POS\t%ID\t%REF\t%ALT\t%AS{0}\t%AS{1}\t%binom_AS\n"
 ```
+
+Polygenic Score Pipeline
+========================
+
+The following are the primary options that you can set in the main input json file for use with <a href="score.wdl">score.wdl</a>
+
+| key               | type           | description                                                                                            |
+|-------------------|----------------|--------------------------------------------------------------------------------------------------------|
+| sample_set_id     | String         | cohort name that will be used as prefix for temporary and output files                                 |
+| vcf               | Boolean?       | whether the input summary statistics files are in VCF format [false]                                   |
+| sample_header     | String?        | what column header to use for the column with samples IDs [sample_id]                                  |
+| region            | String?        | region to extract for polygenic score analysis                                                         |
+| tag               | String?        | VCF format tag to use for polygenic score computation among GP, AP, HDS, DS, GT, and AS                |
+| ext_string        | String?        | extension string for the output polygenic score table [scores]                                         |
+| summary_path      | String?        | path for summary statistics files (unless all files are provided with full path)                       |
+| summary_files     | Array[String]  | summary statistics files                                                                               |
+| summary_idxs      | Array[String]? | summary statistics files indexes (if files provided as VCF)                                            |
+| q_score_thr       | Array[Float]?  | list of p-value thresholds                                                                             |
+| covars_file       | File?          | covariate file to be used to computed adjusted polygenic scores                                        |
+| ref_name          | String?        | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]                   |
+| ref_path          | String?        | path for reference genome resources (needed unless all resources are provided with full path)          |
+| ref_fasta_fai     | String?        | reference sequence index [GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai/human_g1k_v37.fasta.fai] |
+| ref_n_chrs        | Int?           | number of chromosomes [23]                                                                             |
+| data_path         | String?        | path for data files (overrides **path** column in **batch_tsv_file**)                                  |
+| batch_tsv_file    | File           | TSV file with batch information                                                                        |
+| samples_file      | File?          | list of samples to include in the polygenic score analysis                                             |
+| exclude_str       | String?        | exclusion criterias for variants (e.g. [INFO<0.8]) not to be used with include_str                     |
+| include_str       | String?        | inclusion criterias for variants (e.g. [AF>0.01 && AF<0.99]) not to be used with exclude_str           |
+| basic_bash_docker | String?        | docker to run basic bash scripts [ubuntu:latest]                                                       |
+| docker_registry   | String?        | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
+| bcftools_docker   | String?        | docker to run tasks requiring BCFtools [bcftools:1.11-yyyymmdd]                                        |
+| r_mocha_docker    | String?        | docker to run tasks mocha_{plot,summary} [r_mocha:1.11-yyyymmdd]                                       |
+
+Download polygenic scores summary statistics for blood cell counts and liftOver to GRCh38:
+```
+for i in {163..191}; do wget http://ftp.ebi.ac.uk/pub/databases/spot/pgs/scores/PGS000$i/ScoringFiles/PGS000$i.txt.gz; done
+wget http://hgdownload.cse.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz
+wget http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/liftOver
+chmod a+x liftOver
+for i in {163..191}; do
+  (zcat PGS000$i.txt.gz | head -n10;
+  zcat PGS000$i.txt.gz | grep -v ^# | \
+    awk -F"\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+    NR>1 {chr="chr"$(f["chr_name"]); pos=$(f["chr_position"]); ref=$(f["reference_allele"])
+    gsub("\t", "@", $0); printf "%s\t%d\t%d\t%s\t0\t+\n", chr, pos-1, pos+length(ref), $0}' | \
+    ./liftOver /dev/stdin hg19ToHg38.over.chain.gz /dev/stdout /dev/stderr) | \
+    awk '{rev["A"]="T"; rev["C"]="G"; rev["G"]="C"; rev["T"]="A"}
+    NR==10 {for (i=1; i<=NF; i++) f[$i] = i; snp=f["rsID"]; chr=f["chr_name"]; pos=f["chr_position"];
+    ref=f["reference_allele"]; alt=f["effect_allele"]} NR<=10
+    NR>10 {split($4,a,"@"); a[chr]=$1; a[pos]=$2+1;
+    if ($6=="-") {gsub("[ATCG]","[TAGC]",a[ref]); gsub("[ATCG]","[TAGC]",a[alt]);
+    x=""; for (i=length(a[ref]); i>0; i--) x=x substr(a[ref],i,1); a[ref]=x;
+    x=""; for (i=length(a[alt]); i>0; i--) x=x substr(a[alt],i,1); a[alt]=x}
+    for (i=1; i<length(a); i++) printf "%s\t",a[i]; printf a[length(a)]"\n"}' | gzip > PGS000$i.hg38.txt.gz
+done
+gsutil -m cp PGS000{163..191}.hg38.txt.gz gs://{google-bucket}/scores/
+```
+
+Define options to run the WDL to compute the polygenic scores related to mLOX:
+```json
+{
+  "score.sample_set_id": "hapmap370k",
+  "score.region": "chrX",
+  "score.tag": "AS",
+  "score.ext_string": "mLOX",
+  "score.summary_path": "gs://{google-bucket}/GRCh38/scores",
+  "score.summary_files": ["PGS000163.hg38.txt.gz", "PGS000164.hg38.txt.gz", "PGS000165.hg38.txt.gz", "PGS000166.hg38.txt.gz",
+    "PGS000167.hg38.txt.gz", "PGS000168.hg38.txt.gz", "PGS000169.hg38.txt.gz", "PGS000170.hg38.txt.gz", "PGS000171.hg38.txt.gz",
+    "PGS000172.hg38.txt.gz", "PGS000173.hg38.txt.gz", "PGS000174.hg38.txt.gz", "PGS000175.hg38.txt.gz", "PGS000176.hg38.txt.gz",
+    "PGS000177.hg38.txt.gz", "PGS000178.hg38.txt.gz", "PGS000179.hg38.txt.gz", "PGS000180.hg38.txt.gz", "PGS000181.hg38.txt.gz",
+    "PGS000182.hg38.txt.gz", "PGS000183.hg38.txt.gz", "PGS000184.hg38.txt.gz", "PGS000185.hg38.txt.gz", "PGS000186.hg38.txt.gz",
+    "PGS000187.hg38.txt.gz", "PGS000188.hg38.txt.gz", "PGS000189.hg38.txt.gz", "PGS000190.hg38.txt.gz", "PGS000191.hg38.txt.gz"],
+  "score.samples_file": "gs://{google-bucket}/tsvs/hapmap370k.mLOX.lines",
+  "score.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
+  "score.ref_path": "gs://mccarroll-mocha/GRCh38",
+  "score.data_path": "gs://{google-bucket}/imp_vcfs",
+  "score.docker_registry": "us.gcr.io/mccarroll-mocha"
+}
+```
+
+Define options to run the WDL to compute genome-wide polygenic scores for all samples including adjusted polygenic scores if a table `hapmap370k.pcs.tsv` with principal components is available:
+```json
+{
+  "score.sample_set_id": "hapmap370k",
+  "score.tag": "DS",
+  "score.summary_path": "gs://{google-bucket}/scores",
+  "score.summary_files": ["PGS000163.hg38.txt.gz", "PGS000164.hg38.txt.gz", "PGS000165.hg38.txt.gz", "PGS000166.hg38.txt.gz",
+    "PGS000167.hg38.txt.gz", "PGS000168.hg38.txt.gz", "PGS000169.hg38.txt.gz", "PGS000170.hg38.txt.gz", "PGS000171.hg38.txt.gz",
+    "PGS000172.hg38.txt.gz", "PGS000173.hg38.txt.gz", "PGS000174.hg38.txt.gz", "PGS000175.hg38.txt.gz", "PGS000176.hg38.txt.gz",
+    "PGS000177.hg38.txt.gz", "PGS000178.hg38.txt.gz", "PGS000179.hg38.txt.gz", "PGS000180.hg38.txt.gz", "PGS000181.hg38.txt.gz",
+    "PGS000182.hg38.txt.gz", "PGS000183.hg38.txt.gz", "PGS000184.hg38.txt.gz", "PGS000185.hg38.txt.gz", "PGS000186.hg38.txt.gz",
+    "PGS000187.hg38.txt.gz", "PGS000188.hg38.txt.gz", "PGS000189.hg38.txt.gz", "PGS000190.hg38.txt.gz", "PGS000191.hg38.txt.gz"],
+  "score.covars_file": "gs://{google-bucket}/tsvs/hapmap370k.pcs.tsv",
+  "score.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
+  "score.ref_path": "gs://mccarroll-mocha/GRCh38",
+  "score.data_path": "gs://{google-bucket}/imp_vcfs",
+  "score.docker_registry": "us.gcr.io/mccarroll-mocha"
+}
+```
+
+The `batch_tsv_file` input table should look like this:
+
+| batch_id | chr1_imp_vcf             | chr1_imp_vcf_index           | ... | chrX_imp_vcf             | chrX_imp_vcf_index           |
+|----------|--------------------------|------------------------------|-----|--------------------------|------------------------------|
+| A        | hapmap370k.A.chr1.as.bcf | hapmap370k.A.chr1.as.bcf.csi | ... | hapmap370k.A.chrX.as.bcf | hapmap370k.A.chrX.as.bcf.csi |
+| B        | hapmap370k.B.chr1.as.bcf | hapmap370k.B.chr1.as.bcf.csi | ... | hapmap370k.B.chrX.as.bcf | hapmap370k.B.chrX.as.bcf.csi |
+
+The `output_tsv_file` from the imputation pipeline will include these columns
 
 Running with Terra
 ==================
@@ -723,7 +840,7 @@ $ gcloud compute scp {google-project}.key.json INSTANCE-ID: --project mccarroll-
 ```
 $ gcloud compute ssh INSTANCE-ID --project {google-project} --zone us-central1-a -- -L 8000:localhost:8000
 ```
-* Later, if you are not running any computations, to avoid incurring unnecessary costs, make sure you stop the virtual machine with the following command:
+* As the suggested VM costs approximately $35/month to run, when you are not running any computations, to avoid incurring unnecessary costs, you can stop the virtual machine with the following command:
 ```
 $ gcloud compute instances stop INSTANCE-ID --project {google-project} --zone us-central1-a
 ```
@@ -770,7 +887,7 @@ google {
 ```
 * Change `auth = "application-default"` to `auth = "service-account"` in the `PAPIv2.conf` configuration file in both instances where it occurs within the **backend** configuration stanza
 * Change `project = "my-cromwell-workflows"` and `project = "google-billing-project"` to `project = "{google-project}"` in the `PAPIv2.conf` configuration file within the **backend** configuration stanza
-* Change `root = "gs://my-cromwell-workflows-bucket"` to `root = "gs://{google-bucket}/cromwell/cromwell-executions"` in the `PAPIv2.conf` configuration file within the **backend** configuration stanza
+* Change `root = "gs://my-cromwell-workflows-bucket"` to `root = "gs://{google-bucket}/cromwell/executions"` in the `PAPIv2.conf` configuration file within the **backend** configuration stanza
 * As Cromwell will need to load some input files to properly organize the batching, it will need the <a href="https://cromwell.readthedocs.io/en/stable/filesystems/Filesystems/#engine-filesystems">engine filesystem</a> activated for reading files, Add the **engine** configuration stanza to the `PAPIv2.conf` configuration file (leave `service-account` verbatim):
 ```
 engine {
@@ -791,18 +908,17 @@ database {
     url = "jdbc:mysql://localhost/cromwell?rewriteBatchedStatements=true"
     user = "user"
     password = "pass"
-    connectionTimeout = 5000
+    connectionTimeout = 60000
   }
 }
 ```
-* Activate <a href="https://cromwell.readthedocs.io/en/stable/cromwell_features/CallCaching">CallCaching</a> to allow to re-run jobs without re-run tasks that have already completed by adding the **call-caching** configuration stanza:
+* Activate <a href="https://cromwell.readthedocs.io/en/stable/cromwell_features/CallCaching">CallCaching</a> to allow to re-run jobs without re-running tasks that have already completed by adding the **call-caching** configuration stanza:
 ```
 call-caching {
   enabled = true
   invalidate-bad-cache-results = true
 }
 ```
-* Optionally, to avoid the database taking more and more space over time and possibly running out of disk space on the VM, add the additional **service** configuration stanza to the `PAPIv2.conf` configuration file to clear the metadata in the database as explained <a href="https://cromwell.readthedocs.io/en/stable/Configuring/#hybrid-metadata-storage-classic-carbonite">here</a>. Alternatively you will be able to flush the database manually when needed
 * If you want to configure the directory of the mysql database to something other than `/var/lib/mysql` make sure to set the `datadir` variable in the `/etc/mysql/mysql.conf.d/mysqld.cnf` file
 * Start the mySQL server and initialize the root user with the following command (use cromwell as the default root password):
 ```
@@ -904,11 +1020,13 @@ $ sudo mysql --user=root --password=cromwell --execute "DROP DATABASE cromwell"
 $ sudo mysql --user=root --password=cromwell --execute "CREATE DATABASE cromwell"
 $ (java -XX:MaxRAMPercentage=90 -Dconfig.file=PAPIv2.conf -jar cromwell-XY.jar server &)
 ```
-* If you want to clean temporary files and log files, after you have properly moved all the output files you need, you can delete the workflow executions directory defined as `root` in the `PAPIv2.conf` configuration file. Remember that failure to do proper cleanup could cause you to incur unexpected storage costs. After making sure there are no active jobs running with the Cromwell server, you can remove the execution directory with the following command:
+* If you want to clean temporary files and log files, after you have properly moved all the output files you need, you can delete the workflow executions directory defined as `root` in the `PAPIv2.conf` configuration file. Remember that failure to do proper cleanup could cause you to incur unexpected storage costs. After making sure there are no active jobs running with the Cromwell server, you can remove the executions and logs directory with the following command:
 ```
-$ gsutil -m rm -r gs://{google-bucket}/cromwell/cromwell-executions
+$ gsutil -m rm -r gs://{google-bucket}/cromwell/executions gs://{google-bucket}/cromwell/call_logs
 ```
 Notice that either flushing the metadata from the database or removing the workflow executions files will invalidate the cache from previously run tasks
+
+When running computations over large cohorts, it is <a href="https://cloud.google.com/compute/docs/instances/create-start-preemptible-instance#best_practices">best practice</a> to run the jobs on nights and weekends, as this will increase the chances that preemptible jobs will not be stopped and replaced by a non-preemptible version. This will make jobs run both faster and cheaper
 
 Troubleshooting
 ===============
@@ -1114,7 +1232,8 @@ RUN apt-get -qqy update --fix-missing && \
                  bcftools \
                  r-cran-optparse \
                  r-cran-ggplot2 \
-                 r-cran-data.table && \
+                 r-cran-data.table \
+                 r-cran-reshape2 && \
     wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-20210315_amd64.deb && \
     dpkg -i bio-mocha_1.11-20210315_amd64.deb && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \

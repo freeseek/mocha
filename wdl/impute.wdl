@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2021 Giulio Genovese
 ##
-## Version 2021-03-15
+## Version 2021-05-14
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs impute5 or beagle5 on a set of VCFs
 ##
 ## Cromwell version support
-## - Successfully tested on v58
+## - Successfully tested on v61
 ##
 ## Distributed under terms of the MIT License
 
@@ -46,6 +46,7 @@ workflow impute {
 
     String? data_path
     File batch_tsv_file # batch_id n_smpls path vcf vcf_index pgt_vcf pgt_vcf_index chr1_imp_vcf chr1_imp_vcf_index ...
+    Boolean convert_panel = true
     Boolean beagle = false
     Boolean out_ds = true
     Boolean out_gp = false
@@ -53,12 +54,15 @@ workflow impute {
     String? impute_extra_args
     String basic_bash_docker = "ubuntu:latest"
     String pandas_docker = "amancevice/pandas:slim"
-    String bcftools_docker = "us.gcr.io/mccarroll-mocha/bcftools:1.11-20210315"
-    String impute5_docker = "us.gcr.io/mccarroll-mocha/impute5:1.11-20210315"
-    String beagle5_docker = "us.gcr.io/mccarroll-mocha/beagle5:1.11-20210315"
+    String docker_registry = "us.gcr.io/mccarroll-mocha"
+    String bcftools_docker = "bcftools:1.11-20210514"
+    String impute5_docker = "impute5:1.11-20210514"
+    String beagle5_docker = "beagle5:1.11-20210514"
   }
 
-  String ref_path_with_sep = if defined(ref_path) then select_first([ref_path]) + (if sub(select_first([ref_path]), "/$", "") != select_first([ref_path]) then "" else "/") else ""
+  String docker_registry_with_sep = docker_registry + if docker_registry != "" && docker_registry == sub(docker_registry, "/$", "") then "/" else ""
+
+  String ref_path_with_sep = select_first([ref_path, ""]) + if defined(ref_path) && select_first([ref_path]) == sub(select_first([ref_path]), "/$", "") then "/" else ""
   Reference ref = object {
     fasta_fai: ref_path_with_sep + select_first([ref_fasta_fai, if ref_name == "GRCh38" then "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai" else if ref_name == "GRCh37" then "human_g1k_v37.fasta.fai" else None]),
     n_chrs: select_first([ref_n_chrs, 23]),
@@ -106,14 +110,14 @@ workflow impute {
 
     # scatter reference panel
     scatter (idx in range(n_chrs)) {
-      call get_markers as get_panel_markers { input: vcf_idx = ref.panel_pfx + chrs[idx] + ref.panel_sfx + ref.panel_idx, docker = bcftools_docker }
+      call get_markers as get_panel_markers { input: vcf_idx = ref.panel_pfx + chrs[idx] + ref.panel_sfx + ref.panel_idx, docker = docker_registry_with_sep + bcftools_docker }
       if (length(chr_map[(chrs[idx])]) > 1) {
         call vcf_scatter as panel_scatter {
           input:
             vcf_file = ref.panel_pfx + chrs[idx] + ref.panel_sfx,
             intervals_bed = ref_scatter.intervals_bed,
             chr = chrs[idx],
-            docker = bcftools_docker
+            docker = docker_registry_with_sep + bcftools_docker
         }
       }
       Array[File] panel_scatter_vcf_files = select_first([panel_scatter.vcf_files, [ref.panel_pfx + chrs[idx] + ref.panel_sfx]])
@@ -130,8 +134,9 @@ workflow impute {
           vcf_file = panel_flatten_vcf_files[idx],
           vcf_idx = panel_flatten_vcf_idxs[idx],
           chr = intervals_tbl[0][idx],
+          convert = convert_panel,
           beagle = beagle,
-          docker = if beagle then beagle5_docker else impute5_docker
+          docker = if beagle then docker_registry_with_sep + beagle5_docker else docker_registry_with_sep + impute5_docker
       }
     }
 
@@ -141,7 +146,7 @@ workflow impute {
         input:
           vcf_file = data_paths_with_sep[idx] + batch_tbl["pgt_vcf"][idx],
           intervals_bed = ref_scatter.intervals_bed,
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
     }
 
@@ -159,8 +164,8 @@ workflow impute {
             genetic_map_file = ref.genetic_map_file,
             n_panel_smpls = ref.n_panel_smpls,
             n_panel_markers = n_panel_flatten_markers[p.right],
-            panel_genotypes_file = init_panel.panel_genotypes_file[p.right],
-            panel_genotypes_idx = init_panel.panel_genotypes_idx[p.right],
+            panel_genotypes_file = select_first([init_panel.panel_genotypes_file[p.right], panel_flatten_vcf_files[p.right]]),
+            panel_genotypes_idx = select_first([init_panel.panel_genotypes_idx[p.right], panel_flatten_vcf_idxs[p.right]]),
             panel_sites_file = init_panel.panel_sites_file[p.right],
             panel_sites_idx = init_panel.panel_sites_idx[p.right],
             ref_fasta_fai = ref.fasta_fai,
@@ -171,7 +176,7 @@ workflow impute {
             out_gp= out_gp,
             out_ap= out_ap,
             impute_extra_args = impute_extra_args,
-            docker = if beagle then beagle5_docker else impute5_docker
+            docker = if beagle then docker_registry_with_sep + beagle5_docker else docker_registry_with_sep + impute5_docker
         }
       }
     }
@@ -186,7 +191,7 @@ workflow impute {
             n_markers = get_panel_markers.n[p.right],
             vcf_files = idx2vcf_files[(p.left * n_chrs + p.right)],
             filebase = basename(basename(basename(batch_tbl["pgt_vcf"][p.left], ".bcf"), ".vcf.gz"), ".pgt") + ".chr" + chr_strings[p.right] + ".imp",
-            docker = bcftools_docker
+            docker = docker_registry_with_sep + bcftools_docker
         }
       }
       File chr_imp_vcf_files = select_first([vcf_ligate.vcf_file, idx2vcf_files[(p.left * n_chrs + p.right)][0]])
@@ -202,7 +207,7 @@ workflow impute {
                       else data_paths_with_sep[p.left] + batch_tbl[("chr" +  chr_strings[p.right] + "_imp_vcf")][p.left]
       File vcf_idx = if mode == "pgt" then select_first([chr_imp_vcf_idxs])[(p.left * n_chrs + p.right)]
                      else data_paths_with_sep[p.left] + batch_tbl[("chr" +  chr_strings[p.right] + "_imp_vcf_index")][p.left]
-      call get_markers { input: vcf_idx = vcf_idx, docker = bcftools_docker }
+      call get_markers { input: vcf_idx = vcf_idx, docker = docker_registry_with_sep + bcftools_docker }
       call vcf_extend {
         input:
           n_smpls = n_smpls[p.left],
@@ -213,7 +218,7 @@ workflow impute {
           annot_vcf_idx = data_paths_with_sep[p.left] + batch_tbl["vcf_index"][p.left],
           format_id = format_id,
           ext_string = ext_string,
-          docker = bcftools_docker
+          docker = docker_registry_with_sep + bcftools_docker
       }
     }
   }
@@ -417,7 +422,7 @@ task vcf_scatter {
     bcftools annotate \
       --no-version \
       --output-type u \
-      --remove ID,QUAL,INFO,^FMT/GT \
+      --remove ID,QUAL,FILTER,INFO,^FMT/GT \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       "~{basename(vcf_file)}" | \
     bcftools +scatter \
@@ -461,6 +466,7 @@ task init_panel {
     File vcf_file
     File? vcf_idx
     String chr
+    Boolean convert = true
     Boolean beagle = false
 
     String docker
@@ -488,7 +494,7 @@ task init_panel {
         --no-version \
         --output "~{filebase}.sites.bcf" \
         --output-type b \
-        --remove ID,QUAL,FILTER,INFO
+        --remove ID,QUAL,FILTER,INFO,^FMT/GT
     bcftools index --force "~{filebase}.sites.bcf"
     ~{if beagle then
         (if chr != "X" && chr != "chrX" then
@@ -497,18 +503,19 @@ task init_panel {
           "bcftools +fixploidy --no-version \"" + basename(vcf_file) + "\" | \\\n" +
           "  sed 's/0\\/0/0|0/g;s/1\\/1/1|1/g' | \\\n") +
         "  java -jar /usr/bin/bref3.jar > \"" + filebase +  ".bref3\""
-      else
+      else if convert then
         "imp5Converter \\\n" +
         "  --h \"" + basename(vcf_file) + "\" \\\n" +
         "  --r " + chr + " \\\n" +
-        "  --o \"" + filebase + ".imp5\""}
+        "  --o \"" + filebase + ".imp5\""
+      else ""}
     rm "~{basename(vcf_file)}"
     ~{if defined(vcf_idx) then "rm \"" + basename(select_first([vcf_idx])) + "\"" else ""}
   >>>
 
   output {
-    File panel_genotypes_file = filebase + (if beagle then ".bref3" else ".imp5")
-    File? panel_genotypes_idx = if beagle then None else filebase + ".imp5.idx"
+    File? panel_genotypes_file = if beagle then filebase + ".bref3" else if convert then filebase + ".imp5" else None
+    File? panel_genotypes_idx = if !beagle && convert then filebase + ".imp5.idx" else None
     File panel_sites_file = filebase + ".sites.bcf"
     File panel_sites_idx = filebase + ".sites.bcf.csi"
   }

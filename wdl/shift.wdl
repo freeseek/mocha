@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2021 Giulio Genovese
 ##
-## Version 2021-03-15
+## Version 2021-05-14
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
-## This WDL workflow runs impute5 or beagle5 on a set of VCFs
+## This WDL workflow runs allelic shift imbalance analysis in a given region
 ##
 ## Cromwell version support
-## - Successfully tested on v58
+## - Successfully tested on v61
 ##
 ## Distributed under terms of the MIT License
 
@@ -31,14 +31,17 @@ workflow shift {
     File batch_tsv_file # batch_id path chr1_imp_vcf chr1_imp_vcf_index chr2_imp_vcf chr2_imp_vcf_index ...
     File? samples_file
     Boolean drop_genotypes = true
-    Boolean phred_score = false
+    Boolean phred_score = true
     Boolean plot = true
     String basic_bash_docker = "ubuntu:latest"
-    String bcftools_docker = "us.gcr.io/mccarroll-mocha/bcftools:1.11-20210315"
-    String mocha_plot_docker = "us.gcr.io/mccarroll-mocha/mocha_plot:1.11-20210315"
+    String docker_registry = "us.gcr.io/mccarroll-mocha"
+    String bcftools_docker = "bcftools:1.11-20210514"
+    String r_mocha_docker = "r_mocha:1.11-20210514"
   }
 
-  String ref_path_with_sep = if defined(ref_path) then select_first([ref_path]) + (if sub(select_first([ref_path]), "/$", "") != select_first([ref_path]) then "" else "/") else ""
+  String docker_registry_with_sep = docker_registry + if docker_registry != "" && docker_registry == sub(docker_registry, "/$", "") then "/" else ""
+
+  String ref_path_with_sep = select_first([ref_path, ""]) + if defined(ref_path) && select_first([ref_path]) == sub(select_first([ref_path]), "/$", "") then "/" else ""
   Reference ref = object {
     cyto_file: if defined(ref_path) || defined(cyto_file) then ref_path_with_sep + select_first([cyto_file, "cytoBand.txt.gz"]) else None
   }
@@ -68,7 +71,7 @@ workflow shift {
         samples_file = samples_file,
         as_id = as_id,
         drop_genotypes = drop_genotypes,
-        docker = bcftools_docker
+        docker = docker_registry_with_sep + bcftools_docker
     }
   }
 
@@ -80,7 +83,7 @@ workflow shift {
       ext_string = ext_string,
       filebase = sample_set_id + "." + sub(region, "[:-]", "_"),
       phred_score = phred_score,
-      docker = bcftools_docker
+      docker = docker_registry_with_sep + bcftools_docker
   }
 
   if (plot) {
@@ -91,7 +94,7 @@ workflow shift {
         region = region,
         cyto_file = ref.cyto_file,
         filebase = sample_set_id + "." + sub(region, "[:-]", "_"),
-        docker = mocha_plot_docker
+        docker = docker_registry_with_sep + r_mocha_docker
     }
   }
 
@@ -129,12 +132,16 @@ task vcf_summary {
     mv "~{vcf_file}" .
     mv "~{vcf_idx}" .
     ~{if defined(samples_file) then "mv \"" + select_first([samples_file]) + "\" ." else ""}
+    bcftools annotate \
+      --no-version \
+      --output-type u \
+      --regions "~{region}" \
+      --remove ID,QUAL,FILTER,INFO,^FMT/GT,FMT/~{as_id} \
+      "~{basename(vcf_file)}" | \
     bcftools +mochatools \
       --no-version \
       --output-type b \
       --output "~{filebase}.~{ext_string}.bcf" \
-      --regions "~{region}" \
-      "~{basename(vcf_file)}" \
       -- --summary ~{as_id} \
       ~{if defined(samples_file) then "--samples-file \"" + basename(select_first([samples_file])) + "\" \\\n" +
       "  --force-samples" else ""} \
@@ -167,7 +174,7 @@ task vcf_merge {
     String as_id
     String ext_string
     String filebase
-    Boolean phred_score = false
+    Boolean phred_score = true
 
     String docker
     Int cpu = 1
@@ -193,11 +200,11 @@ task vcf_merge {
       --file-list $vcf_files \
       --merge none | \
     bcftools +mochatools \
-    --no-version \
-    --output-type b \
-    --output "~{filebase}.~{ext_string}.bcf" \
-    -- --test ~{as_id} \
-    ~{if phred_score then "--phred" else ""}
+      --no-version \
+      --output-type b \
+      --output "~{filebase}.~{ext_string}.bcf" \
+      -- --test ~{as_id} \
+      ~{if phred_score then "--phred" else ""}
     bcftools index --force "~{filebase}.~{ext_string}.bcf"
     cat $vcf_files $vcf_idxs | tr '\n' '\0' | xargs -0 rm
   >>>
