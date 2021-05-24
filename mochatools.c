@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2021-05-14"
+#define MOCHATOOLS_VERSION "2021-05-24"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
@@ -926,7 +926,7 @@ ret:
         bcf_get_info_int32(args->out_hdr, rec, args->info_str, &args->info_arr, &args->m_info);
         if (info->len == 2) {
             double phred_pval = phred_pbinom(args->info_arr[0], args->info_arr[0] + args->info_arr[1]);
-            ret[0] = (float)(args->phred ? phred_pval : -0.1 * M_LN10 * phred_pval);
+            ret[0] = (float)(args->phred ? phred_pval : exp(-0.1 * M_LN10 * phred_pval));
             bcf_update_info_float(args->out_hdr, rec, args->test_str.s, &ret, 1);
         } else {
             double left, right, fisher;
