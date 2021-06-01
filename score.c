@@ -33,8 +33,9 @@
 #include <htslib/synced_bcf_reader.h>
 #include <htslib/kseq.h>
 #include <htslib/khash_str2int.h>
-#include "mocha.h"
+#include "mocha.h" // tsv_init_delimiter() tsv_read_string() tsv_read_float() tsv_parse_delimiter()
 #include "bcftools.h"
+#include "tsv2vcf.h"
 #include "filter.h"
 
 #define SCORE_VERSION "2021-05-14"
@@ -159,7 +160,7 @@ static const char *snp_hdr_str[] = {"snp", "snpid", "SNPID", "MarkerName", "Mark
 static const char *chr_hdr_str[] = {"CHR", "Chromosome", "Chrom", "Chr", "chr_name", "chromosome"};
 static const char *bp_hdr_str[] = {"bp", "POS", "Position", "Pos", "BP", "chr_position", "base_pair_location"};
 static const char *a1_hdr_str[] = {"effect_allele", "a1", "A1", "Effect_allele", "Allele1", "allele1"};
-static const char *a2_hdr_str[] = {"other_allele",    "a2", "A2", "Non_Effect_allele", "Allele2", "allele2",
+static const char *a2_hdr_str[] = {"other_allele", "a2", "A2", "Non_Effect_allele", "Allele2", "allele2",
                                    "reference_allele"};
 static const char *beta_hdr_str[] = {"effect", "BETA", "Beta", "Effect", "beta", "effect_weight", "A1Effect"};
 static const char *p_hdr_str[] = {"pvalue", "pval", "Pvalue", "P.value", "P", "PValue", "p_value"};

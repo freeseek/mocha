@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2021-05-14"
+#define MOCHA_VERSION "2021-06-01"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -762,17 +762,6 @@ static float get_baf_bdev(const float *baf_arr, int n, const int *imap, float ba
     if ((float)bdev > 2.0f * baf_sd) return (float)bdev;
     double f(double x, void *data) { return -baf_log_lkl(baf_arr, n, imap, baf_sd, x); }
     kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
-    if (n > 1000 && bdev > baf_sd) {
-        fprintf(stderr, "-----\n");
-        fprintf(stderr, "n: %d\n", n);
-        fprintf(stderr, "mean_baf: %.4f\n", get_sample_mean(baf_arr, n, imap));
-        fprintf(stderr, "median_baf: %.4f\n", get_median(baf_arr, n, imap));
-        fprintf(stderr, "bdev/baf_sd: %.4f\n", bdev / baf_sd);
-        fprintf(stderr, "bdev: %.4f\n", bdev);
-        fprintf(stderr, "baf_sd: %.4f\n", baf_sd);
-        fprintf(stderr, "f(bdev): %.4f\n", f(bdev, NULL));
-        fprintf(stderr, "f(0): %.4f\n", f(0, NULL));
-    }
     return (float)bdev < 1e-4 ? (float)NAN : (float)bdev;
 }
 
