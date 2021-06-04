@@ -22,6 +22,7 @@ WARNING: MoChA will not yield useful results for VCFs from whole exome sequencin
    * [Chromosomal alterations pipeline](#chromosomal-alterations-pipeline)
    * [Allelic shift pipeline](#allelic-shift-pipeline)
    * [Plot results](#plot-results)
+   * [HMM parameters](#hmm-parameters)
    * [Acknowledgements](#acknowledgements)
 <!--te-->
 
@@ -153,10 +154,11 @@ sudo apt install --reinstall ./{libhts3_1.11-4,bcftools_1.11-1,bio-mocha_1.11-de
 
 Install Beagle5 and IMPUTE5 (optional for array data) from <a href="https://www.dropbox.com/sh/mwnceyhir8yze2j/AADbzP6QuAFPrj0Z9_I1RSmla?dl=0">here</a>
 ```
-wget -O impute5_v1.1.4.zip https://www.dropbox.com/sh/mwnceyhir8yze2j/AAAPJVJv3kI2glXGDdc3sSHga/impute5_v1.1.4.zip?dl=0
-unzip -d $HOME/bin -o impute5_v1.1.4.zip impute5_v1.1.4/imp{ute5,5Converter}_1.1.4_static
-/bin/mv $HOME/bin/impute5_1.1.4_static $HOME/bin/impute5
-/bin/mv $HOME/bin/imp5Converter_1.1.4_static $HOME/bin/imp5Converter
+wget -O impute5_v1.1.5.zip https://www.dropbox.com/sh/mwnceyhir8yze2j/AAD2VrkZze6ZLrcGX-jok4KRa/impute5_v1.1.5.zip?dl=0
+unzip -ojd $HOME/bin impute5_v1.1.5.zip impute5_v1.1.5/imp{ute5,5Converter}_1.1.5_static
+chmod a+x $HOME/bin/imp{ute5,5Converter}_1.1.5_static
+ln -s impute5_1.1.5_static $HOME/bin/impute5
+ln -s imp5Converter_1.1.5_static $HOME/bin/imp5Converter
 wget -P $HOME/bin http://faculty.washington.edu/browning/beagle/bref3.18May20.d20.jar
 ```
 
@@ -450,7 +452,7 @@ for chr in {1..22} X; do
     --output $dir/$pfx.chr$chr.pgt.bcf
 done
 ```
-If you are using GRCh37 rather than GRCh38, use `--region $chr` instead
+If you are using GRCh37 rather than GRCh38, use `--region $chr` instead. If you are phasing genotypes from WGS data, include the `--sequencing` option
 
 Eagle's <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-100003.2">memory requirements</a> will depend on the number of samples in the target (Nt) and in the reference panel (Nr=2504), and the number of variants (M) in the largest contig, and will amount to 1.5(Nt+Nr)M bytes. The <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-110003.3">running time</a> will be \~1 minute of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">reference-based phasing</a> with a small target and reference panel (see Supplementary Tables 2,3) and \~5 minutes of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">non-reference-based phasing</a> with a large cohort (see Supplementary Tables 7,8). Also, by default, if the option --pbwtIters is not used, Eagle will perform one phasing iteration if Nt<Nr/2=1252, two if 1252=Nr/2<Nt<2Nr=5008, and three if 5008=2Nr<Nt and in the second and third iterations both target and reference panel haplotypes will be used as references for phasing (see <a href="https://www.nature.com/articles/ng.3679#Sec10"here</a>)
 

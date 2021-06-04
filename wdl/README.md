@@ -283,7 +283,7 @@ tar xzvf hapmap370k_1.0.1.tar.gz --strip-components=3 hapmap370k/inst/idatFiles
 ```
 Then make sure you copy all the IDAT files in the `gs://{google-bucket}/idats` Google bucket
 
-Define options to run the WDL:
+Edit JSON file to run the WDL:
 ```json
 {
   "mocha.sample_set_id": "hapmap370k",
@@ -311,50 +311,65 @@ The **hapmap370k.batch.tsv** table could look like this:
 | A        | HumanCNV370v1_C.csv | humancnv370v1_c.bpm | HumanCNV370v1_C.egt |
 | B        | HumanCNV370v1_C.csv | humancnv370v1_c.bpm | HumanCNV370v1_C.egt |
 
+This file can be generated with the following command:
+```
+(echo -e "batch_id\tcsv\tbpm\tegt"
+echo -e "A\tHumanCNV370v1_C.csv\thumancnv370v1_c.bpm\tHumanCNV370v1_C.egt"
+echo -e "B\tHumanCNV370v1_C.csv\thumancnv370v1_c.bpm\tHumanCNV370v1_C.egt") > hapmap370k.batch.tsv
+```
+
 The **hapmap370k.sample.tsv** table could look like this:
 
 | sample_id | batch_id | green_idat            | red_idat              |
 |-----------|----------|-----------------------|-----------------------|
-| NA07029   | A        | 4019585367_A_Grn.idat | 4019585367_A_Red.idat |
-| NA18502   | B        | 4019585376_B_Grn.idat | 4019585376_B_Red.idat |
-| NA10851   | A        | 4019585401_B_Grn.idat | 4019585401_B_Red.idat |
-| NA18912   | B        | 4019585402_A_Grn.idat | 4019585402_A_Red.idat |
-| NA18500   | A        | 4019585413_A_Grn.idat | 4019585413_A_Red.idat |
+| NA06991   | A        | 4030186347_A_Grn.idat | 4030186347_A_Red.idat |
+| NA07000   | B        | 4030186263_B_Grn.idat | 4030186263_B_Red.idat |
 | NA10859   | B        | 4019585415_B_Grn.idat | 4019585415_B_Red.idat |
+| NA11882   | B        | 4031058127_B_Grn.idat | 4031058127_B_Red.idat |
+| NA06993   | B        | 4031058211_B_Grn.idat | 4031058211_B_Red.idat |
+| NA10851   | A        | 4031058082_A_Grn.idat | 4031058082_A_Red.idat |
 | NA12057   | A        | 4019585422_A_Grn.idat | 4019585422_A_Red.idat |
-| NA07000   | B        | 4019585433_A_Grn.idat | 4019585433_A_Red.idat |
-| NA07034   | A        | 4019585455_A_Grn.idat | 4019585455_A_Red.idat |
-| NA18501   | B        | 4019585483_B_Grn.idat | 4019585483_B_Red.idat |
-| NA18912-1 | A        | 4019585498_B_Grn.idat | 4019585498_B_Red.idat |
 | NA12057-1 | B        | 4019585506_B_Grn.idat | 4019585506_B_Red.idat |
-| NA12056   | A        | 4019585508_B_Grn.idat | 4019585508_B_Red.idat |
-| NA06991   | B        | 4019585512_B_Grn.idat | 4019585512_B_Red.idat |
-| NA06994   | A        | 4019585520_B_Grn.idat | 4019585520_B_Red.idat |
-| NA18501-1 | B        | 4019585575_A_Grn.idat | 4019585575_A_Red.idat |
+| NA06993-1 | A        | 4031058132_A_Grn.idat | 4031058132_A_Red.idat |
+| NA06994   | B        | 4019585520_B_Grn.idat | 4019585520_B_Red.idat |
+| NA07029   | A        | 4019585367_A_Grn.idat | 4019585367_A_Red.idat |
+| NA18502   | A        | 4019585597_A_Grn.idat | 4019585597_A_Red.idat |
 | NA06985   | A        | 4019585596_A_Grn.idat | 4019585596_A_Red.idat |
-| NA18502-1 | B        | 4019585597_A_Grn.idat | 4019585597_A_Red.idat |
-| NA18858   | A        | 4030186100_B_Grn.idat | 4030186100_B_Red.idat |
-| NA18505   | B        | 4030186109_A_Grn.idat | 4030186109_A_Red.idat |
-| NA11882   | A        | 4030186125_A_Grn.idat | 4030186125_A_Red.idat |
-| NA11994   | B        | 4030186132_A_Grn.idat | 4030186132_A_Red.idat |
-| NA18504   | A        | 4030186167_B_Grn.idat | 4030186167_B_Red.idat |
-| NA18503   | B        | 4030186197_A_Grn.idat | 4030186197_A_Red.idat |
-| NA12155   | A        | 4030186219_B_Grn.idat | 4030186219_B_Red.idat |
+| NA18500   | A        | 4019585413_A_Grn.idat | 4019585413_A_Red.idat |
+| NA18501   | A        | 4019585575_A_Grn.idat | 4019585575_A_Red.idat |
+| NA18501-1 | B        | 4019585483_B_Grn.idat | 4019585483_B_Red.idat |
+| NA18502-1 | B        | 4019585376_B_Grn.idat | 4019585376_B_Red.idat |
+| NA12155   | B        | 4030186219_B_Grn.idat | 4030186219_B_Red.idat |
+| NA11994   | A        | 4030186132_A_Grn.idat | 4030186132_A_Red.idat |
+| NA10859-1 | A        | 4030186513_A_Grn.idat | 4030186513_A_Red.idat |
+| NA18506   | B        | 4031058102_B_Grn.idat | 4031058102_B_Red.idat |
+| NA11882-1 | A        | 4030186125_A_Grn.idat | 4030186125_A_Red.idat |
+| NA18858   | B        | 4030186100_B_Grn.idat | 4030186100_B_Red.idat |
+| NA18912   | A        | 4019585402_A_Grn.idat | 4019585402_A_Red.idat |
+| NA11881   | B        | 4031058010_B_Grn.idat | 4031058010_B_Red.idat |
+| NA07034   | A        | 4019585455_A_Grn.idat | 4019585455_A_Red.idat |
+| NA07000-1 | A        | 4019585433_A_Grn.idat | 4019585433_A_Red.idat |
+| NA10851-1 | B        | 4019585401_B_Grn.idat | 4019585401_B_Red.idat |
+| NA06991-1 | B        | 4019585512_B_Grn.idat | 4019585512_B_Red.idat |
+| NA12056   | B        | 4019585508_B_Grn.idat | 4019585508_B_Red.idat |
 | NA11993   | B        | 4030186254_B_Grn.idat | 4030186254_B_Red.idat |
-| NA07000-1 | A        | 4030186263_B_Grn.idat | 4030186263_B_Red.idat |
-| NA11993-1 | B        | 4030186332_A_Grn.idat | 4030186332_A_Red.idat |
+| NA18912-1 | B        | 4019585498_B_Grn.idat | 4019585498_B_Red.idat |
+| NA10860   | B        | 4030186396_B_Grn.idat | 4030186396_B_Red.idat |
 | NA12156   | A        | 4030186339_A_Grn.idat | 4030186339_A_Red.idat |
-| NA06991-1 | B        | 4030186347_A_Grn.idat | 4030186347_A_Red.idat |
-| NA10860   | A        | 4030186396_B_Grn.idat | 4030186396_B_Red.idat |
-| NA10861   | B        | 4030186415_A_Grn.idat | 4030186415_A_Red.idat |
-| NA11995   | A        | 4030186434_B_Grn.idat | 4030186434_B_Red.idat |
-| NA10859-1 | B        | 4030186513_A_Grn.idat | 4030186513_A_Red.idat |
-| NA11881   | A        | 4031058010_B_Grn.idat | 4031058010_B_Red.idat |
-| NA10851-1 | B        | 4031058082_A_Grn.idat | 4031058082_A_Red.idat |
-| NA18506   | A        | 4031058102_B_Grn.idat | 4031058102_B_Red.idat |
-| NA11882-1 | B        | 4031058127_B_Grn.idat | 4031058127_B_Red.idat |
-| NA06993   | A        | 4031058132_A_Grn.idat | 4031058132_A_Red.idat |
-| NA06993-1 | B        | 4031058211_B_Grn.idat | 4031058211_B_Red.idat |
+| NA11993-1 | A        | 4030186332_A_Grn.idat | 4030186332_A_Red.idat |
+| NA18505   | A        | 4030186109_A_Grn.idat | 4030186109_A_Red.idat |
+| NA18503   | A        | 4030186197_A_Grn.idat | 4030186197_A_Red.idat |
+| NA18504   | B        | 4030186167_B_Grn.idat | 4030186167_B_Red.idat |
+| NA11995   | B        | 4030186434_B_Grn.idat | 4030186434_B_Red.idat |
+| NA10861   | A        | 4030186415_A_Grn.idat | 4030186415_A_Red.idat |
+
+
+This file can be generated with the following command:
+```
+(echo -e "sample_id\tbatch_id\tgreen_idat\tred_idat"
+awk -F, -v OFS="\t" '$1 in x {$1=$1"-1"}
+  NR>1 {x[$1]++; print $1,substr($5,12),$5"_Grn.idat",$5"_Red.idat"}' samples370k.csv) > hapmap370k.sample.tsv
+```
 
 And the **hapmap370k.ped** file could look like this (only the first four columns are required):
 
@@ -559,7 +574,7 @@ Define options to run the WDL:
   "impute.ref_path": "gs://{google-bucket}/GRCh38",
   "impute.data_path": "gs://{google-bucket}/vcfs",
   "impute.beagle": false,
-  "mocha.docker_registry": "us.gcr.io/mccarroll-mocha"
+  "impute.docker_registry": "us.gcr.io/mccarroll-mocha"
 }
 ```
 
@@ -660,8 +675,8 @@ The `output_tsv_file` from the imputation pipeline will include these columns
 Once successfully run, the allelic shift pipeline will output a VCF named like `hapmap370k.chrX.as.bcf` with an `AS` INFO filed containing allelic shift counts. If you have two (or more) such VCFs (e.g. `hapmapSNP6.chrX.as.bcf`), these can be easily combined with the following command:
 ```
 bcftools merge --no-version -Ou -i AS:sum -m none hapmap370k.chrX.as.bcf hapmapSNP6.chrX.as.bcf | \
-  bcftools +mochatools --no-version -Ou -- --test AS | \
-  bcftools query -i 'binom(INFO/AS)<1e-6' -f "%CHROM\t%POS\t%ID\t%REF\t%ALT\t%AS{0}\t%AS{1}\t%binom_AS\n"
+  bcftools +mochatools --no-version -Ou -- --test AS --phred | \
+  bcftools query -i 'binom(INFO/AS)<1e-6' -f "%CHROM\t%POS\t%ID\t%REF\t%ALT\t%AS{0}\t%AS{1}\t%pbinom_AS\n"
 ```
 
 Polygenic Score Pipeline
@@ -919,6 +934,7 @@ call-caching {
   invalidate-bad-cache-results = true
 }
 ```
+* Notice that if you are using **call-caching* on an HPC cluster rather than Google Cloud, we strongly recommend using the <a href="https://cromwell.readthedocs.io/en/stable/Configuring/#call-cache-strategy-options-for-local-filesystem">fingerprint</a> hashing strategy, as computing hashes of many files can be prohibitevely slow on an HPC filesystem, and for this to work effectively the fingerprint size should be smaller than 1 MB due to the large number of small files the pipeline works with to effectively parallelize computations
 * If you want to configure the directory of the mysql database to something other than `/var/lib/mysql` make sure to set the `datadir` variable in the `/etc/mysql/mysql.conf.d/mysqld.cnf` file
 * Start the mySQL server and initialize the root user with the following command (use cromwell as the default root password):
 ```
@@ -1338,10 +1354,11 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  bcftools \
                  unzip && \
-    wget -O impute5_v1.1.4.zip --no-check-certificate https://www.dropbox.com/sh/mwnceyhir8yze2j/AAAPJVJv3kI2glXGDdc3sSHga/impute5_v1.1.4.zip?dl=0 && \
-    unzip -jd /usr/bin/ impute5_v1.1.4.zip impute5_v1.1.4/impute5_1.1.4_static impute5_v1.1.4/imp5Converter_1.1.4_static && \
-    ln -s impute5_1.1.4_static /usr/bin/impute5 && \
-    ln -s imp5Converter_1.1.4_static /usr/bin/imp5Converter && \
+    wget -O impute5_v1.1.5.zip --no-check-certificate https://www.dropbox.com/sh/mwnceyhir8yze2j/AAD2VrkZze6ZLrcGX-jok4KRa/impute5_v1.1.5.zip?dl=0 && \
+    unzip -ojd /usr/bin impute5_v1.1.5.zip impute5_v1.1.5/impute5_1.1.5_static impute5_v1.1.5/imp5Converter_1.1.5_static && \
+    chmod a+x /usr/bin/impute5_1.1.5_static /usr/bin/imp5Converter_1.1.5_static && \
+    ln -s impute5_1.1.5_static /usr/bin/impute5 && \
+    ln -s imp5Converter_1.1.5_static /usr/bin/imp5Converter && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget \
                  unzip && \

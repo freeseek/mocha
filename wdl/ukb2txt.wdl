@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2021 Giulio Genovese
 ##
-## Version 2021-05-14
+## Version 2021-06-03
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -251,7 +251,8 @@ task init {
 
     mv "~{sqc_file}" .
     mkdir -p out
-    awk 'BEGIN {print "sample_id\tbatch_id\tcel"} {printf "%s\t%s\t%s\n",$1,$4,$1}' "~{basename(sqc_file)}" > out/ukb.sample.tsv
+    awk 'BEGIN {print "sample_id\tbatch_id\tcel\tcomputed_gender\tcall_rate"}
+      {printf "%s\t%s\t%s\t%s\t%s\n",$1,$4,$1,$11,$7/100}' "~{basename(sqc_file)}" > out/ukb.sample.tsv
     cut -d" " -f3,4 "~{basename(sqc_file)}" | uniq -c | \
       awk 'BEGIN {csv["UKBB"]="Axiom_UKB_WCSG.na34.annot.csv.gz"; csv["UKBL"]="Axiom_UKBiLEVE.na34.annot.csv.gz"
       print "batch_id\tn_smpls\tcsv\tsnp\treport\tcalls\tsummary"}

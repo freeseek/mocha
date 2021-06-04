@@ -8,7 +8,7 @@ In this tutorial we will show you how to reconstruct raw Affymetrix files for ea
   * [Download Resources](#download-resources)
   * [Build Auxiliary Tools](#build-auxiliary-tools)
   * [Split by Batches](#split-by-batches)
-  * [Input Files for MoChA WDL](#generate-input-files-for-mocha-wdl)
+  * [Input Files for MoChA WDL](#input-files-for-mocha-wdl)
 <!--te-->
 
 Introduction
@@ -276,7 +276,7 @@ Input Files for MoChA WDL
 Create sample table
 ```
 awk 'BEGIN {print "sample_id\tbatch_id\tcel\tcomputed_gender\tcall_rate"}
-  {printf "%s\t%s\t%s\t%s\t%s\n",$1,$4,$1,$11,$7}' ukb_sqc_v2.txt > ukb.sample.tsv
+  {printf "%s\t%s\t%s\t%s\t%s\n",$1,$4,$1,$11,$7/100}' ukb_sqc_v2.txt > ukb.sample.tsv
 ```
 If you wanted to use the sample IDs associated with your application ID, you should instead include in the first column of the table the IDs from the `ukbA_cal_v2_sP.fam` file which includes the IDs associated to your UK Biobank application ID. Remember, when handling retracted samples, that each ID in the first column needs to be unique for the MoChA WDL pipeline to run
 
