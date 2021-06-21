@@ -641,13 +641,11 @@ The following are the primary options that you can set in the main input json fi
 If you wanted to study allelic shift for mosaic loss of chromosomes X (mLOX), you could define individuals with putative mLOX as follows:
 ```
 awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-  NR==FNR && FNR>1 {sample_id=$(f["sample_id"]); call_rate=$(f["call_rate"]); baf_auto=$(f["baf_auto"])}
-  NR==FNR && FNR>1 && (call_rate<.97 || baf_auto>.03) {xcl[sample_id]++}
+  NR==FNR && FNR>1 && ($(f["call_rate"])<.97 || $(f["baf_auto"])>.03) {xcl[$(f["sample_id"])]++}
   NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i}
-  NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); computed_gender=$(g["computed_gender"]);
-  chrom=$(g["chrom"]); sub("^chr", "", chrom); len=$(g["length"]); rel_cov=$(g["rel_cov"])}
-  NR>FNR && FNR>1 && !(sample_id in xcl) && computed_gender=="F" &&
-  chrom=="X" && len>1e8 && rel_cov<2.5 {print sample_id}' hapmap370k.stats.tsv hapmap370k.calls.tsv > hapmap370k.mLOX.lines
+  NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); chrom=$(g["chrom"]); sub("^chr", "", chrom)}
+  NR>FNR && FNR>1 && !(sample_id in xcl) && $(g["computed_gender"])=="F" && chrom=="X" &&
+  $(g["length"])>1e8 && $(g["rel_cov"])<2.5 {print sample_id}' hapmap370k.stats.tsv hapmap370k.calls.tsv > hapmap370k.mLOX.lines
 ```
 
 Define options to run the WDL:
@@ -1207,6 +1205,7 @@ RUN apt-get -qqy update --fix-missing && \
     wget ftp://webdata2:webdata2@ussd-ftp.illumina.com/downloads/software/iaap/iaap-cli-linux-x64-1.1.0.tar.gz && \
     mkdir /opt/iaap-cli && \
     tar xzvf iaap-cli-linux-x64-1.1.0.tar.gz -C /opt iaap-cli-linux-x64-1.1.0/iaap-cli --strip-components=1 && \
+    chmod a+x /opt/iaap-cli/iaap-cli && \
     ln -s /opt/iaap-cli/iaap-cli /usr/local/bin/iaap-cli && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
@@ -1231,7 +1230,8 @@ RUN apt-get -qqy update --fix-missing && \
     unzip -ojd /usr/local/bin apt_2.11.3_linux_64_bit_x86_binaries.zip apt_2.11.3_linux_64_bit_x86_binaries/bin/apt-probeset-genotype && \
     chmod a+x /usr/local/bin/apt-probeset-genotype && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
-                 wget && \
+                 wget \
+		 unzip && \
     apt-get -qqy clean && \
     rm -rf gtc2vcf_1.11-20210315_amd64.deb \
            apt_2.11.3_linux_64_bit_x86_binaries.zip \

@@ -20,6 +20,7 @@ WARNING: MoChA will not yield useful results for VCFs from whole exome sequencin
    * [Data preparation](#data-preparation)
    * [Phasing pipeline](#phasing-pipeline)
    * [Chromosomal alterations pipeline](#chromosomal-alterations-pipeline)
+   * [Filter callset](#filter-callset)
    * [Allelic shift pipeline](#allelic-shift-pipeline)
    * [Plot results](#plot-results)
    * [HMM parameters](#hmm-parameters)
@@ -595,7 +596,10 @@ Bdev - BAF deviation estimate
   AS - Allelic shift for heterozygous calls: 1/-1 if the alternate allele is over/under represented
 ```
 
-For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to 9NM bytes. For example, if you are running 4,000 samples and chromosome 1 has \~80K variants, you will need approximately 2-3GB to run MoChA. It will take \~1/3 second of CPU time per genome to process samples genotyped on the Illumina GSA DNA microarray. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the --min-dist parameter (D, 400 by default) and the length of the longest contig (L) and will amount to no more than 9NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter --min-dist 400 and chromosome 1 is \~250Mbp long, you might need up to 5-6GB to run MoChA. For whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use options --adjust-BAF-LRR -1 and --regress-BAF-LRR -1). Notice that the CPU requirements for MoChA will be negligible compared to the CPU requirements for phasing with Eagle
+For array data, MoChA's memory requirements will depend on the number of samples (N) and the number of variants (M) in the largest contig and will amount to at most 18NM bytes. For example, if you are running 4,000 samples and chromosome 1 has \~80K variants, you will need approximately 2-3GB to run MoChA. It will take \~1/3 second of CPU time per genome to process samples genotyped on the Illumina GSA DNA microarray. For whole genome sequence data, MoChA's memory requirements will depend on the number of samples (N), the `--min-dist` parameter (D, 400 by default) and the length of the longest contig (L) and will amount to at most 18NL/D, but could be significantly less, depending on how many variants you have in the VCF. If you are running 1,000 samples with default parameter `--min-dist 400` and chromosome 1 is \~250Mbp long, you might need up to 5-6GB to run MoChA. For whole genome sequence data there is no need to batch too many samples together, as batching will not affect the calls made by MoChA (it will for array data unless you use options `--adjust-BAF-LRR -1` and `--regress-BAF-LRR -1`). Notice that the CPU requirements for MoChA will be negligible compared to the CPU requirements for phasing with Eagle
+
+Filter callset
+==============
 
 Depending on your application, you might want to filter the calls from MoChA. For example, the following code
 ```
@@ -611,7 +615,29 @@ awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
 awk 'NR==FNR {x[$1"_"$3"_"$4"_"$5]++} NR>FNR && ($0~"^track" || $4"_"$1"_"$2"_"$3 in x)' \
   $pfx.calls.filtered.tsv $pfx.ucsc.bed > $pfx.ucsc.filtered.bed
 ```
-will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls with less than a `lod_baf_phase` score of 10 unless they are larger than 5Mbp (or 10Mbp if they span the centromere) for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UKBB</a>
+will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls made by the LRR and BAF model if they have less than a `lod_baf_phase` score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UK biboank</a>
+
+To generate a list of samples with mosaic loss-of-Y (mLOY):
+```
+awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR==FNR && FNR>1 && ($(f["call_rate"])<.97 || $(f["baf_auto"])>.03) {xcl[$(f["sample_id"])]++}
+  NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i}
+  NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); chrom=$(g["chrom"]); sub("^chr", "", chrom);}
+  NR>FNR && FNR>1 && !(sample_id in xcl) && $(g["computed_gender"])=="M" && chrom=="X" &&
+  $(g["length"])>2e6 && $(g["rel_cov"])<2.5 {print sample_id}' $pfx.stats.tsv $pfx.calls.tsv > $pfx.mLOY.lines
+```
+Requiring `rel_cov<2.5` should make sure to filter out XXY and XYY samples. This should generate a mLOY set similarly to how it was done in the <a href="http://doi.org/10.1038/s41598-020-59963-8">UK biboank</a>
+
+Similarly, to generate a list of samples with mosaic loss-of-X (mLOX):
+```
+awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR==FNR && FNR>1 && ($(f["call_rate"])<.97 || $(f["baf_auto"])>.03) {xcl[$(f["sample_id"])]++}
+  NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i}
+  NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); chrom=$(g["chrom"]); sub("^chr", "", chrom)}
+  NR>FNR && FNR>1 && !(sample_id in xcl) && $(g["computed_gender"])=="F" && chrom=="X" &&
+  $(g["length"])>1e8 && $(g["rel_cov"])<2.5 {print sample_id}' $pfx.stats.tsv $pfx.calls.tsv > $pfx.mLOX.lines
+```
+Requiring `rel_cov<2.5` should make sure to filter out XXY and XXX samples
 
 Allelic shift pipeline
 ======================
