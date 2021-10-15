@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-mocha_plot_version <- '2021-05-14'
+mocha_plot_version <- '2021-10-15'
 
 library(optparse)
 library(data.table)
@@ -175,6 +175,7 @@ if (!args$wgs && !is.null(args$stats)) {
     df$LRR <- df$LRR - as.numeric(df$gc)^i * df[, paste0('lrr_gc_', i)]
   }
 }
+df$sample_id <- factor(df$sample_id, levels = strsplit(args$samples, ',')[[1]])
 
 # fills in variables of interest
 df$chrom <- as.factor(gsub('^chr', '', gsub('^chrM', 'MT', df$chrom)))
@@ -191,11 +192,11 @@ if (!args$wgs) {
   plot_vars <- c('eLRR', 'BAF', 'pBAF')
   df_horiz <- data.frame(variable = factor(c('eLRR', 'pBAF'), levels = plot_vars), value = c(1.0, 0.5))
 } else {
-  df$DP <- df$ad0 + df$ad1
+  df$logDP <- log(df$ad0 + df$ad1)
   # subset to variants that are heterozygous
-  df <- df[df$gts == 'AB' & df$DP > args$min_depth,]
+  df <- df[df$gts == 'AB' & df$logDP > log(args$min_depth),]
   df$BAF <- NaN
-  df$BAF <- df$ad1/ df$DP
+  df$BAF <- df$ad1 / (df$ad0 + df$ad1)
   df$hd0 <- NaN
   df$hd1 <- NaN
   df$hd0[df$phase == 1] <- df$ad0[df$phase == 1]
@@ -208,8 +209,8 @@ if (!args$wgs) {
     df$pBAF[df$phase == 1] <- df$BAF[df$phase == 1]
     df$pBAF[df$phase == -1] <- 1 - df$BAF[df$phase == -1]
   }
-  cov_var <- 'DP'
-  plot_vars <- c('DP', 'pBAF')
+  cov_var <- 'logDP'
+  plot_vars <- c('logDP', 'pBAF')
   df_horiz <- data.frame(variable = factor('pBAF', levels = plot_vars), value = 0.5)
 }
 if (!is.null(args$cytoband)) {
@@ -275,12 +276,12 @@ if (length(regions)>0) {
                     df_melt$variable == 'pBAF' & abs(df_melt$value - 0.5) > 0.35] <- NA
     } else {
       if (args$clump == 1) {
-        df_melt <- rbind(cbind(setNames(df[idx, c('pos', 'color', 'gts', 'sample_id', 'DP')], c('pos', 'color', 'gts', 'sample_id', 'value')), variable = 'DP'),
+        df_melt <- rbind(cbind(setNames(df[idx, c('pos', 'color', 'gts', 'sample_id', 'logDP')], c('pos', 'color', 'gts', 'sample_id', 'value')), variable = 'logDP'),
                          cbind(setNames(df[idx, c('pos', 'color', 'gts', 'sample_id', 'BAF')], c('pos', 'color', 'gts', 'sample_id', 'value')), variable = 'BAF'),
                          cbind(setNames(df[idx, c('pos', 'color', 'gts', 'sample_id', 'pBAF')], c('pos', 'color', 'gts', 'sample_id', 'value')), variable = 'pBAF'))
-        df_melt$variable <- factor(df_melt$variable, c('DP', 'BAF', 'pBAF'))
-        median_dp <- median(df_melt$value[df_melt$variable == 'DP'], na.rm = TRUE)
-        df_melt$value[df_melt$variable == 'DP' & df_melt$value > 2 * median_dp] <- NA
+        df_melt$variable <- factor(df_melt$variable, c('logDP', 'BAF', 'pBAF'))
+        median_logdp <- median(df_melt$value[df_melt$variable == 'logDP'], na.rm = TRUE)
+        df_melt$value[df_melt$variable == 'logDP' & df_melt$value > 2 * median_logdp] <- NA
       } else {
         l <- list()
         for (sm in unique(df$sample_id)) {
@@ -289,7 +290,7 @@ if (length(regions)>0) {
           l[[sm]] <- data.frame(pos = unname(tapply(df$pos[sm_idx], index, median, na.rm = TRUE)),
                                 color = unname(tapply(as.numeric(df$color[sm_idx]), index, max, -1, na.rm = TRUE)),
                                 sample_id = sm,
-                                DP = unname(tapply(df$DP[sm_idx], index, mean, na.rm = TRUE)),
+                                logDP = unname(tapply(df$logDP[sm_idx], index, mean, na.rm = TRUE)),
                                 hd0 = unname(tapply(df$hd0[sm_idx], index, sum, na.rm = TRUE)),
                                 hd1 = unname(tapply(df$hd1[sm_idx], index, sum, na.rm = TRUE)))
         }
@@ -297,9 +298,10 @@ if (length(regions)>0) {
         tmp$color <- as.factor(tmp$color)
         tmp$color[tmp$color == -1] <- NaN
         tmp$pBAF = tmp$hd1 / (tmp$hd0 + tmp$hd1)
-        df_melt <- reshape2::melt(tmp[, c('pos', 'color', 'sample_id', 'DP', 'pBAF')], id.vars = c('pos', 'color', 'sample_id'))
+        df_melt <- reshape2::melt(tmp[, c('pos', 'color', 'sample_id', 'logDP', 'pBAF')], id.vars = c('pos', 'color', 'sample_id'))
       }
     }
+    df_melt$sample_id <- factor(df_melt$sample_id, levels = strsplit(args$samples, ',')[[1]])
 
     idx <- df_melt$variable == cov_var & !is.na(df_melt$value)
     if (sum(idx) >= args$roll) df_melt$smooth[idx] <- filter(df_melt$value[idx], rep(1 / args$roll, args$roll))

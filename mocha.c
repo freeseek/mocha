@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2021-06-01"
+#define MOCHA_VERSION "2021-10-15"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -203,6 +203,9 @@ typedef struct {
     int n_missing_gts;
     int n_hets;
     int x_nonpar_n_hets;
+    int par1_n_hets;
+    int xtr_n_hets;
+    int par2_n_hets;
     float x_nonpar_dispersion; // either rho(AD0, AD1) for WGS model or sd(BAF)
     float x_nonpar_lrr_median;
     float y_nonpar_lrr_median;
@@ -1500,6 +1503,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
     int cen_beg = model->genome_rules->cen_beg[model->rid];
     int cen_end = model->genome_rules->cen_end[model->rid];
     int length = model->genome_rules->length[model->rid];
+    if (length == 0) length = model->locus_arr[model->n - 1].pos;
     // incentive to extend to the telomere
     float tel_log_prb = model->rid == model->genome_rules->x_rid
                             ? (self->computed_gender == GENDER_MALE ? model->chrY_tel_log_prb : model->chrX_tel_log_prb)
@@ -1739,16 +1743,16 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                     return -lrr_baf_lod(lrr + a, baf + a, mocha.n_sites, NULL, NAN, model->lrr_bias, model->lrr_hap2dip,
                                         self->adjlrr_sd, self->stats.dispersion, x);
             }
-            double x;
-            kmin_brent(f, -0.15, 0.15, NULL, KMIN_EPS, &x);
+            double bdev_lrr_baf;
+            kmin_brent(f, -0.15, 0.15, NULL, KMIN_EPS, &bdev_lrr_baf);
             if (model->flags & WGS_DATA)
                 mocha.lod_lrr_baf =
                     lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.n_sites, NULL, model->err_log_prb, model->lrr_bias,
-                               model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
+                               model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, bdev_lrr_baf);
             else
                 mocha.lod_lrr_baf =
                     lrr_baf_lod(lrr + a, baf + a, mocha.n_sites, NULL, model->err_log_prb, model->lrr_bias,
-                                model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
+                                model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, bdev_lrr_baf);
 
             if (hmm_model == LRR_BAF) {
                 // here you need to check whether the call would have been
@@ -1799,8 +1803,9 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                     double bdev;
                     kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
                     mocha.bdev = fabsf((float)bdev);
-                    mocha.lod_baf_phase = ad_phase_lod(ad0, ad1, gt_phase, mocha.n_hets, imap_arr + beg[i],
-                                                       path + beg[i], model->err_log_prb, self->stats.dispersion, x);
+                    mocha.lod_baf_phase =
+                        ad_phase_lod(ad0, ad1, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i],
+                                     model->err_log_prb, self->stats.dispersion, mocha.bdev);
                 } else {
                     double f(double x, void *data) {
                         return -baf_phase_lod(baf, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i], NAN,
@@ -1950,6 +1955,14 @@ static void sample_stats(sample_t *self, const model_t *model) {
                 if (!isnan(baf[i])) self->x_nonpar_n_hets++;
                 n_imap++;
                 imap_arr[n_imap - 1] = i;
+            } else if (!isnan(baf[i])) {
+                if (pos <= model->genome_rules->x_nonpar_beg) {
+                    self->par1_n_hets++;
+                } else if (pos >= model->genome_rules->x_xtr_beg || pos <= model->genome_rules->x_xtr_end) {
+                    self->xtr_n_hets++;
+                } else if (pos >= model->genome_rules->x_nonpar_end) {
+                    self->par2_n_hets++;
+                }
             }
         }
         self->x_nonpar_lrr_median = get_median(lrr, n_imap, imap_arr);
@@ -2111,6 +2124,9 @@ static void mocha_print_stats(FILE *restrict stream, const sample_t *self, int n
     fputs("\tn_sites", stream);
     fputs("\tn_hets", stream);
     fputs("\tx_nonpar_n_hets", stream);
+    fputs("\tpar1_n_hets", stream);
+    fputs("\txtr_n_hets", stream);
+    fputs("\tpar2_n_hets", stream);
     fputs("\tx_nonpar_baf_corr", stream);
     fputs(flags & WGS_DATA ? "\tx_nonpar_cov_median" : "\tx_nonpar_lrr_median", stream);
     fputs(flags & WGS_DATA ? "\ty_nonpar_cov_median" : "\ty_nonpar_lrr_median", stream);
@@ -2134,6 +2150,9 @@ static void mocha_print_stats(FILE *restrict stream, const sample_t *self, int n
         fprintf(stream, "\t%d", self[i].n_sites);
         fprintf(stream, "\t%d", self[i].n_hets);
         fprintf(stream, "\t%d", self[i].x_nonpar_n_hets);
+        fprintf(stream, "\t%d", self[i].par1_n_hets);
+        fprintf(stream, "\t%d", self[i].xtr_n_hets);
+        fprintf(stream, "\t%d", self[i].par2_n_hets);
         fprintf(stream, "\t%.4f", self[i].x_nonpar_dispersion);
         fprintf(stream, "\t%.4f", flags & WGS_DATA ? expf(self[i].x_nonpar_lrr_median) : self[i].x_nonpar_lrr_median);
         fprintf(stream, "\t%.4f", flags & WGS_DATA ? expf(self[i].y_nonpar_lrr_median) : self[i].y_nonpar_lrr_median);
@@ -2293,7 +2312,7 @@ static int bcf_get_ab_genotypes(bcf_fmt_t *fmt, int8_t *gts, int nsmpl, int alle
 }
 
 // read one contig
-static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
+static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
     int rid = model->rid;
     bcf_hdr_t *hdr = bcf_sr_get_header(sr, 0);
     bcf_sr_seek(sr, bcf_hdr_id2name(hdr, rid), 0);
@@ -2302,15 +2321,13 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
     bcf_info_t *info;
     int nsmpl = bcf_hdr_nsamples(hdr);
 
-    int i;
-
     model->n = 0;
     model->n_flipped = 0;
     for (int j = 0; j < nsmpl; j++) sample[j].n = 0;
 
     if (!(model->flags & USE_NO_RULES_CHRS) && model->genome_rules->cen_beg[rid] == 0
         && model->genome_rules->cen_end[rid] == 0 && rid != model->genome_rules->mt_rid)
-        return;
+        return 0;
 
     int8_t *gts = (int8_t *)malloc(nsmpl * sizeof(int8_t));
     int8_t *phase_arr = (int8_t *)malloc(nsmpl * sizeof(int8_t));
@@ -2322,6 +2339,7 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
     int *last_het_pos = (int *)calloc(nsmpl, sizeof(int));
     int *last_pos = (int *)calloc(nsmpl, sizeof(int));
 
+    int i;
     for (i = 0; bcf_sr_next_line_reader0(sr); i++) {
         bcf1_t *line = bcf_sr_get_line(sr, 0);
         if (model->filter) {
@@ -2365,7 +2383,7 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
 
         // if neither AD nor LRR and BAF formats are present, skip line
         if (model->flags & WGS_DATA) {
-            if (!bcf_get_genotype_alleles(gt_fmt, gt0, gt1, nsmpl)) continue;
+            if (!bcf_get_unphased_genotype_alleles(gt_fmt, gt0, gt1, nsmpl)) continue;
             if (!bcf_get_allelic_depth(bcf_get_fmt_id(line, model->ad_id), gt0, gt1, ad0, ad1, nsmpl)) continue;
         } else {
             if ((info = bcf_get_info_id(line, model->allele_a_id)))
@@ -2512,9 +2530,11 @@ static void get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
     free(ad1);
     free(last_het_pos);
     free(last_pos);
+
+    return i;
 }
 
-static int read_stats(sample_t *samples, const bcf_hdr_t *hdr, const char *fn, int lrr_gc_order) {
+static int read_stats(sample_t *samples, const bcf_hdr_t *hdr, const char *fn, int lrr_gc_order, int flags) {
     htsFile *fp = hts_open(fn, "r");
     if (fp == NULL) error("Could not open %s: %s\n", fn, strerror(errno));
 
@@ -2529,22 +2549,36 @@ static int read_stats(sample_t *samples, const bcf_hdr_t *hdr, const char *fn, i
         error("File %s is missing the computed_gender column\n", fn);
     if (tsv_register(tsv, "call_rate", tsv_read_float, (void *)&sample.stats.call_rate) < 0)
         error("File %s is missing the call_rate column\n", fn);
-    int lrr_median = tsv_register(tsv, "lrr_median", tsv_read_float, (void *)&sample.stats.lrr_median);
-    int lrr_sd = tsv_register(tsv, "lrr_sd", tsv_read_float, (void *)&sample.stats.lrr_sd);
-    if (tsv_register(tsv, "lrr_auto", tsv_read_float, (void *)&sample.stats.lrr_auto) < 0) sample.stats.lrr_auto = NAN;
-    int baf_sd = tsv_register(tsv, "baf_sd", tsv_read_float, (void *)&sample.stats.dispersion);
+    int lrr_median = tsv_register(tsv, flags & WGS_DATA ? "cov_median" : "lrr_median", tsv_read_float,
+                                  (void *)&sample.stats.lrr_median);
+    int lrr_sd =
+        tsv_register(tsv, flags & WGS_DATA ? "cov_sd" : "lrr_sd", tsv_read_float, (void *)&sample.stats.lrr_sd);
+    if (tsv_register(tsv, flags & WGS_DATA ? "cov_auto" : "lrr_auto", tsv_read_float, (void *)&sample.stats.lrr_auto)
+        < 0)
+        sample.stats.lrr_auto = NAN;
+    int baf_sd =
+        tsv_register(tsv, flags & WGS_DATA ? "baf_corr" : "baf_sd", tsv_read_float, (void *)&sample.stats.dispersion);
     int baf_conc = tsv_register(tsv, "baf_conc", tsv_read_float, (void *)&sample.stats.baf_conc);
     if (tsv_register(tsv, "baf_auto", tsv_read_float, (void *)&sample.stats.baf_auto) < 0) sample.stats.baf_auto = NAN;
     tsv_register(tsv, "n_sites", tsv_read_integer, (void *)&sample.n_sites);
     tsv_register(tsv, "n_hets", tsv_read_integer, (void *)&sample.n_hets);
     tsv_register(tsv, "x_nonpar_n_hets", tsv_read_integer, (void *)&sample.x_nonpar_n_hets);
+    tsv_register(tsv, "par1_n_hets", tsv_read_integer, (void *)&sample.par1_n_hets);
+    tsv_register(tsv, "xtr_n_hets", tsv_read_integer, (void *)&sample.xtr_n_hets);
+    tsv_register(tsv, "par2_n_hets", tsv_read_integer, (void *)&sample.par2_n_hets);
     if (tsv_register(tsv, "x_nonpar_baf_corr", tsv_read_float, (void *)&sample.x_nonpar_dispersion) < 0)
         sample.x_nonpar_dispersion = NAN;
-    if (tsv_register(tsv, "x_nonpar_lrr_median", tsv_read_float, (void *)&sample.x_nonpar_lrr_median) < 0)
+    if (tsv_register(tsv, flags & WGS_DATA ? "x_nonpar_cov_median" : "x_nonpar_lrr_median", tsv_read_float,
+                     (void *)&sample.x_nonpar_lrr_median)
+        < 0)
         sample.x_nonpar_lrr_median = NAN;
-    if (tsv_register(tsv, "y_nonpar_lrr_median", tsv_read_float, (void *)&sample.y_nonpar_lrr_median) < 0)
+    if (tsv_register(tsv, flags & WGS_DATA ? "y_nonpar_cov_median" : "y_nonpar_lrr_median", tsv_read_float,
+                     (void *)&sample.y_nonpar_lrr_median)
+        < 0)
         sample.y_nonpar_lrr_median = NAN;
-    if (tsv_register(tsv, "mt_lrr_median", tsv_read_float, (void *)&sample.mt_lrr_median) < 0)
+    if (tsv_register(tsv, flags & WGS_DATA ? "mt_cov_median" : "mt_lrr_median", tsv_read_float,
+                     (void *)&sample.mt_lrr_median)
+        < 0)
         sample.mt_lrr_median = NAN;
     int lrr_gc_rel_ess = tsv_register(tsv, "lrr_gc_rel_ess", tsv_read_float, (void *)&sample.stats.lrr_gc_rel_ess);
     if (lrr_sd < 0 || lrr_gc_rel_ess < 0) sample.adjlrr_sd = NAN;
@@ -2559,6 +2593,13 @@ static int read_stats(sample_t *samples, const bcf_hdr_t *hdr, const char *fn, i
         if (!tsv_parse_delimiter(tsv, (bcf1_t *)hdr, str.s, '\t')) {
             int idx = sample.idx;
             if (idx < 0) continue;
+            if (flags & WGS_DATA) {
+                sample.stats.lrr_sd = sample.stats.lrr_sd / sample.stats.lrr_median;
+                sample.stats.lrr_median = logf(sample.stats.lrr_median);
+                sample.x_nonpar_lrr_median = logf(sample.x_nonpar_lrr_median);
+                sample.y_nonpar_lrr_median = logf(sample.y_nonpar_lrr_median);
+                sample.mt_lrr_median = logf(sample.mt_lrr_median);
+            }
             if (!(lrr_sd < 0)) {
                 sample.adjlrr_sd = sample.stats.lrr_sd;
                 if (!(lrr_gc_rel_ess < 0)) sample.adjlrr_sd *= sqrtf(1.0f - sample.stats.lrr_gc_rel_ess);
@@ -3314,13 +3355,14 @@ int run(int argc, char *argv[]) {
         sample[i].y_nonpar_lrr_median = NAN;
         sample[i].mt_lrr_median = NAN;
     }
-    if (stats_fname ? read_stats(sample, hdr, stats_fname, model.lrr_gc_order) : 1) {
+    if (stats_fname ? read_stats(sample, hdr, stats_fname, model.lrr_gc_order, model.flags) : 1) {
         for (int rid = 0; rid < hdr->n[BCF_DT_CTG]; rid++) {
             model.rid = rid;
-            get_contig(sr, sample, &model);
+            int nret = get_contig(sr, sample, &model);
             if (model.n <= 0) continue;
             if (!(model.flags & NO_LOG))
-                fprintf(log_file, "Read %d variants from contig %s\n", model.n, bcf_hdr_id2name(hdr, rid));
+                fprintf(log_file, "Using %d out of %d read variants from contig %s\n", model.n, nret,
+                        bcf_hdr_id2name(hdr, rid));
             if (model.genome_rules->length[rid] < model.locus_arr[model.n - 1].pos)
                 model.genome_rules->length[rid] = model.locus_arr[model.n - 1].pos;
             for (int j = 0; j < nsmpl; j++) sample_stats(sample + j, &model);
@@ -3339,10 +3381,11 @@ int run(int argc, char *argv[]) {
     if (!only_stats) {
         for (int rid = 0; rid < hdr->n[BCF_DT_CTG]; rid++) {
             model.rid = rid;
-            get_contig(sr, sample, &model);
+            int nret = get_contig(sr, sample, &model);
             if (model.n <= 0) continue;
             if (!(model.flags & NO_LOG))
-                fprintf(log_file, "Read %d variants from contig %s\n", model.n, bcf_hdr_id2name(hdr, rid));
+                fprintf(log_file, "Using %d out of %d read variants from contig %s\n", model.n, nret,
+                        bcf_hdr_id2name(hdr, rid));
             for (int j = 0; j < nsmpl; j++) {
                 if (model.cnp_idx)
                     regidx_overlap(model.cnp_idx, bcf_hdr_id2name(hdr, rid), 0, model.genome_rules->length[rid],
@@ -3351,7 +3394,7 @@ int run(int argc, char *argv[]) {
             }
 
             if (output_fname) {
-                int nret = put_contig(sr, sample, &model, out_fh, out_hdr);
+                nret = put_contig(sr, sample, &model, out_fh, out_hdr);
                 if (!(model.flags & NO_LOG))
                     fprintf(log_file, "Written %d variants for contig %s\n", nret, bcf_hdr_id2name(hdr, rid));
             }

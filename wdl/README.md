@@ -13,6 +13,7 @@ This page contains instructions for how to run the <a href="mocha.wdl">MoChA WDL
    * [Affymetrix Example](#affymetrix-example)
    * [Imputation Pipeline](#imputation-pipeline)
    * [Allelic Shift Pipeline](#allelic-shift-pipeline)
+   * [Association Pipeline](#association-pipeline)
    * [Polygenic Score Pipeline](#polygenic-score-pipeline)
    * [Running with Terra](#running-with-terra)
    * [Running with Cromwell on Google Cloud Platform](#running-with-cromwell-on-google-cloud-platform)
@@ -23,6 +24,8 @@ This page contains instructions for how to run the <a href="mocha.wdl">MoChA WDL
    * [Dockerfiles](#dockerfiles)
    * [Acknowledgements](#acknowledgements)
 <!--te-->
+
+For a brief introduction to the pipeline, check the 15 minutes ISPG video <a href="https://youtu.be/TAnV_UZHApY">here</a>
 
 Input modes
 ===========
@@ -154,7 +157,7 @@ The following are the primary options that you can set in the main input json fi
 |------------------------|----------|---------------------------------------------------------------------------------------------------|
 | sample_set_id          | String   | cohort name that will be used as prefix for temporary and output files                            |
 | mode                   | String   | pipeline mode, one of: **idat**, **gtc**, **cel**, **chp**, **txt**, **vcf**, or **pvcf**         |
-| target                 | String?  | pipeline final state, one of: **vcf**, **pvcf**, **calls**, or **pngs** [**pngs**]                |
+| target                 | String?  | pipeline final state, one of: **vcf**, **pvcf**, **calls**, or **pngs** [**calls**]               |
 | realign                | Boolean? | whether manifest file should be realigned (not in **vcf** or **pvcf** mode) [false]               |
 | wgs                    | Boolean? | whether the input VCF contains a high coverage whole genome sequencing data [false]               |
 | gtc_output             | Boolean? | whether to output the conversion from IDAT to GTC (only in **idat** mode) [false]                 |
@@ -162,7 +165,7 @@ The following are the primary options that you can set in the main input json fi
 | idat_batch_size        | Int?     | largest batch size for conversion of IDAT files to GTC [48] (only in **idat** mode)               |
 | gtc_batch_size         | Int?     | largest batch size for conversion of GTC files to VCF [1024] (only in **idat** and **gtc** mode)  |
 | chp_batch_size         | Int?     | largest batch size for conversion of CHP files to VCF [1024] (only in **cel** and **chp** mode)   |
-| max_win_size_cm        | Float?   | maximum windows size in cM for phasing [300.0]                                                    |
+| max_win_size_cm        | Float?   | maximum windows size in cM for phasing [50.0]                                                     |
 | overlap_size_cm        | Float?   | required overlap size in cM for consecutive windows [5.0]                                         |
 | sample_call_rate_thr   | Float?   | Minimum sample call rate allowed for quality control and plotting purposes [0.97]                 |
 | variant_call_rate_thr  | Float?   | Minimum sample call rate allowed for plotting purposes [0.97]                                     |
@@ -171,8 +174,8 @@ The following are the primary options that you can set in the main input json fi
 | ref_name               | String?  | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]              |
 | ref_path               | String?  | path for reference genome resources (needed unless all resources are provided with full path)     |
 | ref_fasta              | String?  | reference sequence [GCA_000001405.15_GRCh38_no_alt_analysis_set.fna/human_g1k_v37.fasta]          |
-| n_chrs                 | Int?     | number of chromosomes [23]                                                                        |
-| mhc_reg                | String?  | chromosome for MHC [chr6:27518932-33480487/6:27486711-33448264]                                   |
+| ref_n_chrs             | Int?     | number of chromosomes [23]                                                                        |
+| mhc_reg                | String?  | interval region for MHC [chr6:27518932-33480487/6:27486711-33448264]                              |
 | kir_reg                | String?  | chromosome for KIR [chr19:54071493-54992731/19:54574747-55504099]                                 |
 | dup_file               | String?  | file with location of segmental duplications [segdups.bed.gz]                                     |
 | genetic_map_file       | String?  | genetic map [genetic_map_hg38_withX.txt.gz/genetic_map_hg19_withX.txt.gz]                         |
@@ -193,14 +196,14 @@ The following are the primary options that you can set in the main input json fi
 | mocha_extra_args       | String?  | extra arguments for the MoChA plugin                                                              |
 | basic_bash_docker      | String?  | docker to run basic bash scripts [ubuntu:latest]                                                  |
 | pandas_docker          | String?  | docker to run task ref_scatter [amancevice/pandas:slim]                                           |
-| docker_registry        | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                             |
-| bcftools_docker        | String?  | docker to run tasks requiring BCFtools [bcftools:1.11-yyyymmdd]                                   |
-| iaap_cli_docker        | String?  | docker to run task idat2gtc [iaap_cli:1.11-yyyymmdd]                                              |
-| autoconvert_docker     | String?  | docker to run task idat2gtc [autoconvert:1.11-yyyymmdd]                                           |
-| apt_docker             | String?  | docker to run task cel2chp [apt:1.11-yyyymmdd]                                                    |
-| shapeit4_docker        | String?  | docker to run task vcf_phase [shapeit4:1.11-yyyymmdd]                                             |
-| eagle_docker           | String?  | docker to run task vcf_phase [eagle:1.11-yyyymmdd]                                                |
-| r_mocha_docker         | String?  | docker to run tasks mocha_{plot,summary} [r_mocha:1.11-yyyymmdd]                                  |
+| docker_repository      | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                             |
+| bcftools_docker        | String?  | docker to run tasks requiring BCFtools [bcftools:1.13-yyyymmdd]                                   |
+| iaap_cli_docker        | String?  | docker to run task idat2gtc [iaap_cli:1.13-yyyymmdd]                                              |
+| autoconvert_docker     | String?  | docker to run task idat2gtc [autoconvert:1.13-yyyymmdd]                                           |
+| apt_docker             | String?  | docker to run task cel2chp [apt:1.13-yyyymmdd]                                                    |
+| shapeit4_docker        | String?  | docker to run task vcf_phase [shapeit4:1.13-yyyymmdd]                                             |
+| eagle_docker           | String?  | docker to run task vcf_phase [eagle:1.13-yyyymmdd]                                                |
+| r_mocha_docker         | String?  | docker to run tasks mocha_{plot,summary} [r_mocha:1.13-yyyymmdd]                                  |
 
 The **ref_path** variable should contain the path to the genome reference resources. These are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a> for either the GRCh37 or GRCh38 human genome reference
 
@@ -208,7 +211,7 @@ However, if you do not provide the **ref_path** variable, variables **ref_fasta*
 
 The **manifest_path** variable should contain the path to all the CSV/BPM/EGT/XML/ZIP/SAM files necessary to run the analyses. If these manifest files are located in different directories, then provide them with their full path and leave the **manifest_path** variable empty
 
-Docker images will be automatically pulled by the specified **docker_registry** Google bucket. As these GCR buckets are Requester pays buckets, if you run computations in locations separate from where these buckets are localized, you will incur some additional costs. Docker images are located in **us.gcr.io/mccarroll-mocha**, **eu.gcr.io/mccarroll-mocha**, and **asia.gcr.io/mccarroll-mocha** covering, respectively, US, EU, and ASIA <a href="https://cloud.google.com/storage/docs/locations">locations</a>. If you are planning to run the pipeline with resources other than Google Cloud, then you can also use your own container registry. If you are running Cromwell on a computational framework that will simply download the images once and then reuse them, then you can also use **gcr.io/mccarroll-mocha**
+Docker images will be automatically pulled by the specified **docker_repository** Google bucket. As these GCR buckets are Requester pays buckets, if you run computations in locations separate from where these buckets are localized, you will incur some additional costs. Docker images are located in **us.gcr.io/mccarroll-mocha**, **eu.gcr.io/mccarroll-mocha**, and **asia.gcr.io/mccarroll-mocha** covering, respectively, US, EU, and ASIA <a href="https://cloud.google.com/storage/docs/locations">locations</a>. If you are planning to run the pipeline with resources other than Google Cloud, then you can also use your own container repository. If you are running Cromwell on a computational framework that will simply download the images once and then reuse them, then you can also use **gcr.io/mccarroll-mocha**
 
 Secondary Options
 =================
@@ -298,7 +301,7 @@ Edit JSON file to run the WDL:
   "mocha.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
   "mocha.sample_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.sample.tsv",
   "mocha.ped_file": "gs://{google-bucket}/hapmap370k.ped",
-  "mocha.docker_registry": "us.gcr.io/mccarroll-mocha",
+  "mocha.docker_repository": "us.gcr.io/mccarroll-mocha",
   "mocha.do_not_check_bpm": true
 }
 ```
@@ -443,7 +446,7 @@ Define options to run the WDL:
   "mocha.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmapSNP6.batch.tsv",
   "mocha.sample_tsv_file": "gs://{google-bucket}/tsvs/hapmapSNP6.sample.tsv",
   "mocha.ped_file": "gs://{google-bucket}/hapmapSNP6.ped",
-  "mocha.docker_registry": "us.gcr.io/mccarroll-mocha",
+  "mocha.docker_repository": "us.gcr.io/mccarroll-mocha",
   "mocha.chip_type": ["GenomeWideEx_6"]
 }
 ```
@@ -472,7 +475,7 @@ awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]++} NR>FNR && $3 in x || $4 in x {print;
 Filtering Output Calls
 ======================
 
-Once you have completed a full run of the MoChA pipeline, you will receive two tables, **mocha_stats_tsv** and **mocha_calls_tsv**, the first one with overall statistics about the samples, and the second one with the list of chromosomal alterations calls made by the MoChA software. The columns and suggestions for filtering in the table are described in the software <a href="../mocha#chromosomal-alterations-pipeline">documentation</a>
+Once you have completed a full run of the MoChA pipeline, you will receive two tables, **mocha_stats_tsv** and **mocha_calls_tsv**, the first one with overall statistics about the samples, and the second one with the list of chromosomal alterations calls made by the MoChA software. The columns and suggestions for filtering in the table are described in the software <a href="https://github.com/freeseek/mocha#filter-callset">documentation</a>
 
 Not all calls made by MoChA will be mosaic chromosomal alterations. These are some suggestions for how to think about filtering the calls:
 
@@ -524,39 +527,41 @@ Once you have run the MoChA pipeline you will obtain as an output an array of `p
 
 The following are the primary options that you can set in the main input json file for use with <a href="impute.wdl">impute.wdl</a>
 
-| key               | type           | description                                                                                            |
-|-------------------|----------------|--------------------------------------------------------------------------------------------------------|
-| sample_set_id     | String         | cohort name that will be used as prefix for temporary and output files                                 |
-| mode              | String?        | pipeline mode, one of: **pgt** or **imp** [**pgt**]                                                    |
-| target            | String?        | pipeline final state, one of: **imp** or **ext** [**pngs**]                                            |
-| max_win_size_cm   | Float?         | maximum windows size in cM for phasing [10.0]                                                          |
-| overlap_size_cm   | Float?         | required overlap size in cM for consecutive windows [2.0]                                              |
-| format_id         | String?        | format ID to extend to imputed haplotypes [AS]                                                         |
-| ext_string        | String?        | extension string for the imputed VCF with the extended format [as]                                     |
-| target_chrs       | Array[String]? | list of chromosomes to impute                                                                          |
-| ref_name          | String?        | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]                   |
-| ref_path          | String?        | path for reference genome resources (needed unless all resources are provided with full path)          |
-| ref_fasta_fai     | String?        | reference sequence index [GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai/human_g1k_v37.fasta.fai] |
-| ref_n_chrs        | Int?           | number of chromosomes [23]                                                                             |
-| genetic_map_file  | String?        | genetic map [genetic_map_hg38_withX.txt.gz/genetic_map_hg19_withX.txt.gz]                              |
-| panel_pfx         | String?        | prefix for phasing reference [CCDG_14151_B01_GRM_WGS_2020-08-05_/ALL.chr]                              |
-| panel_sfx         | String?        | Suffix for phasing reference [.filtered.phased.bcf/.phase3_integrated.20130502.genotypes.bcf]          |
-| panel_idx         | String?        | index extension for phasing reference [.bcf]                                                           |
-| n_panel_smpls     | Int?           | number of samples in phasing reference [3202/2504]                                                     |
-| data_path         | String?        | path for data files (overrides **path** column in **batch_tsv_file**)                                  |
-| batch_tsv_file    | File           | TSV file with batch information                                                                        |
-| convert_panel     | Boolean?       | whether to convert the reference panel to IMP5 format [true]                                           |
-| beagle            | Boolean?       | whether to run Beagle5 rather than IMPUTE5 [false]                                                     |
-| out_ds            | Boolean?       | whether imputation VCFs should contain the FORMAT/DS field (Genotype dosages) [true]                   |
-| out_gp            | Boolean?       | whether imputation VCFs should contain the FORMAT/GP field (Genotype probabilities) [false]            |
-| out_ap            | Boolean?       | whether imputation VCFs should contain the FORMAT/AP field (ALT haplotype probabilities) [false]       |
-| impute_extra_args | String?        | extra arguments for IMPUTE5/Beagle5                                                                    |
-| basic_bash_docker | String?        | docker to run basic bash scripts [ubuntu:latest]                                                       |
-| pandas_docker     | String?        | docker to run task ref_scatter [amancevice/pandas:slim]                                                |
-| docker_registry   | String?        | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
-| bcftools_docker   | String?        | docker to run tasks requiring BCFtools [bcftools:1.11-yyyymmdd]                                        |
-| impute5_docker    | String?        | docker to run tasks requiring IMPUTE5 [impute5:1.11-yyyymmdd]                                          |
-| beagle5_docker    | String?        | docker to run tasks requiring Beagle5 [beagle5:1.11-yyyymmdd]                                          |
+| key                    | type           | description                                                                                            |
+|------------------------|----------------|--------------------------------------------------------------------------------------------------------|
+| sample_set_id          | String         | cohort name that will be used as prefix for temporary and output files                                 |
+| mode                   | String?        | pipeline mode, one of: **pgt** or **imp** [**pgt**]                                                    |
+| target                 | String?        | pipeline final state, one of: **imp** or **ext** [**pngs**]                                            |
+| max_win_size_cm        | Float?         | maximum windows size in cM for phasing [10.0]                                                          |
+| overlap_size_cm        | Float?         | required overlap size in cM for consecutive windows [2.0]                                              |
+| format_id              | String?        | format ID to extend to imputed haplotypes [AS]                                                         |
+| ext_string             | String?        | extension string for the imputed VCF with the extended format [as]                                     |
+| target_chrs            | Array[String]? | list of chromosomes to impute                                                                          |
+| ref_name               | String?        | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]                   |
+| ref_path               | String?        | path for reference genome resources (needed unless all resources are provided with full path)          |
+| ref_fasta_fai          | String?        | reference sequence index [GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai/human_g1k_v37.fasta.fai] |
+| ref_n_chrs             | Int?           | number of chromosomes [23]                                                                             |
+| mhc_reg                | String?        | interval region for MHC [chr6:27518932-33480487/6:27486711-33448264]                                   |
+| genetic_map_file       | String?        | genetic map [genetic_map_hg38_withX.txt.gz/genetic_map_hg19_withX.txt.gz]                              |
+| panel_pfx              | String?        | prefix for phasing reference [CCDG_14151_B01_GRM_WGS_2020-08-05_/ALL.chr]                              |
+| panel_sfx              | String?        | Suffix for phasing reference [.filtered.phased.bcf/.phase3_integrated.20130502.genotypes.bcf]          |
+| panel_idx              | String?        | index extension for phasing reference [.bcf]                                                           |
+| n_panel_smpls          | Int?           | number of samples in phasing reference [3202/2504]                                                     |
+| data_path              | String?        | path for data files (overrides **path** column in **batch_tsv_file**)                                  |
+| batch_tsv_file         | File           | TSV file with batch information (e.g. output table from mocha.wdl)                                     |
+| remove_samples_file    | File?          | optional file with list of samples that should not be imputed                                          |
+| convert_panel          | Boolean?       | whether to convert the reference panel to IMP5 format [true]                                           |
+| beagle                 | Boolean?       | whether to run Beagle5 rather than IMPUTE5 [false]                                                     |
+| out_ds                 | Boolean?       | whether imputation VCFs should contain the FORMAT/DS field (Genotype dosages) [true]                   |
+| out_gp                 | Boolean?       | whether imputation VCFs should contain the FORMAT/GP field (Genotype probabilities) [false]            |
+| out_ap                 | Boolean?       | whether imputation VCFs should contain the FORMAT/AP field (ALT haplotype probabilities) [false]       |
+| impute_extra_args      | String?        | extra arguments for IMPUTE5/Beagle5                                                                    |
+| basic_bash_docker      | String?        | docker to run basic bash scripts [ubuntu:latest]                                                       |
+| pandas_docker          | String?        | docker to run task ref_scatter [amancevice/pandas:slim]                                                |
+| docker_repository      | String?        | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
+| bcftools_docker        | String?        | docker to run tasks requiring BCFtools [bcftools:1.13-yyyymmdd]                                        |
+| impute5_docker         | String?        | docker to run tasks requiring IMPUTE5 [impute5:1.13-yyyymmdd]                                          |
+| beagle5_docker         | String?        | docker to run tasks requiring Beagle5 [beagle5:1.13-yyyymmdd]                                          |
 
 Make sure all the `pgt_vcf_files` from the MoChA pipeline are first available in the `gs://{google-bucket}/vcfs` directory, together with the `vcf_files` including the MoChA calls. We strongly advise to use **max_win_size_cm** smaller than **30.0** as imputation of large chromosome windows can be prohibitevely memory intensive due to the high density of variants in the reference panels
 
@@ -567,16 +572,17 @@ Define options to run the WDL:
   "impute.mode": "pgt",
   "impute.target": "ext",
   "impute.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
-  "impute.max_win_size_cm": 50.0,
-  "impute.overlap_size_cm": 5.0,
+  "impute.max_win_size_cm": 10.0,
+  "impute.overlap_size_cm": 2.0,
   "impute.target_chrs": ["chr12", "chrX"],
   "impute.ref_name": "GRCh38",
   "impute.ref_path": "gs://{google-bucket}/GRCh38",
   "impute.data_path": "gs://{google-bucket}/vcfs",
   "impute.beagle": false,
-  "impute.docker_registry": "us.gcr.io/mccarroll-mocha"
+  "impute.docker_repository": "us.gcr.io/mccarroll-mocha"
 }
 ```
+If you want to impute all chromosomes, you can omit the `impute.target_chrs` option
 
 The `batch_tsv_file` input table should look like this:
 
@@ -585,7 +591,7 @@ The `batch_tsv_file` input table should look like this:
 | A        | 20      | hapmap370k.A.as.bcf   | hapmap370k.A.as.bcf.csi   | hapmap370k.A.pgt.bcf | hapmap370k.A.pgt.bcf.csi |
 | B        | 20      | hapmap370k.B.as.bcf   | hapmap370k.B.as.bcf.csi   | hapmap370k.B.pgt.bcf | hapmap370k.B.pgt.bcf.csi |
 
-The `output_tsv_file` from the MoChA pipeline will include these columns
+The `output_tsv_file` from the MoChA pipeline will include these columns. If you are only interested in imputing genotype without extending the MoChA calls, you do not need to include columns `vcf` and `vcf_index`
 
 Notice that the imputation pipeline acts independently on each batch and on each chromosome so that you do not have to run all batches and chromosomes at once in one job. Running imputation as multiple jobs will not affect the final result. You can control which batches are imputed through the `batch_tsv_file` input table and you can control which chromosomes are imputed through the `target_chrs` string array
 
@@ -612,52 +618,48 @@ for chr in {1..22} X; do
   cut -f3 samples_file.txt | sort | uniq | xargs -i bcftools index -f {}.bcf
 done
 ```
-Make sure you are using BCFtools version 1.11 or newer, as previous versions are missing the required splitting functionality. Notice that the above command will also strip the imputed VCF of all attributes except ID and FMT/GT, as this will allow the allelic shift pipeline to run faster
+Make sure you are using BCFtools version 1.13 or newer, as previous versions are missing the required splitting functionality. Notice that the above command will also strip the imputed VCF of all attributes except ID and FMT/GT, as this will allow the allelic shift pipeline to run faster
 
 Allelic Shift Pipeline
 ======================
 
 The following are the primary options that you can set in the main input json file for use with <a href="shift.wdl">shift.wdl</a>
 
-| key               | type     | description                                                                                   |
-|-------------------|----------|-----------------------------------------------------------------------------------------------|
-| sample_set_id     | String   | cohort name that will be used as prefix for temporary and output files                        |
-| region            | String   | region to extract for allelic shift analysis                                                  |
-| as_id             | String?  | allelic shift ID [AS]                                                                         |
-| ext_string        | String   | extension string for the imputed VCF with the extended format [as]                            |
-| ref_path          | String?  | path for reference genome resources (needed unless all resources are provided with full path) |
-| cyto_file         | String?  | file with location of cytoband regions [cytoBand.txt.gz]                                      |
-| data_path         | String?  | path for data files (overrides **path** column in **batch_tsv_file**)                         |
-| batch_tsv_file    | File     | TSV file with batch information                                                               |
-| samples_file      | File?    | list of samples to include in the allelic shift analysis                                      |
-| drop_genotypes    | Boolean? | whether to drop genotypes after computing allelic shift counts [true]                         |
-| phred_score       | Boolean? | whether the binomial p-values should be recorded as phred scores [true]                       |
-| plot              | Boolean? | whether to generate a summary plot [true]                                                     |
-| basic_bash_docker | String?  | docker to run basic bash scripts [ubuntu:latest]                                              |
-| docker_registry   | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                         |
-| bcftools_docker   | String?  | docker to run tasks requiring BCFtools [bcftools:1.11-yyyymmdd]                               |
-| r_mocha_docker    | String?  | docker to run tasks mocha_{plot,summary} [r_mocha:1.11-yyyymmdd]                              |
+| key                 | type     | description                                                                                   |
+|---------------------|----------|-----------------------------------------------------------------------------------------------|
+| sample_set_id       | String   | cohort name that will be used as prefix for temporary and output files                        |
+| remove_samples_file | File?    | optional file with list of samples to remove for the Fisher's exact test                      |
+| pheno_tsv_file      | File     | phenotype table with phenotypes that need to be tested                                        |
+| as_id               | String?  | allelic shift ID [AS]                                                                         |
+| ext_string          | String   | extension string for the imputed VCF with the extended format [as.sites]                      |
+| ref_name            | String?  | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]          |
+| ref_path            | String?  | path for reference genome resources (needed unless all resources are provided with full path) |
+| chr_prefix          | String?  | whether chromosome contigs have a chromosome prefix [chr/]                                    |
+| cyto_file           | String?  | file with location of cytoband regions [cytoBand.txt.gz]                                      |
+| data_path           | String?  | path for data files (overrides **path** column in **batch_tsv_file**)                         |
+| batch_tsv_file      | File     | TSV file with batch information (e.g. output table from impute.wdl)                           |
+| fisher_exact        | Boolean? | whether to additionally run a Fisher's exact test for selected vs. unselected samples [true]  |
+| drop_genotypes      | Boolean? | whether to drop genotypes after computing allelic shift counts [true]                         |
+| phred_score         | Boolean? | whether the binomial p-values should be recorded as phred scores [true]                       |
+| plot                | Boolean? | whether to generate a summary plot [true]                                                     |
+| basic_bash_docker   | String?  | docker to run basic bash scripts [debian:stable-slim]                                         |
+| docker_repository   | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                         |
+| bcftools_docker     | String?  | docker to run tasks requiring BCFtools [bcftools:1.13-yyyymmdd]                               |
+| r_mocha_docker      | String?  | docker to run tasks mocha_{plot,summary} [r_mocha:1.13-yyyymmdd]                              |
 
-If you wanted to study allelic shift for mosaic loss of chromosomes X (mLOX), you could define individuals with putative mLOX as follows:
-```
-awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-  NR==FNR && FNR>1 && ($(f["call_rate"])<.97 || $(f["baf_auto"])>.03) {xcl[$(f["sample_id"])]++}
-  NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i}
-  NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); chrom=$(g["chrom"]); sub("^chr", "", chrom)}
-  NR>FNR && FNR>1 && !(sample_id in xcl) && $(g["computed_gender"])=="F" && chrom=="X" &&
-  $(g["length"])>1e8 && $(g["rel_cov"])<2.5 {print sample_id}' hapmap370k.stats.tsv hapmap370k.calls.tsv > hapmap370k.mLOX.lines
-```
+If you wanted to study allelic shift for a range of chromosomal alterations types, including mosaic loss of chromosomes X (mLOX), you could define samples to be removed from analysis and a table with phenotypes associated to each chromosomal alteration type as explained [here](https://github.com/freeseek/mocha/#mosaic-phenotypes)
 
 Define options to run the WDL:
 ```json
 {
   "shift.sample_set_id": "hapmap370k",
-  "shift.region": "chrX",
-  "shift.samples_file": "gs://{google-bucket}/tsvs/hapmap370k.mLOX.lines",
+  "shift.remove_samples_file": "gs://{google-bucket}/tsvs/hapmap370k.remove.lines",
+  "shift.pheno_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.pheno.tsv",
   "shift.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
-  "shift.ref_path": "gs://mccarroll-mocha/GRCh38",
+  "shift.case_samples_file": "gs://{google-bucket}/tsvs/hapmap370k.X_loss.lines",
+  "shift.ref_path": "gs://{google-bucket}/GRCh38",
   "shift.data_path": "gs://{google-bucket}/imp_vcfs",
-  "mocha.docker_registry": "us.gcr.io/mccarroll-mocha"
+  "mocha.docker_repository": "us.gcr.io/mccarroll-mocha"
 }
 ```
 
@@ -670,12 +672,115 @@ The `batch_tsv_file` input table should look like this:
 
 The `output_tsv_file` from the imputation pipeline will include these columns
 
-Once successfully run, the allelic shift pipeline will output a VCF named like `hapmap370k.chrX.as.bcf` with an `AS` INFO filed containing allelic shift counts. If you have two (or more) such VCFs (e.g. `hapmapSNP6.chrX.as.bcf`), these can be easily combined with the following command:
+Once successfully run, the allelic shift pipeline will output one VCF per phenotype, such as `hapmap370k.chrX.as.bcf`, with an `AS` INFO filed containing allelic shift counts. If you have two (or more) such VCFs from multiple cohorts (e.g. `hapmap370k.chrX.as.bcf` and `hapmapSNP6.chrX.as.bcf`), these can be easily combined with the following command:
 ```
 bcftools merge --no-version -Ou -i AS:sum -m none hapmap370k.chrX.as.bcf hapmapSNP6.chrX.as.bcf | \
   bcftools +mochatools --no-version -Ou -- --test AS --phred | \
   bcftools query -i 'binom(INFO/AS)<1e-6' -f "%CHROM\t%POS\t%ID\t%REF\t%ALT\t%AS{0}\t%AS{1}\t%pbinom_AS\n"
 ```
+
+Association Pipeline
+====================
+
+The association pipeline will run the <a href="https://rgcgithub.github.io/regenie/">regenie</a> whole genome regression model for multiple phenotypes input by the user. It is implemented following <a href="https://github.com/rgcgithub/regenie/wiki/Further-parallelization-for-level-0-models-in-Step-1">further parallelization</a> of the step 1 and by computing regression across phenotypes distributed across genome windows and Leave One Chromosome Out (LOCO) predictions distributed across phenotypes. It will optionally also compute approximate principal components and cis-associations with excess heterozygosity for mCA phenotypes using <a href="https://www.cog-genomics.org/plink/2.0/">PLINK</a>. Outputs will be indexed tables with summary statistics results that can be readily uploaded in <a href="https://my.locuszoom.org/">LocusZoom</a> or <a href="https://github.com/statgen/localzoom">LocalZoom</a>. While step 1 of the analysis is relatively inexpensive to run, step 2 will incur moderate costs, so we advise to first run the pipeline on a small number of batches at once to make sure it produces the expected output
+
+The following are the primary options that you can set in the main input json file for use with <a href="assoc.wdl">assoc.wdl</a>
+
+| key                      | type     | description                                                                                            |
+|--------------------------|----------|--------------------------------------------------------------------------------------------------------|
+| sample_set_id            | String   | cohort name that will be used as prefix for temporary and output files                                 |
+| max_win_size_cm_step2    | Float?   | maximum windows size in cM for running regressions in regenie step 2 [20.0]                            |
+| sample_tsv_file          | File     | TSV file with sample information (must include **sample_id** and **computed_gender** columns)          |
+| remove_samples_file      | File?    | optional file with list of samples to remove for the Fisher's exact test                               |
+| min_mac                  | Int?     | minimum minor allele count for variant analyses [10]                                                   |
+| min_maf                  | Float?   | minimum minor allele frequency for variant analyses [0.01]                                             |
+| covar_tsv_file           | File?    | TSV file with covariates information (must include **sample_id** column)                               |
+| pheno_tsv_file           | File     | TSV file with phenotypes that need to be tested (must include **sample_id** column)                    |
+| dosage_field             | String?  | dosage field to use in imputed input VCFs [DS]                                                         |
+| sex_specific             | String?  | indicates whether the analysis should be restricted only to **male**s or **female**s                   |
+| binary                   | Boolean? | whether the phenotypes tested are binary phenotypes [true]                                             |
+| min_case_count           | Int?     | phenotypes with lower case count will be excluded from analysis [20]                                   |
+| bsize                    | Int?     | size of the genotype blocks for regenie [500]                                                          |
+| loocv                    | Boolean? | whether to use leave-one out cross validation [true]                                                   |
+| regenie_step0_extra_args | String?  | extra arguments for regenie when computing the level 0 predictions                                     |
+| regenie_step1_extra_args | String?  | extra arguments for regenie when computing the Leave One Chromosome Out (LOCO) predictions             |
+| regenie_step2_extra_args | String?  | extra arguments for regenie when computing the association tests                                       |
+| plink_extra_args         | String?  | extra arguments for PLINK when running in-cis associations for excess heterozygosity                   |
+| step1                    | Boolean? | whether to compute the prediction through regenie step 1 [true]                                        |
+| pgt_output               | Boolean? | whether to output the pruned PLINK 1.9 files generated during step 1 [false]                           |
+| pca                      | Boolean? | whether to compute approximate principal component loadings from pruned genotype data [false]          |
+| step2                    | Boolean? | whether to compute association tests through regenie step 2 [true]                                     |
+| cis                      | Boolean? | whether to compute in-cis associations for excess heterozygosity using PLINK                           |
+| pca_ndim                 | Integer? | number of principal components for which to report loadings if requested [20]                          |
+| input_loco_lst           | File?    | regenie `_pred.list` file with list of LOCO predictions files for step 2                               |
+| input_loco_path          | String?  | regenie `.loco.gz` files containing LOCO predictions for each phenotype                                |
+| input_firth_lst          | File?    | regenie `_firth.list` file with list of Firth covariates regressions files for step 2                  |
+| input_firth_path         | String?  | regenie `.firth.gz` files containing Firth covariates regressions for each phenotype                   |
+| ref_name                 | String?  | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]                   |
+| ref_path                 | String?  | path for reference genome resources (needed unless all resources are provided with full path)          |
+| ref_fasta_fai            | String?  | reference sequence index [GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai/human_g1k_v37.fasta.fai] |
+| ref_n_chrs               | Int?     | number of chromosomes [23]                                                                             |
+| genetic_map_file         | String?  | genetic map [genetic_map_hg38_withX.txt.gz/genetic_map_hg19_withX.txt.gz]                              |
+| pca_exclusion_regions    | String?  | regions to exclup from PCA [5:...,6:...,8:...,11:...]                                                  |
+| batch_step1_tsv_file     | File?    | TSV file with batch information for phased VCF files (e.g. output table from mocha.wdl)                |
+| data_step1_path          | String?  | path for phased VCF files (overrides **path** column in **batch_step1_tsv_file**)                      |
+| batch_step2_tsv_file     | File?    | TSV file with batch information for imputed VCF files (e.g. output table from impute.wdl)              |
+| data_step2_path          | String?  | path for imputed VCF files (overrides **path** column in **batch_step2_tsv_file**)                     |
+| basic_bash_docker        | String?  | docker to run basic bash scripts [debian:stable-slim]                                                  |
+| pandas_docker            | String?  | docker to run task ref_scatter [amancevice/pandas:slim]                                                |
+| docker_repository        | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
+| bcftools_docker          | String?  | docker to run tasks requiring BCFtools [bcftools:1.13-yyyymmdd]                                        |
+| regenie_docker           | String?  | docker to run tasks requiring regenie and PLINK [regenie:1.13-yyyymmdd]                                |
+
+You can define samples to be removed from analysis and a table with phenotypes associated to each chromosomal alteration type as explained [here](https://github.com/freeseek/mocha/#mosaic-phenotypes)
+
+We advise including reported gender, age, and age², and no more than 20 principal components in your covariates file, as an excessive number of principal components can cause the Firth covariates regression for binary phenotypes to fail
+
+Define options to run the regenie step 1 component of the pipeline:
+```json
+{
+  "assoc.sample_set_id": "hapmap370k",
+  "assoc.pheno_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.pheno.tsv",
+  "assoc.binary": true,
+  "assoc.step1": true,
+  "assoc.pca": false,
+  "assoc.step2": false,
+  "assoc.cis": false,
+  "assoc.ref_name": "GRCh38",    
+  "assoc.ref_path": "gs://{google-bucket}/GRCh38",
+  "assoc.batch_step1_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
+  "assoc.data_path_step1": "gs://{google-bucket}/vcfs",
+  "assoc.remove_samples_file": "gs://{google-bucket}/lines/hapmap370k.remove.lines",
+  "assoc.sample_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.stats.tsv",
+  "assoc.covar_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.covar.tsv"
+}
+```
+Running this WDL will generate files `hapmap370k_pred.list` and `hapmap370k_firth.list` together with `.loco.gz` LOCO predictions and `.firth.gz` Firth covariate regressions files for each phenotype that will be needed to run regenie step 2
+
+Define options to run the regenie step 2 component of the pipeline:
+```json
+{
+  "assoc.sample_set_id": "hapmap370k",
+  "assoc.pheno_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.pheno.tsv",
+  "assoc.binary": true,
+  "assoc.step1": false,
+  "assoc.pca": false,
+  "assoc.step2": true,
+  "assoc.cis": false,
+  "assoc.input_loco_lst": "gs://{google-bucket}/assoc/hapmap370k_pred.list",
+  "assoc.input_loco_path": "gs://{google-bucket}/assoc/hapmap370k/loco",
+  "assoc.input_firth_lst": "gs://{google-bucket}/assoc/hapmap370k_firth.list",
+  "assoc.input_firth_path": "gs://{google-bucket}/assoc/hapmap370k/firth",
+  "assoc.ref_name": "GRCh38",    
+  "assoc.ref_path": "gs://{google-bucket}/GRCh38",
+  "assoc.batch_step2_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
+  "assoc.data_path_step2": "gs://{google-bucket}/vcfs",
+  "assoc.remove_samples_file": "gs://{google-bucket}/lines/hapmap370k.remove.lines",
+  "assoc.sample_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.stats.tsv",
+  "assoc.covar_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.covar.tsv"
+}
+```
+Notice that you can run step 1 and step 2 of the association pipeline at once rather than as two separate steps. It is also okay for `batch_step1_tsv_file` and `batch_step2_tsv_file` to be the same file rather than separate files. If separate files, the two tables should have the same list of batch IDs
 
 Polygenic Score Pipeline
 ========================
@@ -700,14 +805,14 @@ The following are the primary options that you can set in the main input json fi
 | ref_fasta_fai     | String?        | reference sequence index [GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai/human_g1k_v37.fasta.fai] |
 | ref_n_chrs        | Int?           | number of chromosomes [23]                                                                             |
 | data_path         | String?        | path for data files (overrides **path** column in **batch_tsv_file**)                                  |
-| batch_tsv_file    | File           | TSV file with batch information                                                                        |
+| batch_tsv_file    | File           | TSV file with batch information (e.g. output table from mocha.wdl)                                     |
 | samples_file      | File?          | list of samples to include in the polygenic score analysis                                             |
 | exclude_str       | String?        | exclusion criterias for variants (e.g. [INFO<0.8]) not to be used with include_str                     |
 | include_str       | String?        | inclusion criterias for variants (e.g. [AF>0.01 && AF<0.99]) not to be used with exclude_str           |
 | basic_bash_docker | String?        | docker to run basic bash scripts [ubuntu:latest]                                                       |
-| docker_registry   | String?        | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
-| bcftools_docker   | String?        | docker to run tasks requiring BCFtools [bcftools:1.11-yyyymmdd]                                        |
-| r_mocha_docker    | String?        | docker to run tasks mocha_{plot,summary} [r_mocha:1.11-yyyymmdd]                                       |
+| docker_repository | String?        | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
+| bcftools_docker   | String?        | docker to run tasks requiring BCFtools [bcftools:1.13-yyyymmdd]                                        |
+| r_mocha_docker    | String?        | docker to run tasks mocha_{plot,summary} [r_mocha:1.13-yyyymmdd]                                       |
 
 Download polygenic scores summary statistics for blood cell counts and liftOver to GRCh38:
 ```
@@ -748,11 +853,11 @@ Define options to run the WDL to compute the polygenic scores related to mLOX:
     "PGS000177.hg38.txt.gz", "PGS000178.hg38.txt.gz", "PGS000179.hg38.txt.gz", "PGS000180.hg38.txt.gz", "PGS000181.hg38.txt.gz",
     "PGS000182.hg38.txt.gz", "PGS000183.hg38.txt.gz", "PGS000184.hg38.txt.gz", "PGS000185.hg38.txt.gz", "PGS000186.hg38.txt.gz",
     "PGS000187.hg38.txt.gz", "PGS000188.hg38.txt.gz", "PGS000189.hg38.txt.gz", "PGS000190.hg38.txt.gz", "PGS000191.hg38.txt.gz"],
-  "score.samples_file": "gs://{google-bucket}/tsvs/hapmap370k.mLOX.lines",
+  "score.samples_file": "gs://{google-bucket}/tsvs/hapmap370k.X_lines.lines",
   "score.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
-  "score.ref_path": "gs://mccarroll-mocha/GRCh38",
+  "score.ref_path": "gs://{google-bucket}/GRCh38",
   "score.data_path": "gs://{google-bucket}/imp_vcfs",
-  "score.docker_registry": "us.gcr.io/mccarroll-mocha"
+  "score.docker_repository": "us.gcr.io/mccarroll-mocha"
 }
 ```
 
@@ -770,9 +875,9 @@ Define options to run the WDL to compute genome-wide polygenic scores for all sa
     "PGS000187.hg38.txt.gz", "PGS000188.hg38.txt.gz", "PGS000189.hg38.txt.gz", "PGS000190.hg38.txt.gz", "PGS000191.hg38.txt.gz"],
   "score.covars_file": "gs://{google-bucket}/tsvs/hapmap370k.pcs.tsv",
   "score.batch_tsv_file": "gs://{google-bucket}/tsvs/hapmap370k.batch.tsv",
-  "score.ref_path": "gs://mccarroll-mocha/GRCh38",
+  "score.ref_path": "gs://{google-bucket}/GRCh38",
   "score.data_path": "gs://{google-bucket}/imp_vcfs",
-  "score.docker_registry": "us.gcr.io/mccarroll-mocha"
+  "score.docker_repository": "us.gcr.io/mccarroll-mocha"
 }
 ```
 
@@ -837,9 +942,12 @@ done
 ```
 * Create a Google bucket `gs://{google-bucket}` making sure request pays is not activated from the <a href="https://console.cloud.google.com/storage/browser">Storage</a> page or through the following command:
 ```
-gsutil mb -p {google-project} -l us-central1-a -b on gs://{google-bucket}
+$ gsutil mb -p {google-project} -l us-central1-a -b on gs://{google-bucket}
 ```
-* Create a Google virtual machine (VM) with name `INSTANCE-ID` from the <a href="https://console.cloud.google.com/compute/instances">VM instances</a> page. The **n1-standard-1** (1 vCPU, 3.75 GB memory) VM with Ubuntu 21.04 will be sufficient, but make sure to provide at least 100GB of space for the boot disk, rather than the default 10GB, as the mySQL database will easily fail with the default space settings
+* Create a Google virtual machine (VM) with name `INSTANCE-ID` from the <a href="https://console.cloud.google.com/compute/instances">VM instances</a> page. The <a href="https://cloud.google.com/compute/vm-instance-pricing#n1_standard_machine_types">n1-standard-1</a> (1 vCPU, 3.75 GB memory) VM with Debian GNU/Linux 11 can be sufficient, but make sure to provide at least 200GB of space for the boot disk, rather than the default 10GB, as the mySQL database will easily fail with the default space settings. However, to be safe, we advise to select the slightly pricier <a href="https://cloud.google.com/compute/vm-instance-pricing#n1_custommachinetypepricing">N1 custom</a> with 1 vCPU and 6.5GB memory as Cromwell can require significant amount of memory for large workflows. You can use the following command:
+```
+$ gcloud compute instances create INSTANCE-ID --project {google-project} --zone us-central1-a --boot-disk-size 200 --boot-disk-type pd-standard --custom-cpu 1 --custom-memory 6.5GB --image-project debian-cloud --image-family debian-11
+```
 
 * Start the virtual machine with the following command:
 ```
@@ -847,7 +955,7 @@ $ gcloud compute instances start INSTANCE-ID --project {google-project} --zone u
 ```
 * Copy the private json key for your service account to the VM:
 ```
-$ gcloud compute scp {google-project}.key.json INSTANCE-ID: --project mccarroll-mocha --zone us-central1-a
+$ gcloud compute scp {google-project}.key.json INSTANCE-ID: --project {google-project} --zone us-central1-a
 ```
 * Login to the VM with the following command (notice this command will enable ssh tunneling):
 ```
@@ -875,12 +983,23 @@ webservice {
   interface = 127.0.0.1
 }
 ```
-* Add the following **akka** configuration stanza to the `PAPIv2.conf` configuration file to make sure Cromwell has enough time to respond to requests for metadata even for large workflows, as it would be the case for MoChA runs on biobank-size cohorts:
+* Add the following **akka** configuration stanza to the `PAPIv2.conf` configuration file to make sure Cromwell has enough time to respond to requests for metadata even for large workflows (see <a href="https://github.com/hall-lab/cromwell-deployment/blob/master/resources/cromwell-configs/PAPI.v2.conf">here</a>), as it would be the case for MoChA runs on biobank-size cohorts:
 ```
 akka {
   http {
     server {
       request-timeout = 300s
+      idle-timeout = 300s
+    }
+  }
+}
+```
+* Add the following **services** configuration stanza to the `PAPIv2.conf` configuration file to make sure Cromwell can retrieve metadata tables with more than 1,000,000 lines:
+```
+services {
+  MetadataService {
+    config {
+      metadata-read-row-number-safety-threshold = 10000000
     }
   }
 }
@@ -1014,6 +1133,10 @@ $ curl -X GET http://localhost:8000/api/workflows/v1/query | jq
 ```
 $ curl -X GET http://localhost:8000/api/workflows/v1/{id}/metadata | jq
 ```
+* To monitor whether a job failed due to a missing input file:
+```
+$ curl -X GET http://localhost:8000/api/workflows/v1/{id}/metadata | jq | grep FileNotFoundException
+```
 * To monitor a submitted job with workflow ID `{id}` just open your browser and go to URL:
 ```
 http://localhost:8000/api/workflows/v1/{id}/timing
@@ -1085,6 +1208,8 @@ The following softwares are used by the various steps of the pipelines:
 | <a href="https://github.com/poruloh/Eagle">Eagle</a>              | estimates haplotype phase from genotypes       | GPLv3       |
 | <a href="https://jmarchini.org/impute5/">IMPUTE5</a>              | imputes genotypes from phased haplotypes       | proprietary |
 | <a href="http://faculty.washington.edu/browning/beagle/beagle.html">Beagle5</a> | imputes genotypes from phased haplotypes       |  GPLv3       |
+| <a href="https://github.com/rgcgithub/regenie">regenie</a>        | runs whole genome regression modelling         | MIT         |
+| <a href="https://github.com/chrchang/plink-ng">PLINK</a>          | runs association analyses                      | GPLv3       |
 | <a href="https://github.com/broadinstitute/cromwell">Cromwell</a> | workflow management system                     | BSD         |
 
 For users and developers that want to understand the logic and ideas behind the pipeline, here is a list of important aspects:
@@ -1124,29 +1249,30 @@ Dockerfiles
 
 Dockerfile for BCFtools:
 ```
-FROM ubuntu:21.04
+FROM debian:testing-slim
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
                  bwa \
+                 tabix \
                  samtools \
                  bcftools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210315_amd64.deb && \
-    dpkg -i gtc2vcf_1.11-20210315_amd64.deb && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-20210315_amd64.deb && \
-    dpkg -i bio-mocha_1.11-20210315_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.13-20211015_amd64.deb && \
+    dpkg -i gtc2vcf_1.13-20211015_amd64.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.13-20211015_amd64.deb && \
+    dpkg -i bio-mocha_1.13-20211015_amd64.deb && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.11-20210315_amd64.deb \
-           bio-mocha_1.11-20210315_amd64.deb \
+    rm -rf gtc2vcf_1.13-20211015_amd64.deb \
+           bio-mocha_1.13-20211015_amd64.deb \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for Illumina AutoConvert Software:
 ```
-FROM ubuntu:21.04
+FROM debian:testing-slim
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -1158,8 +1284,8 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev \
                  libmono-system-windows-forms4.0-cil && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210315_amd64.deb && \
-    dpkg -i gtc2vcf_1.11-20210315_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.13-20211015_amd64.deb && \
+    dpkg -i gtc2vcf_1.13-20211015_amd64.deb && \
 #   wget https://support.illumina.com/content/dam/illumina-support/documents/downloads/software/beeline/autoconvert-software-v2-0-1-installer.zip && \
     wget --no-check-certificate https://www.dropbox.com/s/tm02cu6t0ib1us7/autoconvert-software-v2-0-1-installer.zip && \
     unzip autoconvert-software-v2-0-1-installer.zip && \
@@ -1180,7 +1306,7 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.11-20210315_amd64.deb \
+    rm -rf gtc2vcf_1.13-20211015_amd64.deb \
            autoconvert-software-v2-0-1-installer.zip \
            AutoConvertInstaller.msi \
            genomestudio-software-v2-0-4-5-installer.zip \
@@ -1193,15 +1319,15 @@ RUN apt-get -qqy update --fix-missing && \
 
 Dockerfile for Illumina Array Analysis Platform Genotyping Command Line Interface:
 ```
-FROM ubuntu:21.04
+FROM debian:testing-slim
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
                  bcftools \
                  icu-devtools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210315_amd64.deb && \
-    dpkg -i gtc2vcf_1.11-20210315_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.13-20211015_amd64.deb && \
+    dpkg -i gtc2vcf_1.13-20211015_amd64.deb && \
     wget ftp://webdata2:webdata2@ussd-ftp.illumina.com/downloads/software/iaap/iaap-cli-linux-x64-1.1.0.tar.gz && \
     mkdir /opt/iaap-cli && \
     tar xzvf iaap-cli-linux-x64-1.1.0.tar.gz -C /opt iaap-cli-linux-x64-1.1.0/iaap-cli --strip-components=1 && \
@@ -1210,37 +1336,36 @@ RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.11-20210315_amd64.deb \
+    rm -rf gtc2vcf_1.13-20211015_amd64.deb \
            iaap-cli-linux-x64-1.1.0.tar.gz \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for Affymetrix Power Tools:
 ```
-FROM ubuntu:21.04
+FROM debian:testing-slim
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
                  bcftools \
                  unzip && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.11-20210315_amd64.deb && \
-    dpkg -i gtc2vcf_1.11-20210315_amd64.deb && \
-    wget --no-check-certificate https://downloads.thermofisher.com/APT/2.11.3/apt_2.11.3_linux_64_bit_x86_binaries.zip && \
-    unzip -ojd /usr/local/bin apt_2.11.3_linux_64_bit_x86_binaries.zip apt_2.11.3_linux_64_bit_x86_binaries/bin/apt-probeset-genotype && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.13-20211015_amd64.deb && \
+    dpkg -i gtc2vcf_1.13-20211015_amd64.deb && \
+    wget --no-check-certificate https://downloads.thermofisher.com/APT/APT_2.11.4/apt_2.11.4_linux_64_bit_x86_binaries.zip && \
+    unzip -ojd /usr/local/bin apt_2.11.4_linux_64_bit_x86_binaries.zip apt_2.11.4_linux_64_bit_x86_binaries/bin/apt-probeset-genotype && \
     chmod a+x /usr/local/bin/apt-probeset-genotype && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
-                 wget \
-		 unzip && \
+                 wget && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.11-20210315_amd64.deb \
-           apt_2.11.3_linux_64_bit_x86_binaries.zip \
+    rm -rf gtc2vcf_1.13-20211015_amd64.deb \
+           apt_2.11.4_linux_64_bit_x86_binaries.zip \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for ggplot2 and scripts to plot MoChA calls:
 ```
-FROM ubuntu:21.04
+FROM debian:testing-slim
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -1250,19 +1375,17 @@ RUN apt-get -qqy update --fix-missing && \
                  r-cran-ggplot2 \
                  r-cran-data.table \
                  r-cran-reshape2 && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-20210315_amd64.deb && \
-    dpkg -i bio-mocha_1.11-20210315_amd64.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.13-20211015_amd64.deb && \
+    dpkg -i bio-mocha_1.13-20211015_amd64.deb && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf bio-mocha_1.11-20210315_amd64.deb \
+    rm -rf bio-mocha_1.13-20211015_amd64.deb \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for SHAPEIT4:
 ```
-FROM ubuntu:21.04
-ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
@@ -1272,13 +1395,13 @@ RUN apt-get -qqy update --fix-missing && \
                  libboost-program-options-dev \
                  libhts-dev \
                  libbz2-dev \
-		 libssl-dev \
+                 libssl-dev \
                  libboost-iostreams1.74.0 \
                  libboost-program-options1.74.0 \
                  bcftools && \
-    wget --no-check-certificate https://github.com/odelaneau/shapeit4/archive/v4.2.1.tar.gz && \
-    tar xzf v4.2.1.tar.gz && \
-    cd shapeit4-4.2.1 && \
+    wget --no-check-certificate https://github.com/odelaneau/shapeit4/archive/v4.2.2.tar.gz && \
+    tar xzf v4.2.2.tar.gz && \
+    cd shapeit4-4.2.2 && \
     sed -i 's/^HTSLIB_INC=\$(HOME)\/Tools\/htslib-1.11$/HTSLIB_INC=-Ihtslib/' makefile && \
     sed -i 's/^HTSLIB_LIB=\$(HOME)\/Tools\/htslib-1.11\/libhts.a$/HTSLIB_LIB=-lhts/' makefile && \
     sed -i 's/^BOOST_LIB_IO=\/usr\/lib\/x86_64-linux-gnu\/libboost_iostreams.a$/BOOST_LIB_IO=-lboost_iostreams/' makefile && \
@@ -1294,16 +1417,16 @@ RUN apt-get -qqy update --fix-missing && \
                  libboost-program-options-dev \
                  libhts-dev \
                  libbz2-dev \
-		 libssl-dev && \
+                 libssl-dev && \
     apt-get -qqy clean && \
-    rm -rf v4.2.1.tar.gz \
-           shapeit4-4.2.1 \
+    rm -rf v4.2.2.tar.gz \
+           shapeit4-4.2.2 \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for Eagle:
 ```
-FROM ubuntu:21.04
+FROM debian:testing-slim
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -1347,7 +1470,7 @@ RUN apt-get -qqy update --fix-missing && \
 
 Dockerfile for IMPUTE5:
 ```
-FROM ubuntu:21.04
+FROM debian:testing-slim
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
@@ -1363,28 +1486,48 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  unzip && \
     apt-get -qqy clean && \
-    rm -rf impute5_v1.1.4.zip \
+    rm -rf impute5_v1.1.5.zip \
            /var/lib/apt/lists/*
 ```
 
 Dockerfile for Beagle:
 ```
-FROM ubuntu:21.04
+FROM debian:testing-slim
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get -qqy update --fix-missing && \
+    apt-get -qqy install --no-install-recommends \
+                 bcftools \
+                 beagle && \
+    apt-get -qqy clean && \
+    rm -rf /var/lib/apt/lists/*
+```
+
+Dockerfile for regenie:
+```
+FROM debian:testing-slim
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy install --no-install-recommends \
                  wget \
+                 unzip \
+                 libgomp1 \
+                 tabix \
                  bcftools \
-                 default-jre-headless && \
-    wget -P /usr/bin/ --no-check-certificate http://faculty.washington.edu/browning/beagle/beagle.18May20.d20.jar && \
-    wget -P /usr/bin http://faculty.washington.edu/browning/beagle/bref3.18May20.d20.jar && \
-    ln -s beagle.18May20.d20.jar /usr/bin/beagle.jar && \
-    ln -s bref3.18May20.d20.jar /usr/bin/bref3.jar && \
+                 plink1.9 \
+                 plink2 && \
+    wget --no-check-certificate https://github.com/rgcgithub/regenie/releases/download/v2.2.4/regenie_v2.2.4.gz_x86_64_Linux_mkl.zip && \
+    unzip -d /usr/local/bin regenie_v2.2.4.gz_x86_64_Linux_mkl.zip && \
+    chmod a+x /usr/local/bin/regenie_v2.2.4.gz_x86_64_Linux_mkl && \
+    ln -s regenie_v2.2.4.gz_x86_64_Linux_mkl /usr/local/bin/regenie && \
+    wget --no-check-certificate https://s3.amazonaws.com/plink2-assets/plink2_linux_avx2_20211011.zip && \
+    unzip -d /usr/local/bin plink2_linux_avx2_20211011.zip && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
-                 wget && \
-    apt-get -qqy autoremove && \
+                 wget \
+                 unzip && \
     apt-get -qqy clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf regenie_v2.2.4.gz_x86_64_Linux_mkl.zip \
+           plink2_linux_avx2_20211011.zip \
+           /var/lib/apt/lists/*
 ```
 
 Acknowledgements

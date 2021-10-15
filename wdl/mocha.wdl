@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2020-2021 Giulio Genovese
 ##
-## Version 2021-05-14
+## Version 2021-10-15
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs MoChA on a cohort of samples genotyped with either Illumina or Affymetrix DNA microarrays
 ##
 ## Cromwell version support
-## - Successfully tested on v61
+## - Successfully tested on v70
 ##
 ## Distributed under terms of the MIT License
 
@@ -33,7 +33,7 @@ workflow mocha {
   input {
     String sample_set_id
     String mode # idat gtc cel chp txt vcf pvcf
-    String target = "pngs" # vcf pvcf calls pngs
+    String target = "calls" # vcf pvcf calls pngs
     Boolean realign = false
     Boolean wgs = false
     Boolean gtc_output = false # only for idat mode
@@ -41,7 +41,7 @@ workflow mocha {
     Int idat_batch_size = 48
     Int gtc_batch_size = 1024
     Int chp_batch_size = 1024
-    Float max_win_size_cm = 300.0
+    Float max_win_size_cm = 50.0
     Float overlap_size_cm = 5.0
     Float sample_call_rate_thr = 0.97
     Float variant_call_rate_thr = 0.97
@@ -51,7 +51,7 @@ workflow mocha {
     String ref_name = "GRCh38"
     String? ref_path
     String? ref_fasta
-    Int? n_chrs
+    Int? ref_n_chrs
     String? mhc_reg
     String? kir_reg
     String? dup_file
@@ -73,16 +73,16 @@ workflow mocha {
     String? phase_extra_args
     String? mocha_extra_args
     String? mocha_plot_extra_args
-    String basic_bash_docker = "ubuntu:latest"
+    String basic_bash_docker = "debian:stable-slim"
     String pandas_docker = "amancevice/pandas:slim"
-    String docker_registry = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.11-20210514"
-    String iaap_cli_docker = "iaap_cli:1.11-20210514"
-    String autoconvert_docker = "autoconvert:1.11-20210514"
-    String apt_docker = "apt:1.11-20210514"
-    String shapeit4_docker = "shapeit4:1.11-20210514"
-    String eagle_docker = "eagle:1.11-20210514"
-    String r_mocha_docker = "r_mocha:1.11-20210514"
+    String docker_repository = "us.gcr.io/mccarroll-mocha"
+    String bcftools_docker = "bcftools:1.13-20211015"
+    String iaap_cli_docker = "iaap_cli:1.13-20211015"
+    String autoconvert_docker = "autoconvert:1.13-20211015"
+    String apt_docker = "apt:1.13-20211015"
+    String shapeit4_docker = "shapeit4:1.13-20211015"
+    String eagle_docker = "eagle:1.13-20211015"
+    String r_mocha_docker = "r_mocha:1.13-20211015"
     Boolean autoconvert = false
     Boolean? table_output
     Boolean? do_not_check_bpm
@@ -96,13 +96,13 @@ workflow mocha {
 
   Boolean mode_is_vcf = mode == "vcf" || mode == "pvcf"
 
-  String docker_registry_with_sep = docker_registry + if docker_registry != "" && docker_registry == sub(docker_registry, "/$", "") then "/" else ""
+  String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
 
   String ref_path_with_sep = select_first([ref_path, ""]) + if defined(ref_path) && select_first([ref_path]) == sub(select_first([ref_path]), "/$", "") then "/" else ""
   Reference ref = object {
     name: ref_name,
     fasta: ref_path_with_sep + select_first([ref_fasta, if ref_name == "GRCh38" then "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna" else if ref_name == "GRCh37" then "human_g1k_v37.fasta" else None]),
-    n_chrs: select_first([n_chrs, 23]),
+    n_chrs: select_first([ref_n_chrs, 23]),
     mhc_reg: select_first([mhc_reg, if ref_name == "GRCh38" then "chr6:27518932-33480487" else if ref_name == "GRCh37" then "6:27486711-33448264" else None]),
     kir_reg: select_first([kir_reg, if ref_name == "GRCh38" then "chr19:54071493-54992731" else if ref_name == "GRCh37" then "19:54574747-55504099" else None]),
     dup_file: ref_path_with_sep + select_first([dup_file, if ref_name == "GRCh38" || ref_name == "GRCh37" then "segdups.bed.gz" else None]),
@@ -143,7 +143,7 @@ workflow mocha {
           csv_file = manifest_path_with_sep + csv_file,
           ref_fasta = ref.fasta,
           ref_fasta_idxs = prefix(ref.fasta + ".", ["amb", "ann", "bwt", "pac", "sa"]),
-          docker = docker_registry_with_sep + bcftools_docker,
+          docker = docker_repository_with_sep + bcftools_docker,
       }
     }
     Map[String, File] csv2sam = as_map(zip(csv_files, csv2bam.bam_file))
@@ -178,7 +178,7 @@ workflow mocha {
             red_idat_files = prefix(data_paths_with_sep[(idat.idxs[idx])], idat_batch2red_idat_files[(idat.sub_batches[idx])]),
             autoconvert = autoconvert,
             filebase = sample_set_id + "." + idat.sub_batches[idx],
-            docker = if autoconvert then docker_registry_with_sep + autoconvert_docker else docker_registry_with_sep + iaap_cli_docker,
+            docker = if autoconvert then docker_repository_with_sep + autoconvert_docker else docker_repository_with_sep + iaap_cli_docker,
         }
       }
       call tsv_concat as green_idat_tsv { input: tsv_files = idat2gtc.green_idat_tsv, filebase = sample_set_id + ".green_idat", docker = basic_bash_docker }
@@ -210,7 +210,7 @@ workflow mocha {
             sam_file = sams[(gtc.idxs[idx])],
             reheader_file = gtc_reheader.map_files[idx],
             filebase = sample_set_id + "." + gtc.sub_batches[idx],
-            docker = docker_registry_with_sep + bcftools_docker,
+            docker = docker_repository_with_sep + bcftools_docker,
         }
       }
       call tsv_concat as gtc_tsv { input: tsv_files = gtc2vcf.gtc_tsv, filebase = sample_set_id + ".gtc", docker = basic_bash_docker }
@@ -225,7 +225,7 @@ workflow mocha {
             input:
               vcf_files = idx2gtc2vcf_files[idx],
               filebase = pfxs[idx],
-              docker = docker_registry_with_sep + bcftools_docker
+              docker = docker_repository_with_sep + bcftools_docker
           }
         }
         File gtc2vcf_files = select_first([gtc2vcf_merge.vcf_file, idx2gtc2vcf_files[idx][0]])
@@ -256,7 +256,7 @@ workflow mocha {
             chip_type = chip_type,
             table_output = table_output,
             filebase = pfxs[idx],
-            docker = docker_registry_with_sep + apt_docker
+            docker = docker_repository_with_sep + apt_docker
         }
       }
       call tsv_concat as cel_tsv { input: tsv_files = cel2chp.cel_tsv, filebase = sample_set_id + ".cel", docker = basic_bash_docker }
@@ -287,7 +287,7 @@ workflow mocha {
             sam_file = sams[(chp.idxs[idx])],
             reheader_file = chp_reheader.map_files[idx],
             filebase = sample_set_id + "." + chp.sub_batches[idx],
-            docker = docker_registry_with_sep + bcftools_docker
+            docker = docker_repository_with_sep + bcftools_docker
         }
       }
 
@@ -301,7 +301,7 @@ workflow mocha {
             input:
               vcf_files = idx2chp2vcf_files[idx],
               filebase = pfxs[idx],
-              docker = docker_registry_with_sep + bcftools_docker
+              docker = docker_repository_with_sep + bcftools_docker
           }
         }
         File chp2vcf_files = select_first([chp2vcf_merge.vcf_file, idx2chp2vcf_files[idx][0]])
@@ -332,7 +332,7 @@ workflow mocha {
             sam_file = sams[idx],
             reheader_file = txt_reheader.map_files[idx],
             filebase = pfxs[idx],
-            docker = docker_registry_with_sep + bcftools_docker
+            docker = docker_repository_with_sep + bcftools_docker
         }
       }
     }
@@ -370,7 +370,7 @@ workflow mocha {
         input:
           vcf_file = if mode_is_vcf then data_paths_with_sep[idx] + batch_tbl["vcf"][idx] else select_first([unphased_vcf_files])[idx],
           intervals_bed = ref_scatter.intervals_bed,
-          docker = docker_registry_with_sep + bcftools_docker
+          docker = docker_repository_with_sep + bcftools_docker
       }
     }
     if (defined(extra_xcl_vcf_file)) {
@@ -378,7 +378,7 @@ workflow mocha {
         input:
           vcf_file = select_first([extra_xcl_vcf_file]),
           intervals_bed = ref_scatter.intervals_bed,
-          docker = docker_registry_with_sep + bcftools_docker
+          docker = docker_repository_with_sep + bcftools_docker
       }
     }
 
@@ -395,7 +395,7 @@ workflow mocha {
         input:
           vcf_files = interval_slices[idx],
           filebase = sample_set_id + "." + idx,
-          docker = docker_registry_with_sep + bcftools_docker
+          docker = docker_repository_with_sep + bcftools_docker
       }
       call vcf_qc {
         input:
@@ -407,7 +407,7 @@ workflow mocha {
           variant_call_rate_thr = variant_call_rate_thr,
           duplicate_samples_file = duplicate_samples_file,
           extra_xcl_vcf_file = if defined(extra_xcl_vcf_file) then select_first([xcl_vcf_scatter.vcf_files])[idx] else None,
-          docker = docker_registry_with_sep + bcftools_docker
+          docker = docker_repository_with_sep + bcftools_docker
       }
       Int beg = intervals_tbl[1][idx] # cast string to integer
       Int end = intervals_tbl[2][idx] # cast string to integer
@@ -427,7 +427,7 @@ workflow mocha {
           wgs = wgs,
           eagle = eagle,
           phase_extra_args = phase_extra_args,
-          docker = if eagle then docker_registry_with_sep + eagle_docker else docker_registry_with_sep + shapeit4_docker
+          docker = if eagle then docker_repository_with_sep + eagle_docker else docker_repository_with_sep + shapeit4_docker
       }
       call vcf_split {
         input:
@@ -436,7 +436,7 @@ workflow mocha {
           sample_id_file = sample_id_split_tsv.file,
           ped_file = ped_file,
           rule = if defined(ped_file) then ref.name else None,
-          docker = docker_registry_with_sep + bcftools_docker
+          docker = docker_repository_with_sep + bcftools_docker
       }
     }
 
@@ -444,7 +444,7 @@ workflow mocha {
       input:
         vcf_files = vcf_qc.xcl_vcf_file,
         filebase = sample_set_id + ".xcl",
-        docker = docker_registry_with_sep + bcftools_docker
+        docker = docker_repository_with_sep + bcftools_docker
     }
 
     Array[Array[File]] batch_slices = transpose(vcf_split.vcf_files)
@@ -453,7 +453,7 @@ workflow mocha {
         input:
           vcf_files = batch_slices[idx],
           filebase = pfxs[idx] + ".pgt",
-          docker = docker_registry_with_sep + bcftools_docker
+          docker = docker_repository_with_sep + bcftools_docker
       }
       call vcf_import {
         input:
@@ -461,15 +461,18 @@ workflow mocha {
           pgt_vcf_idx = vcf_concat.vcf_idx,
           unphased_vcf_file = if mode_is_vcf then data_paths_with_sep[idx] + batch_tbl["vcf"][idx] else select_first([unphased_vcf_files])[idx],
           unphased_vcf_idx = if mode_is_vcf then data_paths_with_sep[idx] + batch_tbl["vcf_index"][idx] else select_first([unphased_vcf_idxs])[idx],
-          docker = docker_registry_with_sep + bcftools_docker
+          docker = docker_repository_with_sep + bcftools_docker
       }
     }
   }
 
   if (target == "calls" || target == "pngs") {
     scatter (idx in range(n_batches)) {
+      call get_max_nrecords { input: vcf_idx = if mode == "pvcf" then data_paths_with_sep[idx] + batch_tbl["vcf_index"][idx] else select_first([vcf_import.vcf_idx])[idx], docker = docker_repository_with_sep + bcftools_docker }
       call vcf_mocha {
         input:
+          n_smpls = if mode == "pvcf" then batch_tbl["n_smpls"][idx] else select_first([vcf_import.n_smpls])[idx],
+          max_n_markers = get_max_nrecords.n,
           assembly = ref.name,
           pvcf_file = if mode == "pvcf" then data_paths_with_sep[idx] + batch_tbl["vcf"][idx] else select_first([vcf_import.vcf_file])[idx],
           pvcf_idx = if mode == "pvcf" then data_paths_with_sep[idx] + batch_tbl["vcf_index"][idx] else select_first([vcf_import.vcf_idx])[idx],
@@ -481,7 +484,7 @@ workflow mocha {
           kir_reg = if ref.kir_reg != "" then ref.kir_reg else None,
           mocha_extra_args = mocha_extra_args,
           ext_string = ext_string,
-          docker = docker_registry_with_sep + bcftools_docker
+          docker = docker_repository_with_sep + bcftools_docker
       }
       if (target == "pngs") {
         call mocha_plot {
@@ -495,7 +498,7 @@ workflow mocha {
             baf_auto_thr = baf_auto_thr,
             mocha_plot_extra_args = mocha_plot_extra_args,
             wgs = wgs,
-            docker = docker_registry_with_sep + r_mocha_docker
+            docker = docker_repository_with_sep + r_mocha_docker
         }
       }
     }
@@ -510,7 +513,7 @@ workflow mocha {
         filebase = sample_set_id,
         call_rate_thr = sample_call_rate_thr,
         baf_auto_thr = baf_auto_thr,
-        docker = docker_registry_with_sep + r_mocha_docker
+        docker = docker_repository_with_sep + r_mocha_docker
     }
   }
 
@@ -525,11 +528,11 @@ workflow mocha {
     String basename_pgt_vcf_idxs = basename(if mode != "pvcf" && target != "vcf" then select_first([vcf_concat.vcf_idx])[idx] else "")
   }
   Array[Pair[String,Array[String]]] output_pairs = flatten([[("batch_id", batch_tbl["batch_id"]),
-    ("n_smpls", select_first([vcf_mocha.n_smpls, vcf_import.n_smpls, unphased_vcf_n_smpls])),
     ("vcf", basename_vcf_files),
     ("vcf_index", basename_vcf_idxs)],
     if mode == "pvcf" || target == "vcf" then [] else
-    [("xcl_vcf", basename_xcl_vcf_files),
+    [("n_smpls", select_first([vcf_import.n_smpls, unphased_vcf_n_smpls])),
+    ("xcl_vcf", basename_xcl_vcf_files),
     ("xcl_vcf_index", basename_xcl_vcf_idxs),
     ("pgt_vcf", basename_pgt_vcf_files),
     ("pgt_vcf_index", basename_pgt_vcf_idxs)]])
@@ -645,7 +648,7 @@ task tsv_column {
     fi
     ~{if column != "call_rate" then "tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col > \"" + column + ".lines\""
     else "max_call_rate=$(tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | sort -g | tail -n1)\n" +
-    "tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | if [[ $max_call_rate > 1.0 ]]; then awk '{print $0/100}'; else cat; fi > \"" + column + ".lines\"\n"}
+      "tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | if [[ $max_call_rate > 1.0 ]]; then awk '{print $0/100}'; else cat; fi > \"" + column + ".lines\"\n"}
     rm "~{basename(tsv_file)}"
   >>>
 
@@ -680,11 +683,11 @@ task tsv_concat {
     set -euo pipefail
     tsv_files=~{write_lines(tsv_files)}
     ~{if length(tsv_files) > 1 then
-    "cat $tsv_files | tr '\\n' '\\0' | xargs -0 mv -t .\n" +
-    "sed -i 's/^.*\\///' $tsv_files\n" +
-    "(head -n1 \"" + basename(tsv_files[0]) + "\";\n" +
-    "cat $tsv_files | tr '\\n' '\\0' | xargs -0 tail -qn+2) > \"" + filebase + ".tsv\"\n" +
-    "cat $tsv_files | tr '\\n' '\\0' | xargs -0 rm"
+      "cat $tsv_files | tr '\\n' '\\0' | xargs -0 mv -t .\n" +
+      "sed -i 's/^.*\\///' $tsv_files\n" +
+      "(head -n1 \"" + basename(tsv_files[0]) + "\";\n" +
+      "cat $tsv_files | tr '\\n' '\\0' | xargs -0 tail -qn+2) > \"" + filebase + ".tsv\"\n" +
+      "cat $tsv_files | tr '\\n' '\\0' | xargs -0 rm"
     else "mv \"" + tsv_files[0] + "\" \"" + filebase + ".tsv\""}
   >>>
 
@@ -1022,12 +1025,12 @@ task idat2gtc {
     mv "~{bpm_file}" .
     mv "~{egt_file}" .
     cat $green_idat_files $red_idat_files | tr '\n' '\0' | xargs -0 mv -t .
-    sed -i 's/^.*\///' $green_idat_files $red_idat_files
     ~{if basename(bpm_file) != basename(bpm_file, ".gz") then "gunzip --force \"" + basename(bpm_file) + "\"" else ""}
     ~{if basename(egt_file) != basename(egt_file, ".gz") then "gunzip --force \"" + basename(egt_file) + "\"" else ""}
     (grep -h "\.gz" $green_idat_files $red_idat_files || if [[ $? -eq 1 ]]; then true; else exit $?; fi) | \
-      tr '\n' '\0' | xargs -0 gunzip --force
-    sed -i 's/.gz$//' $green_idat_files $red_idat_files
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 gunzip --force
+    sed -i 's/^.*\///;s/.gz$//' $green_idat_files
+    sed -i 's/^.*\///;s/.gz$//' $red_idat_files
     bcftools +gtc2vcf --idat --gtcs $green_idat_files --output "~{filebase}.green_idat.tsv"
     bcftools +gtc2vcf --idat --gtcs $red_idat_files --output "~{filebase}.red_idat.tsv"
     ~{if autoconvert then
@@ -1121,10 +1124,9 @@ task cel2affy {
     cel_files=~{write_lines(cel_files)}
     echo "~{sep="\n" select_all([xml_file, zip_file, cdf, chrX_snps, special_snps, chrX_probes, chrY_probes, read_models_brlmmp, target_sketch])}" | \
       cat - $cel_files | tr '\n' '\0' | xargs -0 mv -t .
-    sed -i 's/^.*\///' $cel_files
     (grep "\.gz" $cel_files  || if [[ $? -eq 1 ]]; then true; else exit $?; fi) | \
-      tr '\n' '\0' | xargs -0 gunzip --force
-    sed -i 's/.gz$//' $cel_files
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 gunzip --force
+    sed -i 's/^.*\///;s/.gz$//' $cel_files
     ~{if defined(zip_file) then "unzip -jd \"" + zip_dir + "\" \"" + basename(select_first([zip_file])) + "\" 1>&2" else ""}
     bcftools +affy2vcf --cel --chps $cel_files --output "~{filebase}.cel.tsv"
     echo "cel_files" | cat - $cel_files > cel_files.lines
@@ -1200,7 +1202,6 @@ task gtc2vcf {
     File? sam_file
     File? reheader_file
     String filebase
-    Boolean uncompressed = false
 
     String docker
     Int? cpu_override
@@ -1227,12 +1228,11 @@ task gtc2vcf {
     gtc_files=~{write_lines(gtc_files)}
     echo "~{sep="\n" select_all([bpm_file, csv_file, egt_file, ref_fasta, ref_fasta_fai, sam_file, reheader_file])}" | \
       cat - $gtc_files | tr '\n' '\0' | xargs -0 mv -t .
-    sed -i 's/^.*\///' $gtc_files
     ~{if basename(bpm_file) != basename(bpm_file, ".gz") then "gunzip --force \"" + basename(bpm_file) + "\"" else ""}
     ~{if basename(egt_file) != basename(egt_file, ".gz") then "gunzip --force \"" + basename(egt_file) + "\"" else ""}
     (grep "\.gz" $gtc_files || if [[ $? -eq 1 ]]; then true; else exit $?; fi) | \
-      tr '\n' '\0' | xargs -0 gunzip --force
-    sed -i 's/.gz$//' $gtc_files
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 gunzip --force
+    sed -i 's/^.*\///;s/.gz$//' $gtc_files
     bcftools +gtc2vcf \
       --no-version \
       --output-type u \
@@ -1251,8 +1251,9 @@ task gtc2vcf {
       ~{if defined(sam_file) then "--sam-flank \"" + basename(select_first([sam_file])) + "\"" else ""} | \
       ~{if defined(reheader_file) then "bcftools reheader --samples \"" + basename(select_first([reheader_file])) + "\" |" else ""} \
       bcftools sort --output-type u --temp-dir ./bcftools-sort.XXXXXX | \
-      bcftools norm --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.bcf" --check-ref x --fasta-ref "~{basename(ref_fasta)}"~{if cpu > 1 then " --threads " + (cpu - 1) else ""}
-    bcftools index --force "~{filebase}.bcf"
+    bcftools norm --no-version --output-type b --check-ref x --fasta-ref "~{basename(ref_fasta)}"~{if cpu > 1 then " --threads " + (cpu - 1) else ""} | \
+    tee "~{filebase}.bcf" | \
+    bcftools index --force --output "~{filebase}.bcf.csi"
     bcftools query --list-samples "~{filebase}.bcf" | tee "~{filebase}.sample_id.lines" | wc -l
     rm "~{basename(bpm_file, ".gz")}"
     rm "~{basename(egt_file, ".gz")}"
@@ -1291,7 +1292,6 @@ task chp2vcf {
     File? sam_file
     File? reheader_file
     String filebase
-    Boolean uncompressed = false
 
     String docker
     Int? cpu_override
@@ -1318,10 +1318,9 @@ task chp2vcf {
     chp_files=~{write_lines(chp_files)}
     echo "~{sep="\n" select_all([csv_file, ref_fasta, ref_fasta_fai, snp_file, sam_file, reheader_file])}" | \
       cat - $chp_files | tr '\n' '\0' | xargs -0 mv -t .
-    sed -i 's/^.*\///' $chp_files
     (grep "\.gz" $chp_files || if [[ $? -eq 1 ]]; then true; else exit $?; fi) | \
-      tr '\n' '\0' | xargs -0 gunzip --force
-    sed -i 's/.gz$//' $chp_files
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 gunzip --force
+    sed -i 's/^.*\///;s/.gz$//' $chp_files
     bcftools +affy2vcf \
       --no-version \
       --output-type u \
@@ -1336,9 +1335,10 @@ task chp2vcf {
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       ~{if defined(sam_file) then "--sam-flank \"" + basename(select_first([sam_file])) + "\"" else ""} | \
       ~{if defined(reheader_file) then "bcftools reheader --samples \"" + basename(select_first([reheader_file])) + "\" |" else ""} \
-      bcftools sort --output-type u --temp-dir ./bcftools-sort.XXXXXX | \
-      bcftools norm --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.bcf" --check-ref x --fasta-ref "~{basename(ref_fasta)}"~{if cpu > 1 then " --threads " + (cpu - 1) else ""}
-    bcftools index --force "~{filebase}.bcf"
+    bcftools sort --output-type u --temp-dir ./bcftools-sort.XXXXXX | \
+    bcftools norm --no-version --output-type b --check-ref x --fasta-ref "~{basename(ref_fasta)}"~{if cpu > 1 then " --threads " + (cpu - 1) else ""} | \
+    tee "~{filebase}.bcf" | \
+    bcftools index --force --output "~{filebase}.bcf.csi"
     bcftools query --list-samples "~{filebase}.bcf" | tee "~{filebase}.sample_id.lines" | wc -l
     echo "~{sep="\n" select_all([csv_file, ref_fasta, ref_fasta_fai, snp_file, sam_file, reheader_file])}" | \
       sed 's/^.*\///' | cat - $chp_files | tr '\n' '\0' | xargs -0 rm
@@ -1378,7 +1378,6 @@ task txt2vcf {
     File? sam_file
     File? reheader_file
     String filebase
-    Boolean uncompressed = false
 
     String docker
     Int? cpu_override
@@ -1428,8 +1427,9 @@ task txt2vcf {
       ~{if defined(sam_file) then "--sam-flank \"" + basename(select_first([sam_file])) + "\"" else ""} | \
       ~{if defined(reheader_file) then "bcftools reheader --samples \"" + basename(select_first([reheader_file])) + "\" |" else ""} \
       bcftools sort --output-type u --temp-dir ./bcftools-sort.XXXXXX | \
-      bcftools norm --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.bcf" --check-ref x --fasta-ref "~{basename(ref_fasta)}"~{if cpu > 1 then " --threads " + (cpu - 1) else ""}
-    bcftools index --force "~{filebase}.bcf"
+      bcftools norm --no-version --output-type b --check-ref x --fasta-ref "~{basename(ref_fasta)}"~{if cpu > 1 then " --threads " + (cpu - 1) else ""} | \
+    tee "~{filebase}.bcf" | \
+    bcftools index --force --output "~{filebase}.bcf.csi"
     bcftools query --list-samples "~{filebase}.bcf" | tee "~{filebase}.sample_id.lines" | wc -l
     echo "~{sep="\n" select_all([csv_file, ref_fasta, ref_fasta_fai, calls_file, confidences_file, summary_file, snp_file, sam_file, reheader_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
@@ -1492,7 +1492,7 @@ task ref_scatter {
         win_size = (chr_cm_len - ~{overlap_size_cm}) / n_win + ~{overlap_size_cm}
         cm_begs = (win_size - ~{overlap_size_cm}) * np.arange(1, n_win)
         cm_ends = (win_size - ~{overlap_size_cm}) * np.arange(1, n_win) + ~{overlap_size_cm}
-        pos_begs = np.concatenate(([1], np.interp(cm_begs, df_group['CM'], df_group['POS'], period = np.inf).astype(int)))
+        pos_begs = np.concatenate(([1], 1 + np.interp(cm_begs, df_group['CM'], df_group['POS'], period = np.inf).astype(int)))
         pos_ends = np.concatenate((np.interp(cm_ends, df_group['CM'], df_group['POS'], period = np.inf).astype(int), [chr2len[fai_chr]]))
         df_out[fai_chr] = pd.DataFrame.from_dict({'CHR': fai_chr, 'BEG': pos_begs, 'END': pos_ends})
     df = pd.concat([df_out[fai_chr] for fai_chr in chr2len.keys()])
@@ -1521,7 +1521,6 @@ task vcf_scatter {
   input {
     File vcf_file
     File intervals_bed
-    Boolean uncompressed = false
 
     String docker
     Int? cpu_override
@@ -1549,9 +1548,13 @@ task vcf_scatter {
       --remove ID,QUAL,INFO,^FMT/GT \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       "~{basename(vcf_file)}" | \
+    bcftools norm \
+      --no-version \
+      --rm-dup exact \
+      ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} | \
     bcftools +scatter \
       --no-version \
-      --output-type ~{if uncompressed then "u" else "b"} \
+      --output-type b \
       --output vcfs \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       --scatter-file regions.lines \
@@ -1584,7 +1587,6 @@ task vcf_merge {
     Array[File]+ vcf_files
     String filebase
     Boolean wgs = false
-    Boolean uncompressed = false
 
     String docker
     Int? cpu_override
@@ -1606,15 +1608,16 @@ task vcf_merge {
       "sed -i 's/^.*\\///' $vcf_files\n" +
       "bcftools merge \\\n" +
       "  --no-version \\\n" +
-      "  --output-type " + (if uncompressed then "u" else "b") + " \\\n" +
-      "  --output \"" + filebase + ".bcf\" \\\n" +
+      "  --output-type b \\\n" +
       (if wgs then "--missing-to-ref \\\n" else "") +
       "  --file-list $vcf_files \\\n" +
       "  --merge none \\\n" +
       "  --no-index \\\n" +
-      (if cpu > 1 then "  --threads " + (cpu - 1) else "")
-    else "mv \"" + vcf_files[0] + "\" \"" + filebase + ".bcf\""}
-    bcftools index --force "~{filebase}.bcf"
+      (if cpu > 1 then "  --threads " + (cpu - 1) else "") + " | \\\n" +
+      "tee \"" + filebase + ".bcf\" | \\\n" +
+      "bcftools index --force --output \"" + filebase + ".bcf.csi\""
+    else "mv \"" + vcf_files[0] + "\" \"" + filebase + ".bcf\"\n" +
+      "bcftools index --force \"" + filebase + ".bcf\""}
     bcftools query --list-samples "~{filebase}.bcf" | wc -l
     ~{if length(vcf_files) > 1 then "cat $vcf_files | tr '\\n' '\\0' | xargs -0 rm" else ""}
   >>>
@@ -1647,7 +1650,6 @@ task vcf_qc {
     Float genotype_exc_het_thr = 0.000001
     File? duplicate_samples_file
     File? extra_xcl_vcf_file
-    Boolean uncompressed = false
 
     String docker
     Int? cpu_override
@@ -1673,30 +1675,32 @@ task vcf_qc {
       "  cat - \"" + basename(select_first([duplicate_samples_file])) + "\" | \\\n" +
       "  sort | uniq " else ""}> samples_xcl.lines
     echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
-      bcftools annotate --no-version --output-type u --annotations "~{basename(dup_file)}" --columns CHROM,FROM,TO,JK --header-lines /dev/stdin~{if cpu > 1 then " --threads " + (cpu - 1) else ""} "~{basename(vcf_file)}" | \
-      bcftools view --no-version --output-type u~{if cpu > 1 then " --threads " + (cpu - 1) else ""} --samples-file ^samples_xcl.lines | \
-      bcftools +fill-tags --no-version --output-type u --targets ^Y,MT,chrY,chrM~{if cpu > 1 then " --threads " + (cpu - 1) else ""} -- --tags ExcHet,F_MISSING | \
-      bcftools view --no-version --output-type u --drop-genotypes | \
-      bcftools annotate --no-version --output-type ~{if uncompressed then "u" else "b"} --output "~{filebase}.xcl.bcf" \
+    bcftools annotate --no-version --output-type u --annotations "~{basename(dup_file)}" --columns CHROM,FROM,TO,JK --header-lines /dev/stdin~{if cpu > 1 then " --threads " + (cpu - 1) else ""} "~{basename(vcf_file)}" | \
+    bcftools view --no-version --output-type u~{if cpu > 1 then " --threads " + (cpu - 1) else ""} --samples-file ^samples_xcl.lines --force-samples | \
+    bcftools +fill-tags --no-version --output-type u --targets ^Y,MT,chrY,chrM~{if cpu > 1 then " --threads " + (cpu - 1) else ""} -- --tags ExcHet,F_MISSING | \
+    bcftools view --no-version --output-type u --drop-genotypes | \
+    bcftools annotate --no-version --output-type b \
       --include 'FILTER!="." && FILTER!="PASS" || INFO/JK<~{dup_divergence_thr} || INFO/ExcHet<~{genotype_exc_het_thr} || INFO/F_MISSING>1-~{variant_call_rate_thr}' \
-      --remove ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING~{if cpu > 1 then " --threads " + (cpu - 1) else ""}
-    bcftools index --force "~{filebase}.xcl.bcf"
+      --remove ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING~{if cpu > 1 then " --threads " + (cpu - 1) else ""} | \
+    tee "~{filebase}.xcl.bcf" | \
+    bcftools index --force --output "~{filebase}.xcl.bcf.csi"
     ~{if defined(extra_xcl_vcf_file) then "mv \"" + filebase + ".xcl.bcf\" \"" + filebase + ".tmp.bcf\"\n" +
       "mv \"" + filebase + ".xcl.bcf.csi\" \"" + filebase + ".tmp.bcf.csi\"\n" +
       "bcftools index --force \"" + basename(select_first([extra_xcl_vcf_file])) + "\"\n" +
-      "bcftools merge --no-version --output-type " + (if uncompressed then "u" else "b") + " --output \"" + filebase + ".xcl.bcf\" --merge none \"" + filebase + ".tmp.bcf\" \"" + basename(select_first([extra_xcl_vcf_file])) + "\"\n" +
-      "bcftools index --force \"" + filebase + ".xcl.bcf\"\n" +
+      "bcftools merge --no-version --output-type b --merge none \"" + filebase + ".tmp.bcf\" \"" + basename(select_first([extra_xcl_vcf_file])) + "\" | \\\n" +
+      "tee \"" + filebase + ".xcl.bcf\" | \\\n" +
+      "bcftools index --force --output \"" + filebase + ".xcl.bcf.csi\"\n" +
       "rm \"" + filebase + ".tmp.bcf\" \"" + filebase + ".tmp.bcf.csi\"" else ""}
     bcftools isec \
       --no-version \
-      --output-type ~{if uncompressed then "u" else "b"} \
-      --output "~{filebase}.qc.bcf" \
+      --output-type b \
       --complement \
       --exclude "N_ALT>1" \
       --write 1 \
       "~{basename(vcf_file)}" \
-      "~{filebase}.xcl.bcf"
-    bcftools index --force "~{filebase}.qc.bcf"
+      "~{filebase}.xcl.bcf" | \
+    tee "~{filebase}.qc.bcf" | \
+    bcftools index --force --output "~{filebase}.qc.bcf.csi"
     bcftools index --nrecords "~{filebase}.qc.bcf"
     echo "~{sep="\n" select_all([vcf_file, vcf_idx, dup_file, sample_tsv_file, duplicate_samples_file, extra_xcl_vcf_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
@@ -1722,10 +1726,11 @@ task vcf_qc {
 }
 
 # hack https://github.com/samtools/bcftools/issues/1425 is employed in the end to fix the header
+# once bug fix https://github.com/samtools/bcftools/issues/1497 is incorporated in BCFtools, option --temp-prefix should be used
 task vcf_phase {
   input {
-    Int n_markers
     Int n_smpls
+    Int n_markers
     File unphased_vcf_file
     File unphased_vcf_idx
     File genetic_map_file
@@ -1737,7 +1742,6 @@ task vcf_phase {
     Boolean mhc = false # requires additional resources if phasing the MHC region
     Boolean wgs = false
     Boolean eagle = false
-    Boolean uncompressed = false
     String? phase_extra_args
 
     String docker
@@ -1772,7 +1776,7 @@ task vcf_phase {
       (if cpu > 1 then "  --numThreads " + cpu + " \\\n" else "") +
       (if defined(ref_vcf_file) then "  --vcfRef" + basename(select_first([ref_vcf_file])) + "\" \\\n" +
       "  --vcfTarget \"" else "  --vcf") + " \"" + basename(unphased_vcf_file) + "\" \\\n" +
-      "  --vcfOutFormat " + (if uncompressed then "u" else "b") + " \\\n" +
+      "  --vcfOutFormat b \\\n" +
       "  --chrom " + chr + " \\\n" +
       (if defined(phase_extra_args) then phase_extra_args + " \\\n" else "") +
       "  1>&2"
@@ -1829,7 +1833,6 @@ task vcf_split {
     File sample_id_file
     File? ped_file
     String? rule
-    Boolean uncompressed = false
 
     String docker
     Int? disk_size_override
@@ -1855,8 +1858,8 @@ task vcf_split {
     ~{if defined(ped_file) && defined(rule) then "bcftools +mendelian --output \"mendel/" + filebase + ".mendel.tsv\" --rules \"" + select_first([rule]) + "\" --ped \"" + basename(select_first([ped_file])) + "\" \"" + basename(vcf_file) + "\"" else ""}
     sed 's/\t/,/g;s/$/\t-/' "~{basename(sample_id_file)}" | paste -d $'\t' - $filebases > samples_file.txt
     ~{if defined(ped_file) then "bcftools +trio-phase --no-version --output-type u" + (if cpu > 1 then " --threads " + (cpu - 1) else "") + " \"" + basename(vcf_file) + "\" -- --ped \"" + basename(select_first([ped_file])) + "\" | \\\n" +
-      "  bcftools +split --output-type " + (if uncompressed then "u" else "b") + " --output vcfs --samples-file samples_file.txt"
-      else "bcftools +split --output-type " + (if uncompressed then "u" else "b") + " --output vcfs --samples-file samples_file.txt \"" + basename(vcf_file) + "\""}
+      "  bcftools +split --output-type b --output vcfs --samples-file samples_file.txt"
+      else "bcftools +split --output-type b --output vcfs --samples-file samples_file.txt \"" + basename(vcf_file) + "\""}
     cut -f1 $filebases | sed 's/^/vcfs\//;s/$/.bcf/'
     rm "~{basename(vcf_file)}"
     rm "~{basename(sample_id_file)}"
@@ -1885,7 +1888,6 @@ task vcf_concat {
     Array[File]+ vcf_files
     Boolean ligate = true
     String filebase
-    Boolean uncompressed = false
 
     String docker
     Int? cpu_override
@@ -1910,15 +1912,15 @@ task vcf_concat {
     ~{if ligate then "cat $vcf_files | tr '\\n' '\\0' | xargs -0 -n 1 bcftools index --force" else ""}
     bcftools concat \
       --no-version \
-      --output-type ~{if uncompressed then "u" else "b"} \
+      --output-type b \
       ~{if ligate then "--compact-PS" else ""} \
       --file-list $vcf_files \
       ~{if ligate then "--ligate" else ""} \
-      ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
-      --output "~{filebase}.bcf"
+      ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} | \
+    tee "~{filebase}.bcf" | \
+    bcftools index --force --output "~{filebase}.bcf.csi"
     cat $vcf_files | tr '\n' '\0' | xargs -0 rm
     ~{if ligate then "cat $vcf_files | sed 's/$/.csi/' | tr '\\n' '\\0' | xargs -0 rm" else ""}
-    bcftools index --force "~{filebase}.bcf"
     bcftools query --list-samples "~{filebase}.bcf" | wc -l
   >>>
 
@@ -1944,7 +1946,6 @@ task vcf_import {
     File pgt_vcf_idx
     File unphased_vcf_file
     File unphased_vcf_idx
-    Boolean uncompressed = false
 
     String docker
     Int? cpu_override
@@ -1969,13 +1970,13 @@ task vcf_import {
     mv "~{unphased_vcf_idx}" .
     bcftools annotate \
       --no-version \
-      --output-type ~{if uncompressed then "u" else "b"} \
-      --output "~{filebase}.phased.bcf" \
+      --output-type b \
       --annotations "~{basename(pgt_vcf_file)}" \
       --columns -FMT/GT \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
-      "~{basename(unphased_vcf_file)}"
-    bcftools index --force "~{filebase}.phased.bcf"
+      "~{basename(unphased_vcf_file)}" | \
+    tee "~{filebase}.phased.bcf" | \
+    bcftools index --force --output "~{filebase}.phased.bcf.csi"
     bcftools query --list-samples "~{filebase}.phased.bcf" | wc -l
     rm "~{basename(pgt_vcf_file)}"
     rm "~{basename(pgt_vcf_idx)}"
@@ -1999,8 +2000,52 @@ task vcf_import {
   }
 }
 
+# uses hack from https://github.com/samtools/bcftools/pull/1505
+# (see also https://github.com/samtools/bcftools/issues/1418)
+task get_max_nrecords {
+  input {
+    File vcf_idx
+    Boolean binary_vcf = true
+
+    String docker
+    Int cpu = 1
+    Int disk_size = 10
+    Float memory = 3.5
+    Int preemptible = 1
+    Int maxRetries = 0
+  }
+
+  String ext = if binary_vcf then "bcf" else "vcf.gz"
+
+  command <<<
+    set -euo pipefail
+    mv "~{vcf_idx}" .
+    (echo -e "##fileformat=VCFv4.2"
+    for i in {0..255}; do echo "##contig=<ID=$i>"; done;
+    echo -e "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO") | \
+    bcftools view --no-version -O~{if binary_vcf then "b" else "z"} -o tmp.~{ext}
+    bcftools index --stats "tmp.~{ext}##idx##~{basename(vcf_idx)}" | cut -f3 | sort -n | tail -n1
+    rm tmp.~{ext} "~{basename(vcf_idx)}"
+  >>>
+
+  output {
+    Int n = read_int(stdout())
+  }
+
+  runtime {
+    docker: docker
+    cpu: cpu
+    disks: "local-disk " + disk_size + " HDD"
+    memory: memory + " GiB"
+    preemptible: preemptible
+    maxRetries: maxRetries
+  }
+}
+
 task vcf_mocha {
   input {
+    Int n_smpls
+    Int max_n_markers
     String assembly
     File pvcf_file
     File pvcf_idx
@@ -2012,7 +2057,6 @@ task vcf_mocha {
     String? kir_reg
     String? mocha_extra_args
     String ext_string
-    Boolean uncompressed = false
 
     String docker
     Int? cpu_override
@@ -2025,7 +2069,7 @@ task vcf_mocha {
   Float pvcf_size = size(pvcf_file, "GiB")
   Float xcl_size = size(xcl_vcf_file, "GiB")
   Int disk_size = select_first([disk_size_override, ceil(10.0 + 2.0 * pvcf_size + xcl_size)])
-  Float memory = select_first([memory_override, ceil(4.0 + 0.1 * pvcf_size)])
+  Float memory = select_first([memory_override, 3.5 + 18.0 * n_smpls * max_n_markers / 1024 / 1024 / 1024])
   Int cpu = select_first([cpu_override, if memory > 6.5 then 2 * ceil(memory / 13) else 1])
   String filebase = basename(basename(basename(pvcf_file, ".bcf"), ".vcf.gz"), '.phased')
 
@@ -2042,15 +2086,15 @@ task vcf_mocha {
       ~{if defined(mhc_reg) then "--mhc \"" + mhc_reg + "\"" else ""} \
       ~{if defined(kir_reg) then "--kir \"" + kir_reg + "\"" else ""} \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
-      --output-type ~{if uncompressed then "u" else "b"} \
-      --output "~{filebase}.~{ext_string}.bcf" \
+      --output-type b \
+      --output - \
       --calls "~{filebase}.calls.tsv" \
       --stats "~{filebase}.stats.tsv" \
       --ucsc-bed "~{filebase}.ucsc.bed" \
       "~{basename(pvcf_file)}" \
-      ~{mocha_extra_args}
-    bcftools index --force "~{filebase}.~{ext_string}.bcf"
-    bcftools query --list-samples "~{filebase}.~{ext_string}.bcf" | wc -l
+      ~{mocha_extra_args} | \
+    tee "~{filebase}.~{ext_string}.bcf" | \
+    bcftools index --force --output "~{filebase}.~{ext_string}.bcf.csi"
     echo "~{sep="\n" select_all([pvcf_file, pvcf_idx, sample_tsv_file, xcl_vcf_file, xcl_vcf_idx, cnp_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
@@ -2058,7 +2102,6 @@ task vcf_mocha {
   output {
     File mocha_vcf_file = filebase + "." + ext_string + ".bcf"
     File mocha_vcf_idx = filebase + "." + ext_string + ".bcf.csi"
-    Int n_smpls = read_int(stdout())
     File calls_tsv = filebase + ".calls.tsv"
     File stats_tsv = filebase + ".stats.tsv"
     File ucsc_bed = filebase + ".ucsc.bed"

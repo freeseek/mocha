@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2021 Giulio Genovese
 ##
-## Version 2021-05-14
+## Version 2021-10-15
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow computes poligenic risk scores
 ##
 ## Cromwell version support
-## - Successfully tested on v61
+## - Successfully tested on v70
 ##
 ## Distributed under terms of the MIT License
 
@@ -42,13 +42,13 @@ workflow score {
     File? samples_file
     String? exclude_str
     String? include_str
-    String basic_bash_docker = "ubuntu:latest"
-    String docker_registry = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.11-20210514"
-    String r_mocha_docker = "r_mocha:1.11-20210514"
+    String basic_bash_docker = "debian:stable-slim"
+    String docker_repository = "us.gcr.io/mccarroll-mocha"
+    String bcftools_docker = "bcftools:1.13-20211015"
+    String r_mocha_docker = "r_mocha:1.13-20211015"
   }
 
-  String docker_registry_with_sep = docker_registry + if docker_registry != "" && docker_registry == sub(docker_registry, "/$", "") then "/" else ""
+  String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
 
   String summary_path_with_sep = select_first([summary_path, ""]) + if defined(summary_path) && select_first([summary_path]) == sub(select_first([summary_path]), "/$", "") then "/" else ""
   String ref_path_with_sep = select_first([ref_path, ""]) + if defined(ref_path) && select_first([ref_path]) == sub(select_first([ref_path]), "/$", "") then "/" else ""
@@ -92,7 +92,7 @@ workflow score {
         exclude_str = exclude_str,
         include_str = include_str,
         filebase = basename(basename(data_paths_with_sep[p.left] + batch_tbl[hdr][p.left], ".bcf"), ".vcf.gz") + "." + ext_string,
-        docker = docker_registry_with_sep + bcftools_docker
+        docker = docker_repository_with_sep + bcftools_docker
     }
   }
 
@@ -125,7 +125,7 @@ workflow score {
         covars_file = select_first([covars_file]),
         sample_header = sample_header,
         filebase = sample_set_id + "." + "adj_" + ext_string,
-        docker = docker_registry_with_sep + r_mocha_docker
+        docker = docker_repository_with_sep + r_mocha_docker
     }
   }
 

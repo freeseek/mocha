@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-shift_plot_version <- '2021-05-14'
+shift_plot_version <- '2021-10-15'
 
 library(optparse)
 library(data.table)
@@ -107,7 +107,7 @@ df$pbinom_as = -10 * (log(2) + pbinom(pmin(df$as0, df$as1), df$as0 + df$as1, .5,
 idx <- df$pbinom_as > args$min_phred
 p <- ggplot(df[idx, ], aes(x = pos/1e6, y = pbinom_as/10)) +
   geom_point(alpha = 1/2, size = 1/2) +
-  scale_x_continuous('Mbp position', expand = c(.01,.01)) +
+  scale_x_continuous(paste('Chromosome', chrom, '(Mbp position)'), expand = c(.01,.01)) +
   scale_y_continuous('-log10(p)', expand = c(.01,.01)) +
   theme_bw(base_size = args$fontsize)
 

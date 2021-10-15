@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2021 Giulio Genovese
 ##
-## Version 2021-06-03
+## Version 2021-10-15
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## Converts UK biobank genotype and intensity files back to Affymetrix format suitable for the MoChA WDL pipeline
 ##
 ## Cromwell version support
-## - Successfully tested on v61
+## - Successfully tested on v70
 ##
 ## Distributed under terms of the MIT License
 
@@ -29,7 +29,7 @@ workflow ukb2txt {
     File? snp_qc_file
     File? UKBL_zip
     File? UKBB_zip
-    String docker = "ubuntu:latest"
+    String docker = "debian:stable-slim"
   }
 
   File sqc_file = sqc_path + (if sub(sqc_path, "/$", "") != sqc_path then "" else "/") + sqc_filename
@@ -251,14 +251,17 @@ task init {
 
     mv "~{sqc_file}" .
     mkdir -p out
-    awk 'BEGIN {print "sample_id\tbatch_id\tcel\tcomputed_gender\tcall_rate"}
-      {printf "%s\t%s\t%s\t%s\t%s\n",$1,$4,$1,$11,$7/100}' "~{basename(sqc_file)}" > out/ukb.sample.tsv
-    cut -d" " -f3,4 "~{basename(sqc_file)}" | uniq -c | \
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      awk 'BEGIN {print "sample_id\tbatch_id\tcel\tcomputed_gender\tcall_rate"}
+      {printf "%s\t%s\t%s\t%s\t%s\n",$1,$4,$1,$11,$7/100}' > out/ukb.sample.tsv
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      cut -d" " -f3,4 | uniq -c | \
       awk 'BEGIN {csv["UKBB"]="Axiom_UKB_WCSG.na34.annot.csv.gz"; csv["UKBL"]="Axiom_UKBiLEVE.na34.annot.csv.gz"
       print "batch_id\tn_smpls\tcsv\tsnp\treport\tcalls\tsummary"}
       {printf "%s\t%s\t%s\t%s.AxiomGT1.snp-posteriors.txt.gz\t%s.AxiomGT1.report.txt.gz\t%s.AxiomGT1.calls.txt.gz\t%s.AxiomGT1.summary.txt.gz\n",
       $3,$1,csv[$2],$3,$3,$3,$3}' > out/ukb.batch.tsv
-    cut -d" " -f3,4 "~{basename(sqc_file)}" | uniq -c | awk '{print $1"\t"$2"\t"$3}'
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      cut -d" " -f3,4 | uniq -c | awk '{print $1"\t"$2"\t"$3}'
   >>>
 
   output {
@@ -373,9 +376,11 @@ task split_report {
   command <<<
     set -euo pipefail
     mv "~{sqc_file}" .
-    cut -d" " -f4 "~{basename(sqc_file)}" | uniq > ukb_snp_posterior.batch
-    awk 'NR==FNR {print "cel_files\tcomputed_gender\tcall_rate\tcn-probe-chrXY-ratio_gender_meanX\tcn-probe-chrXY-ratio_gender_meanY" > $1".AxiomGT1.report.txt"}
-      NR>FNR {printf "%s\t%s\t%s\t%s\t%s\n",$1,$11,$7,$12,$13 > $4".AxiomGT1.report.txt"}' ukb_snp_posterior.batch "~{basename(sqc_file)}"
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      cut -d" " -f4 | uniq > ukb_snp_posterior.batch
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      awk 'NR==FNR {print "cel_files\tcomputed_gender\tcall_rate\tcn-probe-chrXY-ratio_gender_meanX\tcn-probe-chrXY-ratio_gender_meanY" > $1".AxiomGT1.report.txt"}
+      NR>FNR {printf "%s\t%s\t%s\t%s\t%s\n",$1,$11,$7,$12,$13 > $4".AxiomGT1.report.txt"}' ukb_snp_posterior.batch -
     sed 's/$/.AxiomGT1.report.txt/' ukb_snp_posterior.batch | tr '\n' '\0' | xargs -0 gzip --force --no-name
     mkdir -p out
     sed 's/$/.AxiomGT1.report.txt.gz/' ukb_snp_posterior.batch | tr '\n' '\0' | xargs -0 mv -t out/
@@ -424,12 +429,15 @@ task split_snp_posterior {
     mv "~{dump_elf}" .
     chmod a+x "~{basename(split_elf)}" "~{basename(dump_elf)}"
     tar xvf "~{basename(snp_posterior_tar)}" 1>&2
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      cut -d" " -f4 | uniq > ukb_snp_posterior.batch
     cat ukb_snp_posterior_chr{{1..22},X,Y,XY,MT}.bin | "./~{basename(split_elf)}" .snp-posteriors.bin <(sed 's/^/132 /' ukb_snp_posterior.batch)
     awk 'NR==FNR {x[$2]++} NR>FNR && FNR>1 {array=$9==0 || $9==2; print array"\t"$3;
       if ($1 in x) print array"\t"$3":1"}' ukb_snp_posterior_chrX_haploid.bim "~{basename(snp_qc_file)}" > snp-posteriors.UKBL.tsv
     awk 'NR==FNR {x[$2]++} NR>FNR && FNR>1 {array=$9==1 || $9==2; print array"\t"$3;
       if ($1 in x) print array"\t"$3":1"}' ukb_snp_posterior_chrX_haploid.bim "~{basename(snp_qc_file)}" > snp-posteriors.UKBB.tsv
-    cut -d" " -f3,4 "~{basename(sqc_file)}" | uniq | while read array batch; do
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      cut -d" " -f3,4 | uniq | while read array batch; do
       (echo -e "#%SnpPosteriorFormatVer=1\n#%data-order=meanX,varX,nObsMean,nObsVar,meanY,varY,covarXY\nid\tBB\tAB\tAA\tCV";
       cat $batch.snp-posteriors.bin | "./~{basename(dump_elf)}" 1 33 | paste "snp-posteriors.$array.tsv" - | sed '/^0/d;s/^..//' | \
       awk '{fmt="%s\t%s,%s,%s,%s,%s,%s,%s\t%s,%s,%s,%s,%s,%s,%s\t%s,%s,%s,%s,%s,%s,%s\t%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n"
@@ -494,10 +502,13 @@ task split_cal {
       awk -F, '{if ($12==$14 && $13==$15) x=0; else if ($12==$15 && $13==$14) x=1; else x=0; print $1,x}' | \
       awk 'NR==FNR {x[$1]=$2} NR>FNR && $4=="~{plink_chr}" {print x[$3]}' - "~{basename(snp_qc_file)}" > swap.lines
     tail -qc+4 "~{basename(cal_file)}" | "./~{basename(unpack_elf)}" $(cat "~{basename(sqc_file)}" | wc -l) swap.lines | \
-      "./~{basename(split_elf)}" ".chr~{chr}.calls.bin" <(cut -d" " -f4 "~{basename(sqc_file)}" | uniq -c | sed 's/^ *//')
+      "./~{basename(split_elf)}" ".chr~{chr}.calls.bin" \
+      <(sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | cut -d" " -f4 | uniq -c | sed 's/^ *//')
     mkdir -p out
-    cut -d" " -f4 "~{basename(sqc_file)}" | uniq | sed 's/$/.chr~{chr}.calls.bin/' | tr '\n' '\0' | xargs -0 mv -t out/
-    cut -d" " -f4 "~{basename(sqc_file)}" | uniq | sed 's/^/out\//;s/$/.chr~{chr}.calls.bin/'
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      cut -d" " -f4 | uniq | sed 's/$/.chr~{chr}.calls.bin/' | tr '\n' '\0' | xargs -0 mv -t out/
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      cut -d" " -f4 | uniq | sed 's/^/out\//;s/$/.chr~{chr}.calls.bin/'
   >>>
 
   output {
@@ -538,10 +549,13 @@ task split_int {
     mv "~{int_file}" .
     mv "~{split_elf}" .
     chmod a+x "~{basename(split_elf)}"
-    cat "~{basename(int_file)}" | "./~{basename(split_elf)}" ".chr~{chr}.summary.bin" <(cut -d" " -f4 "~{basename(sqc_file)}" | uniq -c | awk '{print 8*$1,$2}')
+    cat "~{basename(int_file)}" | "./~{basename(split_elf)}" ".chr~{chr}.summary.bin" \
+      <(sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | cut -d" " -f4 | uniq -c | awk '{print 8*$1,$2}')
     mkdir -p out/
-    cut -d" " -f4 "~{basename(sqc_file)}" | uniq | sed 's/$/.chr~{chr}.summary.bin/' | tr '\n' '\0' | xargs -0 mv -t out/
-    cut -d" " -f4 "~{basename(sqc_file)}" | uniq | sed 's/^/out\//;s/$/.chr~{chr}.summary.bin/'
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      cut -d" " -f4 | uniq | sed 's/$/.chr~{chr}.summary.bin/' | tr '\n' '\0' | xargs -0 mv -t out/
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      cut -d" " -f4 | uniq | sed 's/^/out\//;s/$/.chr~{chr}.summary.bin/'
   >>>
 
   output {
@@ -588,7 +602,8 @@ task revert_calls {
     awk 'NR>1 {array=$9==0 || $9==2; print array"\t"$3}' "~{basename(snp_qc_file)}" > calls.UKBL.tsv
     awk 'NR>1 {array=$9==1 || $9==2; print array"\t"$3}' "~{basename(snp_qc_file)}" > calls.UKBB.tsv
     (echo -en "#Calls: -1=NN, 0=AA, 1=AB, 2=BB\nprobeset_id\t";
-    awk -v batch="~{batch}" '$4==batch {print $1}' "~{basename(sqc_file)}" | tr '\n' '\t' | sed 's/\t$/\n/';
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      awk -v batch="~{batch}" '$4==batch {print $1}' | tr '\n' '\t' | sed 's/\t$/\n/';
     cat $cal_files | tr '\n' '\0' | xargs -0 cat | fold -w~{n} | tr '\n' '\r' | fold -w1 | tr '\n\r' '\t\n' | sed 's/3/-1/g' | \
     paste "calls.~{array}.tsv" - | sed '/^0/d;s/^..//') | \
       gzip > "~{batch}.AxiomGT1.calls.txt.gz"
@@ -642,7 +657,8 @@ task revert_summary {
     awk 'NR>1 {array=$9==0 || $9==2; print array"\t"$3"-A"; print array"\t"$3"-B"}' "~{basename(snp_qc_file)}" > summary.UKBL.tsv
     awk 'NR>1 {array=$9==1 || $9==2; print array"\t"$3"-A"; print array"\t"$3"-B"}' "~{basename(snp_qc_file)}" > summary.UKBB.tsv
     (echo -en "probeset_id\t";
-    awk -v batch="~{batch}" '$4==batch {print $1}' "~{basename(sqc_file)}" | tr '\n' '\t' | sed 's/\t$/\n/';
+    sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' "~{basename(sqc_file)}" | \
+      awk -v batch="~{batch}" '$4==batch {print $1}' | tr '\n' '\t' | sed 's/\t$/\n/';
     cat $int_files | tr '\n' '\0' | xargs -0 cat | "./~{basename(dump_elf)}" 2 ~{n} | paste "summary.~{array}.tsv" - | sed '/^0/d;s/^..//') | \
       gzip > "~{batch}.AxiomGT1.summary.txt.gz"
     mkdir -p out

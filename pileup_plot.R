@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-pileup_plot_version <- '2021-05-14'
+pileup_plot_version <- '2021-10-15'
 
 library(optparse)
 library(ggplot2)

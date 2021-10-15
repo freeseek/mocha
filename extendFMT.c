@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2021-05-14"
+#define EXTENDFMT_VERSION "2021-10-15"
 
 /******************************************
  * CIRCULAR BUFFER                        *
@@ -92,6 +92,13 @@ static void auxbuf_destroy(auxbuf_t *buf) {
     free(buf);
 }
 
+static inline int bcf_int8_is_missing(int8_t value) { return value == bcf_int8_missing; }
+static inline int bcf_int16_is_missing(int16_t value) { return value == bcf_int16_missing; }
+static inline int bcf_int32_is_missing(int32_t value) { return value == bcf_int32_missing; }
+#define bcf_int8_set_missing(x) x = bcf_int8_missing
+#define bcf_int16_set_missing(x) x = bcf_int16_missing
+#define bcf_int32_set_missing(x) x = bcf_int32_missing
+
 // push a new record into the buffer
 static void auxbuf_push(auxbuf_t *buf, bcf1_t *line) {
     rbuf_expand0(&buf->rbuf, data_t, buf->rbuf.n + 1, buf->data);
@@ -114,28 +121,32 @@ static void auxbuf_push(auxbuf_t *buf, bcf1_t *line) {
 
     // extract information from BCF record into an auxiliary array
     if (fmt) {
-#define BRANCH(ht_type_t, bt_type_t)                                                                                   \
+#define BRANCH(ht_type_t, bt_type_t, is_missing, set_missing)                                                          \
     {                                                                                                                  \
         ht_type_t *vals = (ht_type_t *)buf->data[curr].vals;                                                           \
         bt_type_t *p = (bt_type_t *)fmt->p;                                                                            \
         for (int k = 0; k < buf->nsmpl; k++) {                                                                         \
-            vals[k] = p[k];                                                                                            \
-            if (vals[k] && phase) {                                                                                    \
-                if (buf->phase_arr[k] == bcf_int8_missing || buf->phase_arr[k] == bcf_int8_vector_end)                 \
-                    vals[k] = (ht_type_t)0;                                                                            \
-                else                                                                                                   \
-                    vals[k] *= buf->phase_arr[k];                                                                      \
+            if (is_missing(p[k])) {                                                                                    \
+                set_missing(vals[k]);                                                                                  \
+            } else {                                                                                                   \
+                vals[k] = p[k];                                                                                        \
+                if (vals[k] && phase) {                                                                                \
+                    if (buf->phase_arr[k] == bcf_int8_missing || buf->phase_arr[k] == bcf_int8_vector_end)             \
+                        vals[k] = (ht_type_t)0;                                                                        \
+                    else                                                                                               \
+                        vals[k] *= buf->phase_arr[k];                                                                  \
+                }                                                                                                      \
             }                                                                                                          \
         }                                                                                                              \
     }
         if (buf->type == BCF_HT_INT && fmt->type == BCF_BT_INT8) {
-            BRANCH(int32_t, int8_t);
+            BRANCH(int32_t, int8_t, bcf_int8_is_missing, bcf_int32_set_missing);
         } else if (buf->type == BCF_HT_INT && fmt->type == BCF_BT_INT16) {
-            BRANCH(int32_t, int16_t);
+            BRANCH(int32_t, int16_t, bcf_int16_is_missing, bcf_int32_set_missing);
         } else if (buf->type == BCF_HT_INT && fmt->type == BCF_BT_INT32) {
-            BRANCH(int32_t, int32_t);
+            BRANCH(int32_t, int32_t, bcf_int32_is_missing, bcf_int32_set_missing);
         } else if (buf->type == BCF_HT_REAL && fmt->type == BCF_BT_FLOAT) {
-            BRANCH(float, float);
+            BRANCH(float, float, bcf_float_is_missing, bcf_float_set_missing);
         } else {
             error("Unexpected type combination %d %d\n", buf->type, fmt->type);
         }
@@ -149,23 +160,24 @@ static void auxbuf_push(auxbuf_t *buf, bcf1_t *line) {
     int prev_dist = buf->data[curr].line->pos - buf->data[prev].line->pos;
 
 // propagate information backwards
-#define BRANCH(ht_type_t)                                                                                              \
+#define BRANCH(ht_type_t, is_missing)                                                                                  \
     {                                                                                                                  \
         for (int k = 0; k < buf->nsmpl; k++) {                                                                         \
             ht_type_t *curr_vals = (ht_type_t *)buf->data[curr].vals;                                                  \
-            if (curr_vals[k]) {                                                                                        \
+            if (curr_vals[k] && !is_missing(curr_vals[k])) {                                                           \
                 int i = curr;                                                                                          \
                 while (rbuf_prev(&buf->rbuf, &i)) {                                                                    \
                     ht_type_t *vals = (ht_type_t *)buf->data[i].vals;                                                  \
                     int i_dist = buf->data[curr].dist[k] + buf->data[curr].line->pos - buf->data[i].line->pos;         \
-                    if (i_dist <= buf->win && (vals[k] == (ht_type_t)0 || i_dist < buf->data[i].dist[k])) {            \
+                    if (i_dist <= buf->win                                                                             \
+                        && (vals[k] == (ht_type_t)0 || is_missing(vals[k]) || i_dist < buf->data[i].dist[k])) {        \
                         vals[k] = curr_vals[k];                                                                        \
                         buf->data[i].dist[k] = i_dist;                                                                 \
                     }                                                                                                  \
                 }                                                                                                      \
             } else if (prev != curr) {                                                                                 \
                 ht_type_t *prev_vals = (ht_type_t *)buf->data[prev].vals;                                              \
-                if (prev_vals[k] && buf->data[prev].dist[k] + prev_dist <= buf->win) {                                 \
+                if (prev_vals[k] && !is_missing(prev_vals[k]) && buf->data[prev].dist[k] + prev_dist <= buf->win) {    \
                     curr_vals[k] = prev_vals[k];                                                                       \
                     buf->data[curr].dist[k] = buf->data[prev].dist[k] + prev_dist;                                     \
                 }                                                                                                      \
@@ -173,9 +185,9 @@ static void auxbuf_push(auxbuf_t *buf, bcf1_t *line) {
         }                                                                                                              \
     }
     if (buf->type == BCF_HT_INT) {
-        BRANCH(int32_t);
+        BRANCH(int32_t, bcf_int32_is_missing);
     } else if (buf->type == BCF_HT_REAL) {
-        BRANCH(float);
+        BRANCH(float, bcf_float_is_missing);
     } else {
         error("Unexpected type %d\n", buf->type);
     }
@@ -195,10 +207,11 @@ static data_t *auxbuf_flush(auxbuf_t *buf, int flush_all) {
 
     // fix the phase before returning the VCF record
     if (phase) {
-#define BRANCH(type_t)                                                                                                 \
+#define BRANCH(type_t, is_missing)                                                                                     \
     {                                                                                                                  \
         type_t *vals = (type_t *)buf->data[i].vals;                                                                    \
         for (int k = 0; k < buf->nsmpl; k++) {                                                                         \
+            if (is_missing(vals[k])) continue;                                                                         \
             if (buf->phase_arr[k] == bcf_int8_missing || buf->phase_arr[k] == bcf_int8_vector_end)                     \
                 vals[k] = (type_t)0;                                                                                   \
             else                                                                                                       \
@@ -206,9 +219,9 @@ static data_t *auxbuf_flush(auxbuf_t *buf, int flush_all) {
         }                                                                                                              \
     }
         if (buf->type == BCF_HT_INT) {
-            BRANCH(int32_t);
+            BRANCH(int32_t, bcf_int32_is_missing);
         } else if (buf->type == BCF_HT_REAL) {
-            BRANCH(float);
+            BRANCH(float, bcf_float_is_missing);
         } else {
             error("Unexpected type %d\n", buf->type);
         }

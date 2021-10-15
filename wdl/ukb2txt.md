@@ -203,8 +203,9 @@ Split by Batches
 
 Split sample report file into batch report files (~2 seconds)
 ```
-awk 'NR==FNR {print "cel_files\tcomputed_gender\tcall_rate\tcn-probe-chrXY-ratio_gender_meanX\tcn-probe-chrXY-ratio_gender_meanY" > $1".AxiomGT1.report.txt"}
-  NR>FNR {printf "%s\t%s\t%s\t%s\t%s\n",$1,$11,$7,$12,$13 > $4".AxiomGT1.report.txt"}' ukb_snp_posterior.batch ukb_sqc_v2.txt
+sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | \
+  awk 'NR==FNR {print "cel_files\tcomputed_gender\tcall_rate\tcn-probe-chrXY-ratio_gender_meanX\tcn-probe-chrXY-ratio_gender_meanY" > $1".AxiomGT1.report.txt"}
+  NR>FNR {printf "%s\t%s\t%s\t%s\t%s\n",$1,$11,$7,$12,$13 > $4".AxiomGT1.report.txt"}' ukb_snp_posterior.batch -
 sed 's/$/.AxiomGT1.report.txt/' ukb_snp_posterior.batch | tr '\n' '\0' | xargs -0 gzip --force --no-name
 ```
 
@@ -220,7 +221,8 @@ awk 'NR==FNR {x[$2]++} NR>FNR && FNR>1 {array=$9==0 || $9==2; print array"\t"$3;
   if ($1 in x) print array"\t"$3":1"}' ukb_snp_posterior_chrX_haploid.bim ukb_snp_qc.txt > snp-posteriors.UKBL.tsv
 awk 'NR==FNR {x[$2]++} NR>FNR && FNR>1 {array=$9==1 || $9==2; print array"\t"$3;
   if ($1 in x) print array"\t"$3":1"}' ukb_snp_posterior_chrX_haploid.bim ukb_snp_qc.txt > snp-posteriors.UKBB.tsv
-cut -d" " -f3,4 ukb_sqc_v2.txt | uniq | while read array batch; do
+sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | \
+  cut -d" " -f3,4 | uniq | while read array batch; do
   (echo -e "#%SnpPosteriorFormatVer=1\n#%data-order=meanX,varX,nObsMean,nObsVar,meanY,varY,covarXY\nid\tBB\tAB\tAA\tCV";
   cat $batch.snp-posteriors.bin | ./dump 1 33 | paste snp-posteriors.$array.tsv - | sed '/^0/d;s/^..//' | \
   awk '{fmt="%s\t%s,%s,%s,%s,%s,%s,%s\t%s,%s,%s,%s,%s,%s,%s\t%s,%s,%s,%s,%s,%s,%s\t%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n"
@@ -237,16 +239,18 @@ Split chromosome genotype calls files into batch genotype calls files (~30 minut
   awk -F, '{if ($12==$14 && $13==$15) x=0; else if ($12==$15 && $13==$14) x=1; else x=0; print $1,x}' | \
   awk 'NR==FNR {x[$1]=$2} NR>FNR && FNR>1 {print x[$3]}' - ukb_snp_qc.txt > swap.lines
 tail -qc+4 ukb_cal_chr{{1..22},X,Y,XY,MT}_v2.bed | ./unpack $(cat ukb_sqc_v2.txt | wc -l) swap.lines | \
-  ./split .calls.bin <(cut -d" " -f4 ukb_sqc_v2.txt | uniq -c | sed 's/^ *//')
+  ./split .calls.bin <(sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | cut -d" " -f4 | uniq -c | sed 's/^ *//')
 ```
 
 Reconstruct Affymetrix genotype calls files (~10 minutes per batch)
 ```
 awk 'NR>1 {array=$9==0 || $9==2; print array"\t"$3}' ukb_snp_qc.txt > calls.UKBL.tsv
 awk 'NR>1 {array=$9==1 || $9==2; print array"\t"$3}' ukb_snp_qc.txt > calls.UKBB.tsv
-cut -d" " -f3,4 ukb_sqc_v2.txt | uniq -c | while read n array batch; do
+sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | \
+  cut -d" " -f3,4 | uniq -c | while read n array batch; do
   (echo -en "#Calls: -1=NN, 0=AA, 1=AB, 2=BB\nprobeset_id\t";
-  awk -v batch=$batch '$4==batch {print $1}' ukb_sqc_v2.txt | tr '\n' '\t' | sed 's/\t$/\n/';
+  sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | \
+    awk -v batch=$batch '$4==batch {print $1}' | tr '\n' '\t' | sed 's/\t$/\n/';
   fold -w$n $batch.calls.bin | tr '\n' '\r' | fold -w1 | tr '\n\r' '\t\n' | sed 's/3/-1/g' | \
   paste calls.$array.tsv - | sed '/^0/d;s/^..//') | \
     gzip > $batch.AxiomGT1.calls.txt.gz && /bin/rm $batch.calls.bin
@@ -255,16 +259,18 @@ done
 
 Split chromosome intensity files into batch intensity files (~4 hours, could be batched by chromosomes)
 ```
-cat ukb_int_chr{{1..22},X,Y,XY,MT}_v2.bin | ./split .summary.bin <(cut -d" " -f4 ukb_sqc_v2.txt | uniq -c | awk '{print 8*$1,$2}')
+cat ukb_int_chr{{1..22},X,Y,XY,MT}_v2.bin | ./split .summary.bin <(sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | cut -d" " -f4 | uniq -c | awk '{print 8*$1,$2}')
 ```
 
 Reconstruct Affymetrix intensities summary files (~3.5 hours per batch)
 ```
 awk 'NR>1 {array=$9==0 || $9==2; print array"\t"$3"-A"; print array"\t"$3"-B"}' ukb_snp_qc.txt > summary.UKBL.tsv
 awk 'NR>1 {array=$9==1 || $9==2; print array"\t"$3"-A"; print array"\t"$3"-B"}' ukb_snp_qc.txt > summary.UKBB.tsv
-cut -d" " -f3,4 ukb_sqc_v2.txt | uniq -c | while read n array batch; do
+sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | \
+  cut -d" " -f3,4 | uniq -c | while read n array batch; do
   (echo -en "probeset_id\t";
-  awk -v batch=$batch '$4==batch {print $1}' ukb_sqc_v2.txt | tr '\n' '\t' | sed 's/\t$/\n/';
+  sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | \
+    awk -v batch=$batch '$4==batch {print $1}' | tr '\n' '\t' | sed 's/\t$/\n/';
   cat $batch.summary.bin | ./dump 2 $n | paste summary.$array.tsv - | sed '/^0/d;s/^..//') | \
     gzip > $batch.AxiomGT1.summary.txt.gz && /bin/rm $batch.summary.bin
 done
@@ -275,14 +281,16 @@ Input Files for MoChA WDL
 
 Create sample table
 ```
-awk 'BEGIN {print "sample_id\tbatch_id\tcel\tcomputed_gender\tcall_rate"}
-  {printf "%s\t%s\t%s\t%s\t%s\n",$1,$4,$1,$11,$7/100}' ukb_sqc_v2.txt > ukb.sample.tsv
+sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | \
+  awk 'BEGIN {print "sample_id\tbatch_id\tcel\tcomputed_gender\tcall_rate"}
+  {printf "%s\t%s\t%s\t%s\t%s\n",$1,$4,$1,$11,$7/100}' > ukb.sample.tsv
 ```
 If you wanted to use the sample IDs associated with your application ID, you should instead include in the first column of the table the IDs from the `ukbA_cal_v2_sP.fam` file which includes the IDs associated to your UK Biobank application ID. Remember, when handling retracted samples, that each ID in the first column needs to be unique for the MoChA WDL pipeline to run
 
 Create batch table
 ```
-cut -d" " -f3,4 ukb_sqc_v2.txt | uniq -c | \
+sed 's/ UKBiLEVEAX_b\([1-9]\) / UKBiLEVEAX_b0\1 /' ukb_sqc_v2.txt | \
+  cut -d" " -f3,4 | uniq -c | \
   awk 'BEGIN {csv["UKBB"]="Axiom_UKB_WCSG.na34.annot.csv.gz"; csv["UKBL"]="Axiom_UKBiLEVE.na34.annot.csv.gz"
   print "batch_id\tn_smpls\tcsv\tsnp\treport\tcalls\tsummary"}
   {printf "%s\t%s\t%s\t%s.AxiomGT1.snp-posteriors.txt.gz\t%s.AxiomGT1.report.txt.gz\t%s.AxiomGT1.calls.txt.gz\t%s.AxiomGT1.summary.txt.gz\n",
@@ -306,7 +314,7 @@ Create JSON input file
   "mocha.data_path": "gs://{google-bucket}/txts",
   "mocha.sample_tsv_file": "gs://{google-bucket}/tsvs/ukb.sample.tsv",
   "mocha.batch_tsv_file": "gs://{google-bucket}/tsvs/ukb.batch.tsv",
-  "mocha.docker_registry": "us.gcr.io/mccarroll-mocha"
+  "mocha.docker_repository": "us.gcr.io/mccarroll-mocha"
 }
 ```
 

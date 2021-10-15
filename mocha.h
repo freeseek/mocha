@@ -148,12 +148,14 @@ int tsv_read_computed_gender(tsv_t *tsv, bcf1_t *rec, void *usr) {
         *computed_gender = GENDER_MALE;
     } else if (toupper(*tsv->ss) == 'F') {
         *computed_gender = GENDER_FEMALE;
-    } else if (toupper(*tsv->ss) == 'U') {
+    } else if (toupper(*tsv->ss) == 'U' || toupper(*tsv->ss) == 'N') {
         *computed_gender = GENDER_UNKNOWN;
     } else {
         char *endptr;
         *computed_gender = (int)strtol(tsv->ss, &endptr, 0);
-        if (*endptr) error("Could not parse gender %s\n", tsv->ss);
+        if (*endptr)
+            error("Could not parse gender %s\n(Acceptable values: 1/M/m = male, 2/F/f = female, 0/U/u/N/n = missing)\n",
+                  tsv->ss);
     }
     return 0;
 }
@@ -217,9 +219,10 @@ static inline int get_cov(const float *x, const float *y, int n, const int *imap
  * EXTRACT DATA FROM VCF FUNCTIONS      *
  ****************************************/
 
-// retrieve genotype alleles information from BCF record
+// retrieve unphased genotype alleles information from BCF record
 // assumes little endian architecture
-static inline int bcf_get_genotype_alleles(const bcf_fmt_t *fmt, int16_t *gt0_arr, int16_t *gt1_arr, int nsmpl) {
+static inline int bcf_get_unphased_genotype_alleles(const bcf_fmt_t *fmt, int16_t *gt0_arr, int16_t *gt1_arr,
+                                                    int nsmpl) {
     if (!fmt || fmt->n != 2) return 0;
 
 #define BRANCH(type_t, bcf_type_vector_end)                                                                            \
@@ -231,8 +234,9 @@ static inline int bcf_get_genotype_alleles(const bcf_fmt_t *fmt, int16_t *gt0_ar
                 gt0_arr[i] = bcf_int16_missing;                                                                        \
                 gt1_arr[i] = bcf_int16_missing;                                                                        \
             } else {                                                                                                   \
-                gt0_arr[i] = (int16_t)bcf_gt_allele(p[0]);                                                             \
-                gt1_arr[i] = (int16_t)bcf_gt_allele(p[1]);                                                             \
+                int swap = bcf_gt_allele(p[0]) > bcf_gt_allele(p[1]);                                                  \
+                gt0_arr[i] = (int16_t)bcf_gt_allele(p[swap]);                                                          \
+                gt1_arr[i] = (int16_t)bcf_gt_allele(p[!swap]);                                                         \
             }                                                                                                          \
         }                                                                                                              \
     }

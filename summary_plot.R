@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-summary_plot_version <- '2021-05-14'
+summary_plot_version <- '2021-10-15'
 
 library(optparse)
 library(ggplot2)
@@ -180,7 +180,7 @@ if (sum(idx_mlox | idx_mloy) > 0) {
     geom_histogram(binwidth = .001, color = 'black', fill = 'transparent') +
     scale_x_continuous('mLOX/mLOY BAF deviation', limits = c(0.0, 0.05), expand = c(0, 0)) +
     theme_bw(base_size = args$fontsize) +
-    facet_grid(computed_gender ~ .)
+    facet_grid(computed_gender ~ ., scales = 'free_y')
   print(p)
 }
 

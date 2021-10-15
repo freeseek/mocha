@@ -21,6 +21,7 @@ WARNING: MoChA will not yield useful results for VCFs from whole exome sequencin
    * [Phasing pipeline](#phasing-pipeline)
    * [Chromosomal alterations pipeline](#chromosomal-alterations-pipeline)
    * [Filter callset](#filter-callset)
+   * [Mosaic phenotypes](#mosaic-phenotypes)
    * [Allelic shift pipeline](#allelic-shift-pipeline)
    * [Plot results](#plot-results)
    * [HMM parameters](#hmm-parameters)
@@ -187,8 +188,9 @@ for chr in {1..22} X Y; do
   bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
   bcftools norm --no-version -Ou -m -any | \
   bcftools norm --no-version -Ou -d none -f $HOME/GRCh37/human_g1k_v37.fasta | \
-  bcftools sort -Ob -o ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf -T ./bcftools-sort.XXXXXX && \
-  bcftools index -f ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf
+  bcftools sort -Ob -T ./bcftools-sort.XXXXXX | \
+  tee ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf | \
+  bcftools index --force --output ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf.csi
 done
 ```
 
@@ -199,7 +201,7 @@ bcftools query -i 'AC>1 && END-POS+1>10000 && SVTYPE!="INDEL" && (SVTYPE=="CNV" 
   -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh37/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz > $HOME/GRCh37/cnps.bed
 ```
 
-Minimal divergence intervals from segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
+Minimal divergence intervals from segmental duplications (make sure your bedtools version is 2.27 or newer)
 ```
 wget -O- http://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/genomicSuperDups.txt.gz | gzip -d |
   awk '!($2=="chrX" && $8=="chrY" || $2=="chrY" && $8=="chrX") {print $2"\t"$3"\t"$4"\t"$30}' > genomicSuperDups.bed
@@ -269,16 +271,18 @@ wget http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_
 for chr in {1..22}; do
   bcftools view --no-version -Ou -c 2 CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.shapeit2-duohmm-phased.vcf.gz | \
   bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
-  bcftools sort -Ob -o CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf -T ./bcftools-sort.XXXXXX && \
-  bcftools index -f CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf
+  bcftools sort -Ob -T ./bcftools-sort.XXXXXX | \
+  tee CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf | \
+  bcftools index --force --output CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf.csi
 done
 bcftools view --no-version -h CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.vcf.gz | \
   sed 's/^#CHROM/##INFO=<ID=ME,Number=1,Type=Float,Description="Mendelian genotype errors">\n#CHROM/' | \
   bcftools reheader -h /dev/stdin CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.vcf.gz | \
   bcftools view --no-version -Ou -c 2 | \
   bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
-  bcftools sort -Ob -o CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf -T ./bcftools-sort.XXXXXX && \
-  bcftools index -f CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf
+  bcftools sort -Ob -T ./bcftools-sort.XXXXXX | \
+  tee CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf | \
+  bcftools index --force --output CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf.csi
 ```
 
 List of common germline duplications and deletions
@@ -288,7 +292,7 @@ bcftools query -i 'AC>1 && END-POS+1>10000 && (SVTYPE=="CNV" || SVTYPE=="DEL" ||
   -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh38/1KGP_3202.Illumina_ensemble_callset.freeze_V1.vcf.gz > $HOME/GRCh38/cnps.bed
 ```
 
-Minimal divergence intervals from segmental duplications (make sure your bedtools version is not affected by the groupby <a href="https://github.com/arq5x/bedtools2/issues/418">bug</a>)
+Minimal divergence intervals from segmental duplications (make sure your bedtools version is 2.27 or newer)
 ```
 wget -O- http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/genomicSuperDups.txt.gz | gzip -d |
   awk '!($2=="chrX" && $8=="chrY" || $2=="chrY" && $8=="chrX") {print $2"\t"$3"\t"$4"\t"$30}' > genomicSuperDups.bed
@@ -344,8 +348,8 @@ Preparation steps
 vcf="..." # input VCF file with phased GT, LRR, and BAF
 pfx="..." # output prefix
 thr="..." # number of threads to use
-crt="..." # file with call rate information (first column sample ID, second column call rate)
-sex="..." # file with computed gender information (first column sample ID, second column gender: 1=male; 2=female)
+crt="..." # tab delimited file with call rate information (first column sample ID, second column call rate)
+sex="..." # tab delimited file with computed gender information (first column sample ID, second column gender: 1=male; 2=female)
 xcl="..." # VCF file with additional list of variants to exclude (optional)
 ped="..." # pedigree file to use if parent child duos are present
 dir="..." # directory where output files will be generated
@@ -373,9 +377,10 @@ If you do not already have a VCF file but you have Illumina or Affymetrix genoty
 
 Create a minimal binary VCF
 ```
-bcftools annotate --no-version -Ob -o $dir/$pfx.unphased.bcf $vcf \
-  -x ID,QUAL,^INFO/ALLELE_A,^INFO/ALLELE_B,^INFO/GC,^FMT/GT,^FMT/BAF,^FMT/LRR && \
-  bcftools index -f $dir/$pfx.unphased.bcf
+bcftools annotate --no-version -Ob $vcf \
+  -x ID,QUAL,^INFO/ALLELE_A,^INFO/ALLELE_B,^INFO/GC,^FMT/GT,^FMT/BAF,^FMT/LRR | \
+  tee $dir/$pfx.unphased.bcf | \
+  bcftools index --force --output $dir/$pfx.unphased.bcf.csi
 ```
 
 If you want to process <b>whole-genome sequence</b> data you need a VCF file with GC, GT and AD information
@@ -399,8 +404,9 @@ bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/'
   bcftools filter --no-version -Ou -e "FMT/DP<10 | FMT/GQ<20" --set-GT . | \
   bcftools annotate --no-version -Ou -x ID,QUAL,^INFO/GC,^FMT/GT,^FMT/AD | \
   bcftools norm --no-version -Ou -m -any --keep-sum AD | \
-  bcftools norm --no-version -Ob -o $dir/$pfx.unphased.bcf -f $ref && \
-  bcftools index -f $dir/$pfx.unphased.bcf
+  bcftools norm --no-version -Ob -f $ref | \
+  tee $dir/$pfx.unphased.bcf | \
+  bcftools index --force --output $dir/$pfx.unphased.bcf.csi
 ```
 This will set to missing all genotypes that have low coverage or low genotyping quality, as these can cause issues
 
@@ -412,10 +418,11 @@ echo '##INFO=<ID=JK,Number=1,Type=Float,Description="Jukes Cantor">' | \
   bcftools view --no-version -Ou -S ^samples_xcl_list.txt | \
   bcftools +fill-tags --no-version -Ou -t ^Y,MT,chrY,chrM -- -t ExcHet,F_MISSING | \
   bcftools view --no-version -Ou -G | \
-  bcftools annotate --no-version -Ob -o $dir/$pfx.xcl.bcf \
+  bcftools annotate --no-version -Ob \
     -i 'FILTER!="." && FILTER!="PASS" || INFO/JK<.02 || INFO/ExcHet<1e-6 || INFO/F_MISSING>1-.97' \
-    -x ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING && \
-  bcftools index -f $dir/$pfx.xcl.bcf;
+    -x ^INFO/JK,^INFO/ExcHet,^INFO/F_MISSING | \
+  tee $dir/$pfx.xcl.bcf | \
+  bcftools index --force --output $dir/$pfx.xcl.bcf.csi; \
 /bin/rm samples_xcl_list.txt
 ```
 This command will create a list of variants falling within segmental duplications with low divergence (<2%), high levels of missingness (>3%), variants with excess heterozygosity (p<1e-6). If you are using WGS data and you don't have a file with sex information, you can skip the quality control line using this information. When later running MoChA, sex will be imputed and a sex file can be computed from MoChA's output
@@ -424,8 +431,9 @@ If a file with additional variants to be excluded is available, further merge it
 ```
 /bin/mv $dir/$pfx.xcl.bcf $dir/$pfx.xcl.tmp.bcf && \
 /bin/mv $dir/$pfx.xcl.bcf.csi $dir/$pfx.xcl.tmp.bcf.csi && \
-bcftools merge --no-version -Ob -o $dir/$pfx.xcl.bcf -m none $dir/$pfx.xcl.tmp.bcf $xcl && \
-bcftools index -f $dir/$pfx.xcl.bcf
+bcftools merge --no-version -Ob -m none $dir/$pfx.xcl.tmp.bcf $xcl | \
+  tee $dir/$pfx.xcl.bcf | \ 
+  bcftools index --force --output $dir/$pfx.xcl.bcf.csi
 ```
 
 Phasing pipeline
@@ -461,23 +469,26 @@ Notice that you can also use alternative phasing methods that might be more effe
 
 Concatenate phased output into a single VCF file
 ```
-bcftools concat --no-version -Ob -o $dir/$pfx.pgt.bcf $dir/$pfx.chr{{1..22},X}.pgt.bcf && \
-bcftools index -f $dir/$pfx.pgt.bcf
+bcftools concat --no-version -Ob $dir/$pfx.chr{{1..22},X}.pgt.bcf | \
+  tee $dir/$pfx.pgt.bcf | \
+  bcftools index --force --output $dir/$pfx.pgt.bcf.csi
 ```
 Notice that if the phasing was made in overlapping windows rather than chromosomes, the overlapping windows should be concatenated using the `--ligate` option in bcftools concat
 
 If pedigree information with duos or trios is available, you can improve the phased haplotypes by running the following command instead of the previous one
 ```
 bcftools concat --no-version -Ou $dir/$pfx.chr{{1..22},X}.pgt.bcf | \
-bcftools +trio-phase --no-version -Ob -o $dir/$pfx.pgt.bcf -- -p $ped && \
-bcftools index -f $dir/$pfx.pgt.bcf
+bcftools +trio-phase --no-version -Ob -- -p $ped | \
+  tee $dir/$pfx.pgt.bcf | \
+  bcftools index --force --output $dir/$pfx.pgt.bcf.csi
 ```
 (it requires a ped file)
 
 Import phased genotypes in the original VCF without changing missing genotypes
 ```
-bcftools annotate --no-version -Ob -o $dir/$pfx.bcf --annotations $dir/$pfx.pgt.bcf --columns -FMT/GT $dir/$pfx.unphased.bcf && \
-bcftools index -f $dir/$pfx.bcf
+bcftools annotate --no-version -Ob --annotations $dir/$pfx.pgt.bcf --columns -FMT/GT $dir/$pfx.unphased.bcf | \
+  tee $dir/$pfx.bcf | \
+  bcftools index --force --output $dir/$pfx.bcf.csi
 ```
 
 Impute variants using impute5 (optional for array data)
@@ -498,8 +509,9 @@ If you are using GRCh37 rather than GRCh38, use `--r $chr` instead
 
 Concatenate imputed genotypes into a single VCF file (optional for array data)
 ```
-bcftools concat --no-version -Ob -o $dir/$pfx.imp.bcf $dir/$pfx.chr{{1..22},X}.imp.bcf && \
-bcftools index -f $dir/$pfx.imp.bcf
+bcftools concat --no-version -Ob $dir/$pfx.chr{{1..22},X}.imp.bcf | \
+  tee $dir/$pfx.imp.bcf | \
+  bcftools index --force --output $dir/$pfx.imp.bcf.csi
 ```
 
 Remove unphased VCF and single chromosome files (optional)
@@ -527,7 +539,6 @@ bcftools +mocha \
   --input-stats $tsv \
   --no-version \
   --output-type b \
-  --output $dir/$pfx.bdev.bcf \
   --variants ^$dir/$pfx.xcl.bcf \
   --calls $dir/$pfx.calls.tsv \
   --stats $dir/$pfx.stats.tsv \
@@ -535,10 +546,11 @@ bcftools +mocha \
   --cnp $cnp \
   --mhc $mhc_reg \
   --kir $kir_reg \
-  $dir/$pfx.bcf && \
-bcftools index -f $dir/$pfx.bdev.bcf
+  $dir/$pfx.bcf | \
+  tee $dir/$pfx.as.bcf | \
+  bcftools index --force --output $dir/$pfx.as.bcf.csi
 ```
-Notice that MoChA will read input computed gender and call rate if provided, otherwise these will be estimated from the VCF. For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms. MoChA should not be run on single chromosome VCFs as median statistics across the autosomes are used to calibrate the likelihoods 
+Notice that MoChA will read input computed gender and call rate with the `--input-stats` option if provided, otherwise these will be estimated from the VCF. MoChA requires a balanced ratio of males and females to correctly infer gender so if this is not the case, we advise to input the gender with the `--input-stats` option. For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms. MoChA should not be run on single chromosome VCFs as median statistics across the autosomes are used to calibrate the likelihoods 
 
 The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns
 ```
@@ -554,6 +566,9 @@ The genome statistics file contains information for each sample analyzed in the 
               n_sites - number of sites across the genome for model based on LRR and BAF
                n_hets - number of heterozygous sites across the genome for model based on BAF and genotype phase
       x_nonpar_n_hets - number of heterozygous sites in the X nonPAR region
+          par1_n_hets - number of heterozygous sites in the PAR1 region
+           xtr_n_hets - number of heterozygous sites in the XTR region
+          par2_n_hets - number of heterozygous sites in the PAR2 region
 x_nonpar_baf_sd/_corr - BAF standard deviation or beta-binomial overdispersion for read counts in the X nonPAR region
   x_nonpar_XXX_median - median LRR or sequencing coverage over the X nonPAR region
   y_nonpar_XXX_median - median LRR or sequencing coverage over the Y nonPAR region
@@ -587,7 +602,7 @@ computed_gender - inferred sample gender
            type - Type of call based on LRR / relative coverage
              cf - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
 ```
-Notice that the cell fraction is computed as either `2 bdev` for CN-LOH events or using the formulas `| 1/cn - 1/2 | = bdev` with `cn` the copy number and `cf = | 2 - cn |` for gains and losses. If the type of event cannot be determined, it will be determined as `4 bdev` if `bdev < 0.05` otherwise it will not be estimated
+Notice that the cell fraction is computed as either `2 bdev` for CN-LOH events or using the formulas `| 1/cn - 1/2 | = bdev` with `cn` the copy number and `cf = | 2 - cn |` for gains and losses. If the type of event cannot be determined, it will be determined as `4 bdev` if `bdev < 0.05` otherwise it will not be estimated. The `rel_cov` statistic is estimated as `2 x 2 ^ (LRR / LRR-hap2dip)` with `LRR-hap2dip = 0.45` by default
 
 The output VCF will contain the following extra FORMAT fields
 ```
@@ -615,29 +630,104 @@ awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
 awk 'NR==FNR {x[$1"_"$3"_"$4"_"$5]++} NR>FNR && ($0~"^track" || $4"_"$1"_"$2"_"$3 in x)' \
   $pfx.calls.filtered.tsv $pfx.ucsc.bed > $pfx.ucsc.filtered.bed
 ```
-will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls made by the LRR and BAF model if they have less than a `lod_baf_phase` score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UK biboank</a>
+will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls made by the LRR and BAF model if they have less than a `lod_baf_phase` score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UK biboank</a>. Notice that different filtering thresholds are used for calls smaller than 500kbp and smaller than 5Mbp, reflecting different priors that these could be germline events. Most calls on chromosome X in male samples likely represent mosaic loss-of-Y events, as only the PAR1 and PAR2 regions are analyzed in male samples
 
-To generate a list of samples with mosaic loss-of-Y (mLOY):
-```
-awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-  NR==FNR && FNR>1 && ($(f["call_rate"])<.97 || $(f["baf_auto"])>.03) {xcl[$(f["sample_id"])]++}
-  NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i}
-  NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); chrom=$(g["chrom"]); sub("^chr", "", chrom);}
-  NR>FNR && FNR>1 && !(sample_id in xcl) && $(g["computed_gender"])=="M" && chrom=="X" &&
-  $(g["length"])>2e6 && $(g["rel_cov"])<2.5 {print sample_id}' $pfx.stats.tsv $pfx.calls.tsv > $pfx.mLOY.lines
-```
-Requiring `rel_cov<2.5` should make sure to filter out XXY and XYY samples. This should generate a mLOY set similarly to how it was done in the <a href="http://doi.org/10.1038/s41598-020-59963-8">UK biboank</a>
+Mosaic phenotypes
+=================
 
-Similarly, to generate a list of samples with mosaic loss-of-X (mLOX):
+For additional downstream analyses, we can generate phenotypes to analyze. Generate a list of samples to exclude from association analyses
 ```
-awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-  NR==FNR && FNR>1 && ($(f["call_rate"])<.97 || $(f["baf_auto"])>.03) {xcl[$(f["sample_id"])]++}
-  NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i}
-  NR>FNR && FNR>1 {sample_id=$(g["sample_id"]); chrom=$(g["chrom"]); sub("^chr", "", chrom)}
-  NR>FNR && FNR>1 && !(sample_id in xcl) && $(g["computed_gender"])=="F" && chrom=="X" &&
-  $(g["length"])>1e8 && $(g["rel_cov"])<2.5 {print sample_id}' $pfx.stats.tsv $pfx.calls.tsv > $pfx.mLOX.lines
+awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR>1 && ($(f["call_rate"])<.97 || $(f["baf_auto"])>.03) {print $(f["sample_id"])}' $pfx.stats.tsv > $pfx.remove.lines
 ```
-Requiring `rel_cov<2.5` should make sure to filter out XXY and XXX samples
+
+Generate list of samples with mosaic loss of chromosome Y (mLOY)
+```
+awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR>1 {chrom=$(f["chrom"]); sub("^chr", "", chrom);}
+  NR>1 && $(f["computed_gender"])=="M" && chrom=="X" &&
+  $(f["length"])>2e6 && $(f["rel_cov"])<2.5 {print $(f["sample_id"])}' $pfx.calls.tsv > $pfx.Y_loss.lines
+```
+Requiring `rel_cov<2.5` should make sure to filter out XXY and XYY samples. This should generate a mLOY set similarly to how it was done in the <a href="http://doi.org/10.1038/s41598-020-59963-8">UK biboank</a>. Notice that this inference strategy is based on BAF imbalances over the PAR1 region which allows detection of loss-of-Y at much lower cell fractions that by using LRR statistics over the Y nonPAR region
+
+Generate list of samples with mosaic loss of chromosome X (mLOX)
+```
+awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR>1 {chrom=$(f["chrom"]); sub("^chr", "", chrom)}
+  NR>1 && $(f["computed_gender"])=="F" && chrom=="X" &&
+  $(f["length"])>1e8 && $(f["rel_cov"])<2.5 {print $(f["sample_id"])}' $pfx.calls.tsv > $pfx.X_loss.lines
+```
+Requiring `rel_cov<2.5` should make sure to filter out XXY and XXX samples. Notice that we do not require that the event be identified as a loss by MoChA. MoChA determines the event type based on LRR median statistics and as we have observed that the LRR on chromosome X is quite noisy, for low cell fraction chromosome X calls determinining the type of event based on LRR is not reliable. Notice that this inference strategy is based on BAF imbalances over whole chromosome X which allows detection of loss-of-X at much lower cell fractions than by using LRR statistics over the X nonPAR region
+
+Generate list of non-germline events
+```
+awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i; print}
+  NR>1 {len=$(f["length"]); bdev=$(f["bdev"]); rel_cov=$(f["rel_cov"])}
+  NR>1 && $(f["type"])!~"^CNP" &&
+  ( $(f["chrom"])~"X" && $(f["computed_gender"])=="M" || bdev<0.1 || $(f["n50_hets"])<2e5 ) &&
+  ( $(f["bdev_se"])!="nan" || $(f["lod_baf_phase"])!="nan" && $(f["lod_baf_phase"]) > 10.0 ) &&
+  ( rel_cov<2.1 || bdev<0.05 || len>5e5 && bdev<0.1 && rel_cov<2.5 || len>5e6 && bdev<0.15 )' \
+  $pfx.calls.tsv > $pfx.mca.calls.tsv
+```
+
+Generate list of samples with mosaic autosomal alterations
+```
+for chr in {1..12} {16..20}; do
+  awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])=="T" && $(f["q_arm"])!="T" && $(f["rel_cov"])>1 {
+    x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y*y<x*x) print $(f["sample_id"])}' \
+    $pfx.mca.calls.tsv > $pfx.${chr}p_cnloh.lines
+  awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])!="N" && $(f["rel_cov"])>1 {
+    x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y>x) print $(f["sample_id"])}' \
+    $pfx.mca.calls.tsv > $pfx.${chr}p_loss.lines
+done
+for chr in {1..22}; do
+  awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])!="T" && $(f["q_arm"])=="T" && $(f["rel_cov"])>1 {
+    x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y*y<x*x) print $(f["sample_id"])}' \
+    $pfx.mca.calls.tsv > $pfx.${chr}q_cnloh.lines
+  awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["q_arm"])!="N" && $(f["rel_cov"])>1 {
+    x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y>x) print $(f["sample_id"])}' \
+    $pfx.mca.calls.tsv > $pfx.${chr}q_loss.lines
+done
+for chr in {1..12} {16..20}; do
+  awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])=="T" && $(f["q_arm"])=="T" && $(f["rel_cov"])>1 {
+    x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y<-x) print $(f["sample_id"])}' \
+    $pfx.mca.calls.tsv > $pfx.${chr}_gain.lines
+done
+for chr in 13 14 15 21 22; do
+  awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["q_arm"])=="T" && $(f["rel_cov"])>1 {
+    x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y<-x) print $(f["sample_id"])}' \
+    $pfx.mca.calls.tsv > $pfx.${chr}_gain.lines
+done
+cat $pfx.{{3,4,6,8,11,17,18}p_loss,{1,6,11,13,14,16,17,22}q_loss,13q_cnloh,{2,3,4,5,12,17,18,19}_gain}.lines | \
+  awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]++} NR>FNR && $1 in x {print $1}' - $pfx.stats.tsv > $pfx.cll.lines
+```
+
+Generate phenotype table with mosaic loss of chromosome X and Y
+```
+(echo -e "sample_id\tX_loss\tY_loss"
+awk -F"\t" -v OFS="\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i} NR>1 {print $(f["sample_id"]),$(f["computed_gender"])}' $pfx.stats.tsv | \
+  awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]=1} NR>FNR {if ($2=="F") phe=0+x[$1]; else phe="NA"; print $1,$2,phe}' $pfx.X_loss.lines - | \
+  awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]=1} NR>FNR {if ($2=="M") phe=0+x[$1]; else phe="NA"; print $1,$3,phe}' $pfx.Y_loss.lines -) \
+  > $pfx.pheno.tsv
+```
+
+Generate phenotype table with mosaic loss of chromosome X and Y
+```
+for type in {{{1..12},{16..20}}p,{1..22}q}_{cnloh,loss} {1..22}_gain cll; do
+  n=$(cat $pfx.$type.lines | wc -l);
+  if [ "$n" -gt 0 ]; then
+    awk -F"\t" -v OFS="\t" -v type=$type 'NR==FNR {x[$1]=1}
+      NR>FNR {if (FNR==1) col=type; else col=0+x[$1]; print $0,col}' \
+      $pfx.$type.lines $pfx.pheno.tsv | sponge $pfx.pheno.tsv
+  fi
+done
+```
 
 Allelic shift pipeline
 ======================
@@ -650,9 +740,9 @@ bcftools annotate \
   --no-version -Ob \
   --columns FMT/AS \
   $dir/$pfx.imp.bcf \
-  --annotations $dir/$pfx.bdev.bcf \
-  --output $dir/$pfx.imp.bdev.bcf && \
-bcftools index --force $dir/$pfx.imp.bdev.bcf
+  --annotations $dir/$pfx.as.bcf | \
+  tee $dir/$pfx.imp.as.bcf | \
+  bcftools index --force --output $dir/$pfx.imp.as.bcf.csi
 ```
 
 Run asymmetry analyses (subset cohort, run binomial test, discard genotypes)
@@ -664,15 +754,15 @@ bcftools +extendFMT \
   --dist 500000 \
   --regions $reg \
   --samples $lst \
-  $dir/$pfx.imp.bdev.bcf | \
+  $dir/$pfx.imp.as.bcf | \
 bcftools +mochatools \
   --no-version \
   --output-type b \
-  --output $dir/$pfx.bal.bcf \
   -- --summary AS \
   --test AS \
-  --drop-genotypes && \
-bcftools index --force $dir/$pfx.as.bcf
+  --drop-genotypes | \
+  tee $dir/$pfx.bal.bcf | \
+  bcftools index --force --output $dir/$pfx.as.bcf.csi
 ```
 
 Observe results for asymmetry analyses in table format
@@ -732,7 +822,7 @@ Plot mosaic chromosomal alterations (for array data)
 mocha_plot.R \
   --mocha \
   --stats $dir/$pfx.stats.tsv \
-  --vcf $dir/$pfx.bdev.bcf \
+  --vcf $dir/$pfx.as.bcf \
   --png MH0145622.png \
   --samples MH0145622 \
   --regions 11:81098129-115077367 \
@@ -749,7 +839,7 @@ mocha_plot.R \
   --wgs \
   --mocha \
   --stats $dir/$pfx.stats.tsv
-  --vcf $dir/$pfx.bdev.bcf \
+  --vcf $dir/$pfx.as.bcf \
   --png CSES15_P26_140611.png \
   --samples CSES15_P26_140611 \
   --regions 1:202236354-211793505 \
@@ -765,7 +855,7 @@ HMM parameters
 MoChA has a complicated list of parameters that it uses to assign likelihoods and transition probabilities:
 - [xy-major-pl] transition phred-scaled likelihood where the non-alternate state is towards the centromere
 - [xy-minor-pl] transition phred-scaled likelihood where the non-alternate state is away from the centromere
-- [chrY-tel-pl] autosomal telomeres phred-scaled likelihood used to provide a prior for aneuploidy and CN-LOH events reaching the telomere
+- [auto-tel-pl] autosomal telomeres phred-scaled likelihood used to provide a prior for aneuploidy and CN-LOH events reaching the telomere
 - [chrX-tel-pl] chromosome X telomeres phred-scaled likelihood used to provide a prior for mLOX events
 - [chrY-tel-pl] chromosome Y telomeres phred-scaled likelihood used to provide a prior for mLOY events
 - [error-pl] uniform error phred-scaled likelihood used to maximize the amount of evidence a single site can provide in favor of an event

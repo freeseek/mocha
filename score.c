@@ -38,7 +38,7 @@
 #include "tsv2vcf.h"
 #include "filter.h"
 
-#define SCORE_VERSION "2021-05-14"
+#define SCORE_VERSION "2021-10-15"
 
 #define FLT_INCLUDE (1 << 0)
 #define FLT_EXCLUDE (1 << 1)
@@ -160,7 +160,7 @@ static const char *snp_hdr_str[] = {"snp", "snpid", "SNPID", "MarkerName", "Mark
 static const char *chr_hdr_str[] = {"CHR", "Chromosome", "Chrom", "Chr", "chr_name", "chromosome"};
 static const char *bp_hdr_str[] = {"bp", "POS", "Position", "Pos", "BP", "chr_position", "base_pair_location"};
 static const char *a1_hdr_str[] = {"effect_allele", "a1", "A1", "Effect_allele", "Allele1", "allele1"};
-static const char *a2_hdr_str[] = {"other_allele", "a2", "A2", "Non_Effect_allele", "Allele2", "allele2",
+static const char *a2_hdr_str[] = {"other_allele",    "a2", "A2", "Non_Effect_allele", "Allele2", "allele2",
                                    "reference_allele"};
 static const char *beta_hdr_str[] = {"effect", "BETA", "Beta", "Effect", "beta", "effect_weight", "A1Effect"};
 static const char *p_hdr_str[] = {"pvalue", "pval", "Pvalue", "P.value", "P", "PValue", "p_value"};
@@ -218,6 +218,7 @@ static summary_t *summary_init(const char *fn, bcf_hdr_t *hdr, int snp_id_mode) 
     for (int i = 0; i < sizeof(p_hdr_str) / sizeof(char *); i++)
         if (tsv_register(tsv, p_hdr_str[i], tsv_read_float, (void *)&marker->p) == 0) summary->p_tsv = 1;
 
+    int force_warned = 0;
     bcf1_t *rec = bcf_init();
     char chr_bp_str[2 * (sizeof(int32_t) + sizeof(hts_pos_t)) + 1];
     while (hts_getline(fp, KS_SEP_LINE, &str) > 0) {
@@ -226,8 +227,11 @@ static summary_t *summary_init(const char *fn, bcf_hdr_t *hdr, int snp_id_mode) 
         rec->pos = -1;
         hts_expand(marker_t, summary->n_markers + 1, summary->m_markers, summary->markers);
         if (!tsv_parse_delimiter(tsv, rec, str.s, delimiter)) {
-            if (rec->rid < 0) {
-                fprintf(stderr, "Warning: could not recognize chromosome in line:\n%s\n", str.s);
+            if (rec->rid < 0 && summary->chr_tsv && !force_warned) {
+                fprintf(stderr,
+                        "Warning: could not recognize chromosome in line:\n%s\n(This warning is printed only once.)\n",
+                        str.s);
+                force_warned = 1;
                 continue;
             }
             marker->rid = rec->rid;
@@ -242,12 +246,19 @@ static summary_t *summary_init(const char *fn, bcf_hdr_t *hdr, int snp_id_mode) 
             }
             int size = khash_str2int_size(summary->str2id);
             if (khash_str2int_inc(summary->str2id, key) < size) {
-                if (summary->use_snp)
-                    fprintf(stderr, "Warning: could not include marker name %s as present multiple times\n", rec->d.id);
-                else
-                    fprintf(stderr,
-                            "Warning: could not include chromosome position %s %" PRId64 " as present multiple times\n",
-                            bcf_hdr_id2name(hdr, rec->rid), rec->pos + 1);
+                if (!force_warned) {
+                    if (summary->use_snp)
+                        fprintf(stderr,
+                                "Warning: could not include marker name %s as present multiple times\n(This warning is "
+                                "printed only once.)\n",
+                                rec->d.id);
+                    else
+                        fprintf(stderr,
+                                "Warning: could not include chromosome position %s %" PRId64
+                                " as present multiple times\n(This warning is printed only once.)\n",
+                                bcf_hdr_id2name(hdr, rec->rid), rec->pos + 1);
+                    force_warned = 1;
+                }
                 free(key);
                 free(marker->a1);
                 free(marker->a2);
@@ -298,9 +309,11 @@ static const char *usage_text(void) {
            "   -w, --weight <tag>            FORMAT tag to use for effect weights (only in VCF-mode)\n"
            "   -p, --p-value <tag>           FORMAT tag to use for p-values (only in VCF-mode)\n"
            "       --q-score-thr LIST        comma separated list of p-value thresholds\n"
+           "       --counts                  include SNP counts in the output table\n"
            "   -o, --output <file.tsv>       write output to a file [standard output]\n"
            "       --sample-header           header for sample ID column [SAMPLE]\n"
            "   -e, --exclude <expr>          exclude sites for which the expression is true\n"
+           "   -f, --apply-filters <list>    require at least one of the listed FILTER strings (e.g. \"PASS,.\")\n"
            "   -i, --include <expr>          select sites for which the expression is true\n"
            "   -r, --regions <region>        restrict to comma-separated list of regions\n"
            "   -R, --regions-file <file>     restrict to regions listed in a file\n"
@@ -336,6 +349,7 @@ int run(int argc, char **argv) {
     int vcf_mode = 0;
     int snp_id_mode = 0;
     int use_tag = 0;
+    int display_cnts = 0;
     int filter_logic = 0;
     int regions_is_file = 0;
     int targets_is_file = 0;
@@ -352,6 +366,7 @@ int run(int argc, char **argv) {
     const char *targets_list = NULL;
     const char *sample_names = NULL;
     filter_t *filter = NULL;
+    bcf_srs_t *sr = bcf_sr_init();
 
     static struct option loptions[] = {{"use", required_argument, NULL, 1},
                                        {"summaries", required_argument, NULL, 2},
@@ -360,9 +375,11 @@ int run(int argc, char **argv) {
                                        {"weight", required_argument, NULL, 'w'},
                                        {"p-value", required_argument, NULL, 'p'},
                                        {"q-score-thr", required_argument, NULL, 4},
+                                       {"counts", no_argument, NULL, 5},
                                        {"output", required_argument, NULL, 'o'},
-                                       {"sample-header", required_argument, NULL, 5},
+                                       {"sample-header", required_argument, NULL, 6},
                                        {"exclude", required_argument, NULL, 'e'},
+                                       {"apply-filters", required_argument, NULL, 'f'},
                                        {"include", required_argument, NULL, 'i'},
                                        {"regions", required_argument, NULL, 'r'},
                                        {"regions-file", required_argument, NULL, 'R'},
@@ -370,10 +387,10 @@ int run(int argc, char **argv) {
                                        {"targets-file", required_argument, NULL, 'T'},
                                        {"samples", required_argument, NULL, 's'},
                                        {"samples-file", required_argument, NULL, 'S'},
-                                       {"force-samples", no_argument, NULL, 6},
+                                       {"force-samples", no_argument, NULL, 7},
                                        {NULL, 0, NULL, 0}};
     int c;
-    while ((c = getopt_long(argc, argv, "h?vw:p:o:e:i:r:R:t:T:s:S:", loptions, NULL)) >= 0) {
+    while ((c = getopt_long(argc, argv, "h?vw:p:o:e:f:i:r:R:t:T:s:S:", loptions, NULL)) >= 0) {
         switch (c) {
         case 1:
             if (!strcasecmp(optarg, "GT"))
@@ -409,15 +426,22 @@ int run(int argc, char **argv) {
         case 4:
             q_score_thr_str = optarg;
             break;
+        case 5:
+            display_cnts = 1;
+            break;
         case 'o':
             output_fname = optarg;
             break;
-        case 5:
+        case 6:
             sample_header = optarg;
             break;
         case 'e':
             filter_str = optarg;
             filter_logic |= FLT_EXCLUDE;
+            break;
+        case 'f':
+            sr->apply_filters = optarg;
+            break;
             break;
         case 'i':
             filter_str = optarg;
@@ -444,7 +468,7 @@ int run(int argc, char **argv) {
             sample_names = optarg;
             sample_is_file = 1;
             break;
-        case 6:
+        case 7:
             force_samples = 1;
             break;
         case 'h':
@@ -457,7 +481,6 @@ int run(int argc, char **argv) {
 
     if ((pathname && optind + 1 != argc) || (!pathname && optind + 2 > argc)) error("%s", usage_text());
 
-    bcf_srs_t *sr = bcf_sr_init();
     sr->require_index = 1;
     if (filter_logic == (FLT_EXCLUDE | FLT_INCLUDE)) error("Only one of --include or --exclude can be given.\n");
     if (regions_list) {
@@ -590,8 +613,10 @@ int run(int argc, char **argv) {
     float *float_arr = NULL;
     char *str = NULL;
     float *alleles = (float *)malloc(m_alleles * sizeof(float));
+    float *missing = (float *)malloc(n_smpls * sizeof(float));
     int *idxs = vcf_mode ? NULL : (int *)malloc(n_prs * sizeof(int));
     float *scores = (float *)calloc(n_prs * n_q_score_thr * n_smpls, sizeof(float));
+    int *cnts = (int *)calloc(n_prs * n_q_score_thr * n_smpls, sizeof(int));
 
     while (bcf_sr_next_line(sr)) {
         if (!bcf_sr_has_line(sr, 0)) continue;
@@ -624,6 +649,7 @@ int run(int argc, char **argv) {
         hdr = bcf_sr_get_header(sr, 0);
         hts_expand(float, line->n_allele *n_smpls, m_alleles, alleles);
         memset((void *)alleles, 0, line->n_allele * n_smpls * sizeof(float));
+        memset((void *)missing, 0, n_smpls * sizeof(int));
         int number;
         char *ap_str[] = {"AP1", "AP2"};
         switch (use_tag) {
@@ -633,8 +659,12 @@ int run(int argc, char **argv) {
             assert(number == 2);
             for (int k = 0; k < n_smpls; k++) {
                 int32_t *ptr = int32_arr + (number * k);
-                if (!bcf_gt_is_missing(ptr[0])) alleles[bcf_gt_allele(ptr[0]) * n_smpls + k]++;
-                if (!bcf_gt_is_missing(ptr[1])) alleles[bcf_gt_allele(ptr[1]) * n_smpls + k]++;
+                if (bcf_gt_is_missing(ptr[0]) || bcf_gt_is_missing(ptr[1])) {
+                    missing[k] = 1;
+                } else {
+                    alleles[bcf_gt_allele(ptr[0]) * n_smpls + k]++;
+                    alleles[bcf_gt_allele(ptr[1]) * n_smpls + k]++;
+                }
             }
             break;
         case SCORE_DS:
@@ -643,16 +673,24 @@ int run(int argc, char **argv) {
             assert(number == line->n_allele - 1);
             if (number == 1) { // line->n_allele == 2
                 for (int k = 0; k < n_smpls; k++) {
-                    alleles[k] += 2.0f - float_arr[k]; // check whether this should be replaced with 2.0f
-                    alleles[n_smpls + k] += float_arr[k];
+                    if (bcf_float_is_missing(float_arr[k])) {
+                        missing[k] = 1;
+                    } else {
+                        alleles[k] += 2.0f - float_arr[k]; // check whether this should be replaced with 2.0f
+                        alleles[n_smpls + k] += float_arr[k];
+                    }
                 }
             } else {
                 for (int k = 0; k < n_smpls; k++) {
                     float *ptr = float_arr + (number * k);
                     alleles[k] += 2.0f; // check whether this should be replaced with 2.0f
                     for (int idx = 0; idx < number; idx++) {
-                        alleles[k] -= ptr[idx];
-                        alleles[(idx + 1) * n_smpls + k] += ptr[idx];
+                        if (bcf_float_is_missing(ptr[idx])) {
+                            missing[k] = 1;
+                        } else {
+                            alleles[k] -= ptr[idx];
+                            alleles[(idx + 1) * n_smpls + k] += ptr[idx];
+                        }
                     }
                 }
             }
@@ -662,8 +700,12 @@ int run(int argc, char **argv) {
             number /= bcf_hdr_nsamples(hdr);
             assert(number == 2 && line->n_allele == 2);
             for (int k = 0; k < n_smpls; k++) {
-                alleles[k] += 1.0f - float_arr[2 * k] - float_arr[2 * k + 1];
-                alleles[n_smpls + k] += float_arr[2 * k] + float_arr[2 * k + 1];
+                if (bcf_float_is_missing(float_arr[2 * k]) || bcf_float_is_missing(float_arr[2 * k + 1])) {
+                    missing[k] = 1;
+                } else {
+                    alleles[k] += 1.0f - float_arr[2 * k] - float_arr[2 * k + 1];
+                    alleles[n_smpls + k] += float_arr[2 * k] + float_arr[2 * k + 1];
+                }
             }
             break;
         case SCORE_AP:
@@ -673,16 +715,24 @@ int run(int argc, char **argv) {
                 assert(number == line->n_allele - 1);
                 if (number == 1) { // line->n_allele == 2
                     for (int k = 0; k < n_smpls; k++) {
-                        alleles[k] += 1.0f - float_arr[k];
-                        alleles[n_smpls + k] += float_arr[k];
+                        if (bcf_float_is_missing(float_arr[k])) {
+                            missing[k] = 1;
+                        } else {
+                            alleles[k] += 1.0f - float_arr[k];
+                            alleles[n_smpls + k] += float_arr[k];
+                        }
                     }
                 } else {
                     for (int k = 0; k < n_smpls; k++) {
                         float *ptr = float_arr + (number * k);
                         alleles[k] += 1.0f;
                         for (int idx = 0; idx < number; idx++) {
-                            alleles[k] -= ptr[idx];
-                            alleles[(idx + 1) * n_smpls + k] += ptr[idx];
+                            if (bcf_float_is_missing(ptr[idx])) {
+                                missing[k] = 1;
+                            } else {
+                                alleles[k] -= ptr[idx];
+                                alleles[(idx + 1) * n_smpls + k] += ptr[idx];
+                            }
                         }
                     }
                 }
@@ -695,8 +745,12 @@ int run(int argc, char **argv) {
             if (number == 3) { // line->n_allele == 2
                 for (int k = 0; k < n_smpls; k++) {
                     float *ptr = float_arr + (number * k);
-                    alleles[k] += 2.0f * ptr[0] + ptr[1];
-                    alleles[n_smpls + k] += ptr[1] + 2.0f * ptr[2];
+                    if (bcf_float_is_missing(ptr[0]) || bcf_float_is_missing(ptr[1]) || bcf_float_is_missing(ptr[2])) {
+                        missing[k] = 1;
+                    } else {
+                        alleles[k] += 2.0f * ptr[0] + ptr[1];
+                        alleles[n_smpls + k] += ptr[1] + 2.0f * ptr[2];
+                    }
                 }
             } else {
                 for (int k = 0; k < n_smpls; k++) {
@@ -707,8 +761,12 @@ int run(int argc, char **argv) {
                     for (int b = 0; b < line->n_allele; b++) {
                         for (int a = 0; a <= b; a++) {
                             int idx = b * (b + 1) / 2 + a;
-                            alleles[a * n_smpls + k] += ptr[idx];
-                            alleles[b * n_smpls + k] += ptr[idx];
+                            if (bcf_float_is_missing(ptr[idx])) {
+                                missing[k] = 1;
+                            } else {
+                                alleles[a * n_smpls + k] += ptr[idx];
+                                alleles[b * n_smpls + k] += ptr[idx];
+                            }
                         }
                     }
                 }
@@ -719,8 +777,12 @@ int run(int argc, char **argv) {
             number /= bcf_hdr_nsamples(hdr);
             assert(number == 1 && line->n_allele == 2);
             for (int k = 0; k < n_smpls; k++) {
-                alleles[k] -= (float)int32_arr[k];
-                alleles[n_smpls + k] += (float)int32_arr[k];
+                if (int32_arr[k] == 0 || int32_arr[k] == bcf_int32_missing) {
+                    missing[k] = 1;
+                } else {
+                    alleles[k] -= (float)int32_arr[k];
+                    alleles[n_smpls + k] += (float)int32_arr[k];
+                }
             }
             break;
         }
@@ -753,7 +815,12 @@ int run(int argc, char **argv) {
                 if (q_score_thr && p > q_score_thr[j]) continue;
                 float *ptr = scores + (i * n_q_score_thr + j) * n_smpls;
                 float *ptr2 = alleles + idx_allele * n_smpls;
-                for (int k = 0; k < n_smpls; k++) ptr[k] += beta * ptr2[k];
+                int *ptr3 = cnts + (i * n_q_score_thr + j) * n_smpls;
+                for (int k = 0; k < n_smpls; k++)
+                    if (missing[k] == 0) {
+                        ptr[k] += beta * ptr2[k];
+                        ptr3[k]++;
+                    }
             }
         }
     }
@@ -771,15 +838,21 @@ int run(int argc, char **argv) {
                 }
         for (int j = 0; j < n_q_score_thr; j++) {
             fprintf(out_fh, "\t%s", strrchr(filenames[i], '/') ? strrchr(filenames[i], '/') + 1 : filenames[i]);
-            if (!q_score_thr) break;
-            fprintf(out_fh, "_p%.4g", q_score_thr[j]);
+            if (q_score_thr) fprintf(out_fh, "_p%.4g", q_score_thr[j]);
+            if (display_cnts) {
+                fprintf(out_fh, "\t%s_CNT", strrchr(filenames[i], '/') ? strrchr(filenames[i], '/') + 1 : filenames[i]);
+                if (q_score_thr) fprintf(out_fh, "_p%.4g", q_score_thr[j]);
+            }
         }
     }
     fprintf(out_fh, "\n");
     for (int k = 0; k < n_smpls; k++) {
         fprintf(out_fh, "%s", hdr->samples[k]);
-        for (int j = 0; j < n_q_score_thr; j++)
-            for (int i = 0; i < n_prs; i++) fprintf(out_fh, "\t%f", scores[(i * n_q_score_thr + j) * n_smpls + k]);
+        for (int i = 0; i < n_prs; i++)
+            for (int j = 0; j < n_q_score_thr; j++) {
+                fprintf(out_fh, "\t%f", scores[(i * n_q_score_thr + j) * n_smpls + k]);
+                if (display_cnts) fprintf(out_fh, "\t%d", cnts[(i * n_q_score_thr + j) * n_smpls + k]);
+            }
         fprintf(out_fh, "\n");
     }
 
@@ -790,8 +863,10 @@ int run(int argc, char **argv) {
     }
     if (out_fh != stdout) fclose(out_fh);
     free(scores);
+    free(cnts);
     free(idxs);
     free(alleles);
+    free(missing);
     free(str);
     free(int32_arr);
     free(float_arr);

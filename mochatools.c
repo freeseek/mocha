@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2021-05-24"
+#define MOCHATOOLS_VERSION "2021-10-15"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
@@ -653,16 +653,23 @@ static double mann_whitney_u(float *a, float *b, int na, int nb) {
     return pval > 1.0 ? 1.0 : pval;
 }
 
+static inline int bcf_int8_is_vector_end(int8_t value) { return value == bcf_int8_vector_end; }
+static inline int bcf_int16_is_vector_end(int16_t value) { return value == bcf_int16_vector_end; }
+static inline int bcf_int32_is_vector_end(int32_t value) { return value == bcf_int32_vector_end; }
+static inline int bcf_int8_is_missing(int8_t value) { return value == bcf_int8_missing; }
+static inline int bcf_int16_is_missing(int16_t value) { return value == bcf_int16_missing; }
+static inline int bcf_int32_is_missing(int32_t value) { return value == bcf_int32_missing; }
+
 // retrieve phase information from BCF record
 // assumes little endian architecture
 static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *as_arr, int nsmpl) {
     if (!fmt || fmt->n != 1) return 0;
 
-#define BRANCH(type_t, bcf_type_vector_end, bcf_type_missing)                                                          \
+#define BRANCH(type_t, is_vector_end, is_missing)                                                                      \
     {                                                                                                                  \
         type_t *p = (type_t *)fmt->p;                                                                                  \
         for (int i = 0; i < nsmpl; i++) {                                                                              \
-            if (p[i] == bcf_type_vector_end || p[i] == bcf_type_missing)                                               \
+            if (is_vector_end(p[i]) || is_missing(p[i]))                                                               \
                 as_arr[i] = bcf_int8_missing;                                                                          \
             else if (p[i] == (type_t)0)                                                                                \
                 as_arr[i] = (int8_t)0;                                                                                 \
@@ -674,16 +681,16 @@ static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *as_arr, int nsmpl) {
     }
     switch (fmt->type) {
     case BCF_BT_INT8:
-        BRANCH(int8_t, bcf_int8_vector_end, bcf_int8_missing);
+        BRANCH(int8_t, bcf_int8_is_vector_end, bcf_int8_is_missing);
         break;
     case BCF_BT_INT16:
-        BRANCH(int16_t, bcf_int16_vector_end, bcf_int16_missing);
+        BRANCH(int16_t, bcf_int16_is_vector_end, bcf_int16_is_missing);
         break;
     case BCF_BT_INT32:
-        BRANCH(int32_t, bcf_int32_vector_end, bcf_int32_missing);
+        BRANCH(int32_t, bcf_int32_is_vector_end, bcf_int32_is_missing);
         break;
     case BCF_BT_FLOAT:
-        BRANCH(int32_t, bcf_float_vector_end, bcf_float_missing);
+        BRANCH(int32_t, bcf_float_is_vector_end, bcf_float_is_missing);
         break;
     default:
         error("Unexpected type %d\n", fmt->type);
@@ -735,7 +742,8 @@ bcf1_t *process(bcf1_t *rec) {
     int gt_phase = bcf_get_genotype_phase(gt_fmt, args->gt_phase_arr, args->nsmpl);
 
     // if samples or genotypes are not present, skip to the end
-    if (args->nsmpl == 0 || !bcf_get_genotype_alleles(gt_fmt, args->gt0_arr, args->gt1_arr, args->nsmpl)) goto ret;
+    if (args->nsmpl == 0 || !bcf_get_unphased_genotype_alleles(gt_fmt, args->gt0_arr, args->gt1_arr, args->nsmpl))
+        goto ret;
 
     bcf_fmt_t *as_fmt = bcf_get_fmt_id(rec, args->as_id);
     int as_sign = (args->as_str && as_fmt) ? bcf_get_format_sign(as_fmt, args->as_arr, args->nsmpl) : 0;
