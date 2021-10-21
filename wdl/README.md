@@ -1,7 +1,7 @@
 MoChA WDL pipeline
 ==================
 
-This page contains instructions for how to run the <a href="mocha.wdl">MoChA WDL</a> pipeline to detect mosaic chromsosomal alterations. The MoChA WDL pipeline first runs Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms, then gtc2vcf to format Illumina or Affymetrix genotype data in more compliant VCF containers, then runs <a href="https://odelaneau.github.io/shapeit4/">SHAPEIT4</a> (or <a href="https://alkesgroup.broadinstitute.org/Eagle/">Eagle</a>) to phase genotypes across overlapping genome windows, and finally it runs MoChA to detect mosaic chromosomal alterations. It can also be used to analyze whole genome sequencing data. Using a highly performant and parallelizable design, this workflow can be scaled to satisfy the needs for large biobanks. The workflow also allows for automatic realigning of manifest files to a genome reference of choice making it effortless to use GRCh38 even when GRCh38 manifest files are not available from the array manufacturer. For any feedback or questions, contact the <a href="mailto:giulio.genovese@gmail.com">author</a>
+This page contains instructions for how to run the <a href="mocha.wdl">MoChA WDL</a> pipeline to detect mosaic chromsosomal alterations. The MoChA WDL pipeline first runs Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms, then gtc2vcf to format Illumina or Affymetrix genotype data in more compliant VCF containers, then runs <a href="https://odelaneau.github.io/shapeit4/">SHAPEIT4</a> (or <a href="https://alkesgroup.broadinstitute.org/Eagle/">Eagle</a>) to phase genotypes across overlapping genome windows, and finally it runs MoChA to detect mosaic chromosomal alterations. It can also be used to analyze whole genome sequencing data. Using a highly performant and parallelizable design, this workflow can be scaled to satisfy the needs for large biobanks. The workflow also allows for automatic realigning of manifest files to a genome reference of choice making it effortless to use GRCh38 even when GRCh38 manifest files are not available from the array manufacturer. For any feedback or questions, contact the <a href="mailto:giulio.genovese@gmail.com">author</a>. For a brief introduction to the pipeline, check the 15 minutes ISPG video <a href="https://youtu.be/TAnV_UZHApY">here</a>
 
 <!--ts-->
    * [Input Modes](#input-modes)
@@ -24,8 +24,6 @@ This page contains instructions for how to run the <a href="mocha.wdl">MoChA WDL
    * [Dockerfiles](#dockerfiles)
    * [Acknowledgements](#acknowledgements)
 <!--te-->
-
-For a brief introduction to the pipeline, check the 15 minutes ISPG video <a href="https://youtu.be/TAnV_UZHApY">here</a>
 
 Input modes
 ===========
@@ -194,7 +192,7 @@ The following are the primary options that you can set in the main input json fi
 | extra_xcl_vcf_file     | File?    | optional VCF file with list of additional variants to exclude from analysis, mostly for WGS data  |
 | phase_extra_args       | String?  | extra arguments for SHAPEIT4/Eagle                                                                |
 | mocha_extra_args       | String?  | extra arguments for the MoChA plugin                                                              |
-| basic_bash_docker      | String?  | docker to run basic bash scripts [ubuntu:latest]                                                  |
+| basic_bash_docker      | String?  | docker to run basic bash scripts [debian:stable-slim]                                             |
 | pandas_docker          | String?  | docker to run task ref_scatter [amancevice/pandas:slim]                                           |
 | docker_repository      | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                             |
 | bcftools_docker        | String?  | docker to run tasks requiring BCFtools [bcftools:1.13-yyyymmdd]                                   |
@@ -556,7 +554,7 @@ The following are the primary options that you can set in the main input json fi
 | out_gp                 | Boolean?       | whether imputation VCFs should contain the FORMAT/GP field (Genotype probabilities) [false]            |
 | out_ap                 | Boolean?       | whether imputation VCFs should contain the FORMAT/AP field (ALT haplotype probabilities) [false]       |
 | impute_extra_args      | String?        | extra arguments for IMPUTE5/Beagle5                                                                    |
-| basic_bash_docker      | String?        | docker to run basic bash scripts [ubuntu:latest]                                                       |
+| basic_bash_docker      | String?        | docker to run basic bash scripts [debian:stable-slim]                                                  |
 | pandas_docker          | String?        | docker to run task ref_scatter [amancevice/pandas:slim]                                                |
 | docker_repository      | String?        | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
 | bcftools_docker        | String?        | docker to run tasks requiring BCFtools [bcftools:1.13-yyyymmdd]                                        |
@@ -698,8 +696,10 @@ The following are the primary options that you can set in the main input json fi
 | pheno_tsv_file           | File     | TSV file with phenotypes that need to be tested (must include **sample_id** column)                    |
 | dosage_field             | String?  | dosage field to use in imputed input VCFs [DS]                                                         |
 | sex_specific             | String?  | indicates whether the analysis should be restricted only to **male**s or **female**s                   |
+| space_character          | String?  | indicates how to convert spaces in sample IDs for analyses with regenie and PLINK [_]                  |
 | binary                   | Boolean? | whether the phenotypes tested are binary phenotypes [true]                                             |
-| min_case_count           | Int?     | phenotypes with lower case count will be excluded from analysis [20]                                   |
+| min_case_count           | Int?     | binary phenotypes with lower case count will be excluded from analysis [20]                            |
+| min_sex_count            | Int?     | phenotypes with lower counts for each of the tested sexes will be excluded from analysis [20]          |
 | bsize                    | Int?     | size of the genotype blocks for regenie [500]                                                          |
 | loocv                    | Boolean? | whether to use leave-one out cross validation [true]                                                   |
 | regenie_step0_extra_args | String?  | extra arguments for regenie when computing the level 0 predictions                                     |
@@ -809,7 +809,7 @@ The following are the primary options that you can set in the main input json fi
 | samples_file      | File?          | list of samples to include in the polygenic score analysis                                             |
 | exclude_str       | String?        | exclusion criterias for variants (e.g. [INFO<0.8]) not to be used with include_str                     |
 | include_str       | String?        | inclusion criterias for variants (e.g. [AF>0.01 && AF<0.99]) not to be used with exclude_str           |
-| basic_bash_docker | String?        | docker to run basic bash scripts [ubuntu:latest]                                                       |
+| basic_bash_docker | String?        | docker to run basic bash scripts [debian:stable-slim]                                                  |
 | docker_repository | String?        | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
 | bcftools_docker   | String?        | docker to run tasks requiring BCFtools [bcftools:1.13-yyyymmdd]                                        |
 | r_mocha_docker    | String?        | docker to run tasks mocha_{plot,summary} [r_mocha:1.13-yyyymmdd]                                       |
@@ -1090,7 +1090,7 @@ task myTask {
     String out = read_string(stdout())
   }
   runtime {
-    docker: "ubuntu:latest"
+    docker: "debian:stable-slim"
   }
 }
 ```

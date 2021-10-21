@@ -147,11 +147,11 @@ export BCFTOOLS_PLUGINS="$HOME/bin"
 
 Alternatively, you can download MoChA's binaries using the following code
 ```
-wget http://ftp.us.debian.org/debian/pool/main/h/htslib/libhts3_1.11-4_amd64.deb
-wget http://ftp.us.debian.org/debian/pool/main/b/bcftools/bcftools_1.11-1_amd64.deb
-wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.11-dev_amd64.deb
-sudo apt remove bio-mocha_1.11-dev_amd64.deb
-sudo apt install --reinstall ./{libhts3_1.11-4,bcftools_1.11-1,bio-mocha_1.11-dev}_amd64.deb
+wget http://ftp.us.debian.org/debian/pool/main/h/htslib/libhts3_1.13+ds-2_amd64.deb
+wget http://ftp.us.debian.org/debian/pool/main/b/bcftools/bcftools_1.13-1_amd64.deb
+wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.13-dev_amd64.deb
+sudo apt remove bio-mocha
+sudo apt install --reinstall ./{libhts3_1.13+ds-2,bcftools_1.13-1,bio-mocha_1.13-dev}_amd64.deb
 ```
 
 Install Beagle5 and IMPUTE5 (optional for array data) from <a href="https://www.dropbox.com/sh/mwnceyhir8yze2j/AADbzP6QuAFPrj0Z9_I1RSmla?dl=0">here</a>
@@ -161,7 +161,7 @@ unzip -ojd $HOME/bin impute5_v1.1.5.zip impute5_v1.1.5/imp{ute5,5Converter}_1.1.
 chmod a+x $HOME/bin/imp{ute5,5Converter}_1.1.5_static
 ln -s impute5_1.1.5_static $HOME/bin/impute5
 ln -s imp5Converter_1.1.5_static $HOME/bin/imp5Converter
-wget -P $HOME/bin http://faculty.washington.edu/browning/beagle/bref3.18May20.d20.jar
+wget -P $HOME/bin http://faculty.washington.edu/browning/beagle/b{eagle,ref3}.28Jun21.220.jar
 ```
 
 Download resources for GRCh37
@@ -224,7 +224,7 @@ cd $HOME/GRCh37
 pfx="ALL.chr"
 sfx=".phase3_integrated.20130502.genotypes"
 for chr in {{1..22},X}; do imp5Converter --h $pfx$chr$sfx.bcf --o $pfx$chr$sfx --r $chr; done
-wget -O bref3.jar http://faculty.washington.edu/browning/beagle/bref3.18May20.d20.jar
+wget -O bref3.jar http://faculty.washington.edu/browning/beagle/bref3.28Jun21.220.jar
 for chr in {1..22}; do bcftools view --no-version $pfx$chr$sfx.bcf | java -jar bref3.jar > $pfx$chr$sfx.bref3; done
 chr=X; bcftools +fixploidy --no-version $pfx$chr$sfx.bcf | \
   sed 's/0\/0/0|0/g;s/1\/1/1|1/g' | java -jar ~/bin/bref3.jar > $pfx$chr$sfx.bref3
@@ -312,10 +312,10 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
 1000 Genomes project phase 3 imputation panel for beagle5 and impute5
 ```
 cd $HOME/GRCh38
-pfx="ALL."
-sfx="_GRCh38.genotypes.20170504"
+pfx="CCDG_14151_B01_GRM_WGS_2020-08-05_"
+sfx=".filtered.phased.bcf"
 for chr in chr{{1..22},X}; do imp5Converter --h $pfx$chr$sfx.bcf --o $pfx$chr$sfx --r $chr; done
-wget -O bref3.jar http://faculty.washington.edu/browning/beagle/bref3.18May20.d20.jar
+wget -O bref3.jar http://faculty.washington.edu/browning/beagle/bref3.28Jun21.220.jar
 for chr in chr{1..22}; do bcftools view --no-version $pfx$chr$sfx.bcf | java -jar bref3.jar > $pfx$chr$sfx.bref3; done
 chr=chrX; bcftools +fixploidy --no-version $pfx$chr$sfx.bcf | \
   sed 's/0\/0/0|0/g;s/1\/1/1|1/g' | java -jar ~/bin/bref3.jar > $pfx$chr$sfx.bref3

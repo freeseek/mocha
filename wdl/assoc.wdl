@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2021 Giulio Genovese
 ##
-## Version 2021-10-15
+## Version 2021-10-20
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -32,8 +32,10 @@ workflow assoc {
     File pheno_tsv_file
     String dosage_field = "DS"
     String? sex_specific # male female
+    String space_character = "_"
     Boolean binary = true
     Int min_case_count = 20
+    Int min_sex_count = 20
     Int bsize = 500
     Boolean loocv = true
     String? regenie_step0_extra_args
@@ -91,8 +93,11 @@ workflow assoc {
       pheno_tsv_file = pheno_tsv_file,
       remove_samples_file = remove_samples_file,
       covar_tsv_file = covar_tsv_file,
+      sex_specific = sex_specific,
+      space_character = space_character,
       binary = binary,
       min_case_count = min_case_count,
+      min_sex_count = min_sex_count,
       filebase = sample_set_id,
       docker = basic_bash_docker
   }
@@ -148,6 +153,8 @@ workflow assoc {
           vcf_file = select_first([pgt_merge.vcf_file, interval_slices[idx][0]]),
           sample_tsv_file = sample_tsv_file,
           remove_samples_file = remove_samples_file,
+          sex_specific = sex_specific,
+          space_character = space_character,
           min_mac = min_mac,
           min_maf = min_maf,
           docker = docker_repository_with_sep + regenie_docker
@@ -326,8 +333,10 @@ workflow assoc {
           vcf_file = select_first([vcf_merge.vcf_file, matrix_vcf_files[idx][0]]),
           sample_tsv_file = sample_tsv_file,
           remove_samples_file = remove_samples_file,
-          ref_name = ref_name,
           dosage_field = dosage_field,
+          ref_name = ref_name,
+          sex_specific = sex_specific,
+          space_character = space_character,
           docker = docker_repository_with_sep + regenie_docker
       }
 
@@ -464,16 +473,18 @@ task get_n {
   }
 }
 
+# use of !(a!=b) due to bug Cromwell team will not fix: https://github.com/broadinstitute/cromwell/issues/5602
 task prune_file {
   input {
     File sample_tsv_file
     File pheno_tsv_file
     File? remove_samples_file
     File? covar_tsv_file
-    String space_character = '_'
     String? sex_specific
+    String space_character
     Boolean binary
     Int min_case_count
+    Int min_sex_count
     String filebase
 
     String docker
@@ -488,29 +499,38 @@ task prune_file {
     set -euo pipefail
     echo "~{sep="\n" select_all([sample_tsv_file, pheno_tsv_file, remove_samples_file, covar_tsv_file])}" | \
       tr '\n' '\0' | xargs -0 mv -t .
-    awk 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i} NR>1~{if defined (sex_specific) then
-      (if !(select_first([sex_specific]) != "male") then " && ($3==\"M\" || $3==1)"
-       else if !(select_first([sex_specific]) != "female") then " && ($3==\"F\" || $3==2)"
-       else "") else ""} {print $(f["sample_id"])}' "~{basename(sample_tsv_file)}" | \
-    ~{if defined(remove_samples_file) then
-      "awk -F\"\\t\" -v OFS=\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && !($1 in x)' \"" + basename(select_first([remove_samples_file])) + "\" - | "
-      else ""}\
-    ~{if defined(covar_tsv_file) then
-      "awk -F\"\\t\" -v OFS=\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && $1 in x' \"" + basename(select_first([covar_tsv_file])) + "\" - | "
-      else ""}\
-    awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]++} NR>FNR && FNR==1 {$1="FID\tIID"; print}
-      NR>FNR && $1 in x {gsub(" ","~{space_character}",$1); $1="0\t"$1; print}' - "~{basename(pheno_tsv_file)}" \
-      > ~{if binary then "\"" + filebase + ".tmp\"\n" +
-      "awk -F\"\\t\" -v OFS=\"\\t\" 'NR==FNR && NR>1 {for (i=3; i<=NF; i++) {if ($i==0) x[i]++; if ($i==1) y[i]++}}\n" +
-      "  NR>FNR {if (FNR==1) for (i=3; i<=NF; i++) if (x[i]>=" + min_case_count + " && y[i]>=" + min_case_count + ") z[j++]=i;\n" +
-      "  printf \"%s\\t%s\",$1,$2; for (i=0; i<j; i++) printf \"\\t%s\",$z[i]; printf \"\\n\"}' \\\n" +
-      "  \"" + filebase + ".tmp\" \"" + filebase + ".tmp\" > \"" + filebase + ".phe\"\n" +
-      "rm \"" + filebase + ".tmp\"" else "\"" + filebase + ".phe\""}
-    ~{if defined(covar_tsv_file) then
-      "awk -F\"\\t\" -v OFS=\"\\t\" 'NR==1 {$1=\"FID\\tIID\"} NR>1 {gsub(\" \",\"" + space_character + "\",$1); $1=\"0\\t\"$1}\n" +
-      "  {print}' \"" + basename(select_first([covar_tsv_file])) + "\" > \"" + filebase + ".cov\""
-      else ""}
-    head -n1 "~{filebase}.phe" | cut -f3- | tr '\t' '\n'
+    awk -F"\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+      NR>1 {sex=substr($(f["computed_gender"]),1,1); if (toupper(sex)=="M" || sex==1) printf "%s\t1\n",$(f["sample_id"])}' \
+      "~{basename(sample_tsv_file)}" > "~{filebase}.male"
+    awk -F"\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+      NR>1 {sex=substr($(f["computed_gender"]),1,1); if (toupper(sex)=="F" || sex==2) printf "%s\t2\n",$(f["sample_id"])}' \
+      "~{basename(sample_tsv_file)}" > "~{filebase}.female"
+    cat "~{filebase + "." + if defined(sex_specific) then select_first([sex_specific]) else "male\" \"" + filebase + ".female"}" | \
+      ~{if defined(remove_samples_file) then
+        "awk -F\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && !($1 in x)' \"" + basename(select_first([remove_samples_file])) + "\" - | \\\n"
+        else "" + if defined(covar_tsv_file) then
+        "awk -F\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && $1 in x' \"" + basename(select_first([covar_tsv_file])) + "\" - | \\\n"
+        else ""}awk -F"\t" 'NR==FNR {x[$1]++} NR>FNR && (FNR==1 || $1 in x)' - "~{basename(pheno_tsv_file)}" > "~{filebase}.tmp"
+    cat "~{filebase}.male" "~{filebase}.female" | \
+      awk -F"\t" 'NR==FNR {sex[$1]=$2} NR>FRN && FNR==1 {for (i=2; i<=NF; i++) pheno[i] = $i}
+      NR>FNR && FNR>1 {for (i=2; i<=NF; i++) {if ($i==0) ctrls[i]++; if ($i==1) cases[i]++
+      if (sex[$1]==1 && $i!="NA") males[i]++; if (sex[$1]==2 && $i!="NA") females[i]++}}
+      END {for (i in pheno); printf "%s\t%d\t%d\t%d\t%d\n",pheno[i],ctrls[i],cases[i],males[i],females[i]}' \
+      - "~{filebase}.tmp" > "~{filebase}.cnt"
+    awk -F"\t" 'NR==FNR ~{if binary then "&& $2>=" + min_case_count + " && $3>=" + min_case_count else ""} && $~{
+      if defined(sex_specific) && !(select_first([sex_specific]) != "male") then "4"
+      else if defined(sex_specific) && !(select_first([sex_specific]) != "female") then "5"
+      else "4>=" + min_sex_count + " && $5"}>=~{min_sex_count} {keep[$1]++}
+      NR>FNR {if (FNR==1) {for (i=2; i<=NF; i++) if ($i in keep) col[j++]=i; printf "FID\tIID"}
+      else {gsub(" ","~{space_character}",$1); printf "0\t%s",$1} for (i=0; i<j; i++) printf "\t%s",$col[i]; printf "\n"}' \
+      "~{filebase}.cnt" "~{filebase}.tmp" > "~{filebase}.phe"
+    ~{if defined(covar_tsv_file) then "cat \"" + filebase + "." +
+      (if defined(sex_specific) then select_first([sex_specific]) else "male\" + \"" + filebase + ".female") + "\" | \\\n" +
+      "  awk -F\"\\t\" 'NR==FNR {sex[$1]=$2} NR>FNR {if (FNR==1) {col=\"sex\"; $1=\"FID\\tIID\"}\n" +
+      "  if (FNR>1) {col=sex[$1]; gsub(\" \",\"" + space_character + "\",$1); $1=\"0\\t\"$1} printf \"%s\\t%s\\n\",$0,col}' \\\n" +
+      "  - \"" + basename(select_first([covar_tsv_file])) + "\" > \"" + filebase + ".cov\"\n"
+      else ""}head -n1 "~{filebase}.phe" | cut -f3- | tr '\t' '\n'
+    rm "~{filebase}.male" "~{filebase}.female" "~{filebase}.tmp" "~{filebase}.cnt"
     echo "~{sep="\n" select_all([sample_tsv_file, pheno_tsv_file, remove_samples_file, covar_tsv_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
@@ -739,7 +759,7 @@ task pgt_prune {
     File? sample_tsv_file
     File? remove_samples_file
     String? sex_specific
-    String space_character = '_'
+    String space_character
     Int min_mac
     Float min_maf
 
@@ -763,16 +783,12 @@ task pgt_prune {
         "awk 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}\n" +
         "  NR>1 {id=$(f[\"sample_id\"]); gsub(\" \",\"" + space_character + "\",id);\n" +
         "  print 0,id,toupper(substr($(f[\"computed_gender\"]),1,1))}' \"" + basename(select_first([sample_tsv_file])) + "\" | \\\n" +
-        "  sed 's/U$/0/' > \"" + filebase + ".sex\""
-      else ""}
-    ~{if defined (sex_specific) then
-      (if !(select_first([sex_specific]) != "male") then
-        "awk '$3==\"M\" || $3==1' \"" + filebase + ".sex\" > " + select_first([sex_specific]) + ".fam"
-      else if !(select_first([sex_specific]) != "female") then
-        "awk '$3==\"F\" || $3==2' \"" + filebase + ".sex\" > " + select_first([sex_specific]) + ".fam"
-      else "")
-    else ""}
-    ~{if defined(remove_samples_file) then "bcftools view --no-version -Ou --samples-file \"^" + basename(select_first([remove_samples_file])) + "\" --force-samples \"" + basename(vcf_file) + "\" |\n  "
+        "  sed 's/U$/0/' > \"" + filebase + ".sex\"\n"
+      else ""}~{if defined (sex_specific) && !(select_first([sex_specific]) != "male") then
+        "  awk '$3==\"M\" || $3==1' \"" + filebase + ".sex\" > " + select_first([sex_specific]) + ".fam\n"
+      else if defined (sex_specific) && !(select_first([sex_specific]) != "female") then
+        "  awk '$3==\"F\" || $3==2' \"" + filebase + ".sex\" > " + select_first([sex_specific]) + ".fam\n"
+      else ""}~{if defined(remove_samples_file) then "bcftools view --no-version -Ou --samples-file \"^" + basename(select_first([remove_samples_file])) + "\" --force-samples \"" + basename(vcf_file) + "\" |\n  "
       else ""}bcftools +fill-tags --no-version -Ou --include 'sum(AC)>=~{min_mac} && AN-sum(AC)>=~{min_mac} && MAF>=~{min_maf}' ~{if defined(remove_samples_file) then""
       else "\"" + basename(vcf_file) + "\" "}-- --tags AC,AN,MAF | \
       bcftools +add-variantkey --no-version -Ou | \
@@ -781,7 +797,7 @@ task pgt_prune {
       plink1.9 \
         --bcf /dev/stdin \
         ~{if defined(sample_tsv_file) then "--update-sex \"" + filebase + ".sex\"" else ""} \
-        ~{if defined(sex_specific) then "--keep " + select_first([sex_specific]) + ".fam" else ""}\
+        ~{if defined(sex_specific) then "--keep " + select_first([sex_specific]) + ".fam" else ""} \
         --keep-allele-order \
         --vcf-idspace-to ~{space_character} \
         --const-fid \
@@ -1161,10 +1177,10 @@ task vcf2pgen {
     File vcf_file
     File? sample_tsv_file
     File? remove_samples_file
+    String dosage_field
     String? ref_name
     String? sex_specific
-    String dosage_field
-    String space_character = '_'
+    String space_character
 
     String docker
     Int cpu = 1
@@ -1176,7 +1192,7 @@ task vcf2pgen {
 
   String filebase = basename(basename(vcf_file, ".bcf"), ".vcf.gz")
   Float vcf_size = size(vcf_file, "GiB")
-  Int disk_size = select_first([disk_size_override, ceil(10.0 + 2.0 * (vcf_size))])
+  Int disk_size = select_first([disk_size_override, ceil(10.0 + 3.0 * vcf_size)])
 
   command <<<
     set -euo pipefail
@@ -1188,7 +1204,7 @@ task vcf2pgen {
         "  print 0,id,$(f[\"computed_gender\"])}' \"" + basename(select_first([sample_tsv_file])) + "\" > \"" + filebase + ".sex\""
       else ""}
     ~{if defined(remove_samples_file) then
-      "sed -i 's/ /" + space_character + "/g;s/^/0\t/' \"" + basename(select_first([remove_samples_file])) + "\""
+      "sed -i 's/ /" + space_character + "/g;s/^/0\\t/' \"" + basename(select_first([remove_samples_file])) + "\""
       else ""}
     bcftools query -l "~{basename(vcf_file)}" | wc -l
     plink2 \
@@ -1235,7 +1251,6 @@ task regenie_step2 {
     File pgen_file
     File pvar_file
     File psam_file
-    String space_character = '_'
     File? covar_file
     File pheno_file
     Array[String] suffix # suffix array passed due to bug https://github.com/broadinstitute/cromwell/issues/5549
@@ -1362,7 +1377,6 @@ task plink_glm {
     File pgen_file
     File pvar_file
     File psam_file
-    String space_character = '_'
     File? loco_file
     File? covar_file
     File pheno_file
@@ -1392,8 +1406,7 @@ task plink_glm {
       "awk 'BEGIN {print \"IID\\tLOCO\"} NR==1 {for (i=2; i<=NF; i++) {sub(\"^0_\", \"\", $i); f[i] = $i}}\n" +
       "  $1==\"" + chr_num + "\" {for (i=2; i<=NF; i++) print f[i]\"\\t\"$i}' " +
       (if defined(covar_file) then "| \\\n" +
-        "awk -F\"\\t\" -v OFS=\"\\t\" 'NR==FNR {x[$1]=$2}\n" +
-        "  NR>FNR && $2 in x {gsub(\" \",\"" + space_character + "\",$1); print $0\"\\t\"x[$2]}' - \"" + basename(select_first([covar_file])) + "\" "
+        "awk -F\"\\t\" -v OFS=\"\\t\" 'NR==FNR {x[$1]=$2} NR>FNR && $2 in x {print $0\"\\t\"x[$2]}' - \"" + basename(select_first([covar_file])) + "\" "
         else "") +
       "> \"" +  filebase + ".cov\""
     else ""}
