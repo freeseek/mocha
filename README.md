@@ -41,58 +41,60 @@ Required options:
     -G, --genome-file <file>        genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE
 
 General Options:
-    -v, --variants [^]<file>       tabix-indexed [compressed] VCF/BCF file containing variants
-    -f, --apply-filters <list>     require at least one of the listed FILTER strings (e.g. "PASS,.")
-                                   to include (or exclude with "^" prefix) in the analysis
-    -e, --exclude <expr>           exclude sites for which the expression is true
-    -i, --include <expr>           select sites for which the expression is true
-    -r, --regions <region>         restrict to comma-separated list of regions
-    -R, --regions-file <file>      restrict to regions listed in a file
-    -t, --targets [^]<region>      restrict to comma-separated list of regions. Exclude regions with "^" prefix
-    -T, --targets-file [^]<file>   restrict to regions listed in a file. Exclude regions with "^" prefix
-    -s, --samples [^]<list>        comma separated list of samples to include (or exclude with "^" prefix)
-    -S, --samples-file [^]<file>   file of samples to include (or exclude with "^" prefix)
-        --force-samples            only warn about unknown subset samples
-        --input-stats <file>       input samples genome-wide statistics file
-        --only-stats               compute genome-wide statistics without detecting mosaic chromosomal alterations
-    -p  --cnp <file>               list of regions to genotype in BED format
-        --mhc <region>             MHC region to exclude from analysis (will be retained in the output)
-        --kir <region>             KIR region to exclude from analysis (will be retained in the output)
-        --threads <int>            number of extra output compression threads [0]
+    -v, --variants [^]<file>        tabix-indexed [compressed] VCF/BCF file containing variants
+    -f, --apply-filters <list>      require at least one of the listed FILTER strings (e.g. "PASS,.")
+                                    to include (or exclude with "^" prefix) in the analysis
+    -e, --exclude <expr>            exclude sites for which the expression is true
+    -i, --include <expr>            select sites for which the expression is true
+    -r, --regions <region>          restrict to comma-separated list of regions
+    -R, --regions-file <file>       restrict to regions listed in a file
+        --regions-overlap 0|1|2     Include if POS in the region (0), record overlaps (1), variant overlaps (2) [1]
+    -t, --targets [^]<region>       restrict to comma-separated list of regions. Exclude regions with "^" prefix
+    -T, --targets-file [^]<file>    restrict to regions listed in a file. Exclude regions with "^" prefix
+        --targets-overlap 0|1|2     Include if POS in the region (0), record overlaps (1), variant overlaps (2) [0]
+    -s, --samples [^]<list>         comma separated list of samples to include (or exclude with "^" prefix)
+    -S, --samples-file [^]<file>    file of samples to include (or exclude with "^" prefix)
+        --force-samples             only warn about unknown subset samples
+        --input-stats <file>        input samples genome-wide statistics file
+        --only-stats                compute genome-wide statistics without detecting mosaic chromosomal alterations
+    -p  --cnp <file>                list of regions to genotype in BED format
+        --mhc <region>              MHC region to exclude from analysis (will be retained in the output)
+        --kir <region>              KIR region to exclude from analysis (will be retained in the output)
+        --threads <int>             number of extra output compression threads [0]
 
 Output Options:
-    -o, --output <file>            write output to a file [no output]
-    -O, --output-type <b|u|z|v>    b: compressed BCF, u: uncompressed BCF, z: compressed VCF, v: uncompressed VCF [v]
-        --no-version               do not append version and command line to the header
-    -a  --no-annotations           omit Ldev and Bdev FORMAT from output VCF (requires --output)
-        --no-log                   suppress progress report on standard error
-    -l  --log <file>               write log to file [standard error]
-    -c, --calls <file>             write chromosomal alterations calls table to a file [standard output]
-    -z  --stats <file>             write samples genome-wide statistics table to a file [no output]
-    -u, --ucsc-bed <file>          write UCSC bed track to a file [no output]
+    -o, --output <file>             write output to a file [no output]
+    -O, --output-type u|b|v|z[0-9]  u/b: un/compressed BCF, v/z: un/compressed VCF, 0-9: compression level [v]
+        --no-version                do not append version and command line to the header
+    -a  --no-annotations            omit Ldev and Bdev FORMAT from output VCF (requires --output)
+        --no-log                    suppress progress report on standard error
+    -l  --log <file>                write log to file [standard error]
+    -c, --calls <file>              write chromosomal alterations calls table to a file [standard output]
+    -z  --stats <file>              write samples genome-wide statistics table to a file [no output]
+    -u, --ucsc-bed <file>           write UCSC bed track to a file [no output]
 
 HMM Options:
-        --bdev-LRR-BAF <list>      comma separated list of inverse BAF deviations for LRR+BAF model [-2.0,-4.0,-6.0,10.0,6.0,4.0]
-        --bdev-BAF-phase <list>    comma separated list of inverse BAF deviations for BAF+phase model
-                                   [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
-        --min-dist <int>           minimum base pair distance between consecutive sites for WGS data [400]
-        --adjust-BAF-LRR <int>     minimum number of genotypes for a cluster to median adjust BAF and LRR (-1 for no adjustment) [5]
-        --regress-BAF-LRR <int>    minimum number of genotypes for a cluster to regress BAF against LRR (-1 for no regression) [15]
-        --LRR-GC-order <int>       order of polynomial to regress LRR against local GC content (-1 for no regression) [2]
-        --xy-major-pl              major transition phred-scaled likelihood [65.0]
-        --xy-minor-pl              minor transition phred-scaled likelihood [35.0]
-        --auto-tel-pl              autosomal telomeres phred-scaled likelihood [20.0]
-        --chrX-tel-pl              chromosome X telomeres phred-scaled likelihood [8.0]
-        --chrY-tel-pl              chromosome Y telomeres phred-scaled likelihood [6.0]
-        --error-pl                 uniform error phred-scaled likelihood [15.0]
-        --flip-pl                  phase flip phred-scaled likelihood [20.0]
-        --short-arm-chrs <list>    list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
-        --use-short-arms           use variants in short arms [FALSE]
-        --use-centromeres          use variants in centromeres [FALSE]
-        --use-no-rules-chrs        use chromosomes without centromere rules  [FALSE]
-        --LRR-weight <float>       relative contribution from LRR for LRR+BAF  model [0.2]
-        --LRR-hap2dip <float>      difference between LRR for haploid and diploid [0.45]
-        --LRR-cutoff <float>       cutoff between LRR for haploid and diploid used to infer gender [estimated from X nonPAR]
+        --bdev-LRR-BAF <list>       comma separated list of inverse BAF deviations for LRR+BAF model [-2.0,-4.0,-6.0,10.0,6.0,4.0]
+        --bdev-BAF-phase <list>     comma separated list of inverse BAF deviations for BAF+phase model
+                                    [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
+        --min-dist <int>            minimum base pair distance between consecutive sites for WGS data [400]
+        --adjust-BAF-LRR <int>      minimum number of genotypes for a cluster to median adjust BAF and LRR (-1 for no adjustment) [5]
+        --regress-BAF-LRR <int>     minimum number of genotypes for a cluster to regress BAF against LRR (-1 for no regression) [15]
+        --LRR-GC-order <int>        order of polynomial to regress LRR against local GC content (-1 for no regression) [2]
+        --xy-major-pl               major transition phred-scaled likelihood [65.0]
+        --xy-minor-pl               minor transition phred-scaled likelihood [35.0]
+        --auto-tel-pl               autosomal telomeres phred-scaled likelihood [20.0]
+        --chrX-tel-pl               chromosome X telomeres phred-scaled likelihood [8.0]
+        --chrY-tel-pl               chromosome Y telomeres phred-scaled likelihood [6.0]
+        --error-pl                  uniform error phred-scaled likelihood [15.0]
+        --flip-pl                   phase flip phred-scaled likelihood [20.0]
+        --short-arm-chrs <list>     list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
+        --use-short-arms            use variants in short arms [FALSE]
+        --use-centromeres           use variants in centromeres [FALSE]
+        --use-no-rules-chrs         use chromosomes without centromere rules  [FALSE]
+        --LRR-weight <float>        relative contribution from LRR for LRR+BAF  model [0.2]
+        --LRR-hap2dip <float>       difference between LRR for haploid and diploid [0.45]
+        --LRR-cutoff <float>        cutoff between LRR for haploid and diploid used to infer gender [estimated from X nonPAR]
 
 Examples:
     bcftools +mocha -g GRCh37 -v ^exclude.bcf -p cnps.bed -c calls.tsv -z stats.tsv input.bcf
@@ -313,7 +315,7 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
 ```
 cd $HOME/GRCh38
 pfx="CCDG_14151_B01_GRM_WGS_2020-08-05_"
-sfx=".filtered.phased.bcf"
+sfx=".filtered.phased"
 for chr in chr{{1..22},X}; do imp5Converter --h $pfx$chr$sfx.bcf --o $pfx$chr$sfx --r $chr; done
 wget -O bref3.jar http://faculty.washington.edu/browning/beagle/bref3.28Jun21.220.jar
 for chr in chr{1..22}; do bcftools view --no-version $pfx$chr$sfx.bcf | java -jar bref3.jar > $pfx$chr$sfx.bref3; done
@@ -333,7 +335,7 @@ mhc_reg="chr6:27518932-33480487"
 kir_reg="chr19:54071493-54992731"
 map="$HOME/GRCh38/genetic_map_hg38_withX.txt.gz"
 panel_pfx="$HOME/GRCh38/CCDG_14151_B01_GRM_WGS_2020-08-05_chr"
-panel_sfx=".filtered.phased.bcf"
+panel_sfx=".filtered.phased"
 assembly="GRCh38"
 cnp="$HOME/GRCh38/cnps.bed"
 dup="$HOME/GRCh38/segdups.bed.gz"
@@ -538,6 +540,7 @@ bcftools +mocha \
   --genome $assembly \
   --input-stats $tsv \
   --no-version \
+  --output - \
   --output-type b \
   --variants ^$dir/$pfx.xcl.bcf \
   --calls $dir/$pfx.calls.tsv \
