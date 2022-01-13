@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2021 Giulio Genovese
+#  Copyright (C) 2017-2022 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,11 +25,11 @@
 #  THE SOFTWARE.
 ###
 
-pileup_plot_version <- '2021-10-15'
+pileup_plot_version <- '2022-01-12'
 
-library(optparse)
-library(ggplot2)
-options(bitmapType = 'cairo')
+suppressPackageStartupMessages(library(optparse))
+suppressPackageStartupMessages(library(ggplot2))
+if (capabilities()[['cairo']]) options(bitmapType = 'cairo')
 
 parser <- OptionParser('usage: pileup_plot.R [options] --cytoband <cytoband.txt.gz> --stats <file.tsv> --calls <file.tsv> --pdf <file.pdf>')
 parser <- add_option(parser, c('--cytoband'), type = 'character', help = 'cytoband file', metavar = '<cytoband.txt.gz>')
@@ -41,8 +41,8 @@ parser <- add_option(parser, c('--gain-cumulative'), action = 'store_true', defa
 parser <- add_option(parser, c('--call-rate-thr'), type = 'double', default = 0.97, help = 'minimum call rate threshold [0.97]', metavar = '<float>')
 parser <- add_option(parser, c('--baf-auto-thr'), type = 'double', default = 0.03, help = 'maximum BAF autocorrelation threshold [0.03]', metavar = '<float>')
 parser <- add_option(parser, c('--pdf'), type = 'character', help = 'output PDF file', metavar = '<file.pdf>')
-parser <- add_option(parser, c('--width'), type = 'integer', default = 7, help = 'inches width of the output file [7]', metavar = '<integer>')
-parser <- add_option(parser, c('--height'), type = 'integer', default = 7, help = 'inches height of the output file [7]', metavar = '<integer>')
+parser <- add_option(parser, c('--width'), type = 'double', default = 7.0, help = 'inches width of the output file [7.0]', metavar = '<float>')
+parser <- add_option(parser, c('--height'), type = 'double', default = 7.0, help = 'inches height of the output file [7.0]', metavar = '<float>')
 parser <- add_option(parser, c('--fontsize'), type = 'integer', default = 16, help = 'font size [16]', metavar = '<integer>')
 args <- parse_args(parser, commandArgs(trailingOnly = TRUE), convert_hyphens_to_underscores = TRUE)
 

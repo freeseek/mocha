@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2021 Giulio Genovese
+#  Copyright (C) 2017-2022 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,16 +25,16 @@
 #  THE SOFTWARE.
 ###
 
-mocha_plot_version <- '2021-10-15'
+mocha_plot_version <- '2022-01-12'
 
-library(optparse)
-library(data.table)
-library(ggplot2)
-library(reshape2)
-options(bitmapType = 'cairo')
+suppressPackageStartupMessages(library(optparse))
+suppressPackageStartupMessages(library(data.table))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(reshape2))
+if (capabilities()[['cairo']]) options(bitmapType = 'cairo')
 
-parser <- OptionParser('usage: mocha_plot.R [options] --rules <GRCh37|GRCh38>|--cytoband <cytoband.txt.gz> --vcf <file.vcf> --samples <list>')
-parser <- add_option(parser, c('--rules'), type = 'character', help = 'genome assembly (e.g. GRCh38)', metavar = '<assembly>')
+parser <- OptionParser('usage: mocha_plot.R [options] --genome <GRCh37|GRCh38>|--cytoband <cytoband.txt.gz> --vcf <file.vcf> --samples <list>')
+parser <- add_option(parser, c('--genome'), type = 'character', help = 'genome assembly (e.g. GRCh38)', metavar = '<assembly>')
 parser <- add_option(parser, c('--cytoband'), type = 'character', help = 'cytoband file', metavar = '<cytoband.txt.gz>')
 parser <- add_option(parser, c('--wgs'), action = 'store_true', default = FALSE, help = 'whether the input VCF file contains WGS data')
 parser <- add_option(parser, c('--mocha'), action = 'store_true', default = FALSE, help = 'whether the input VCF file contains Ldev/Bdev data')
@@ -44,8 +44,8 @@ parser <- add_option(parser, c('--vcf'), type = 'character', help = 'input VCF f
 parser <- add_option(parser, c('--exclude'), type = 'character', help = 'regions to exclude listed in a file', metavar = '<file.bed>')
 parser <- add_option(parser, c('--pdf'), type = 'character', help = 'output PDF file', metavar = '<file.pdf>')
 parser <- add_option(parser, c('--png'), type = 'character', help = 'output PNG file', metavar = '<file.png>')
-parser <- add_option(parser, c('--width'), type = 'integer', default = 7, help = 'inches width of the output file [7]', metavar = '<integer>')
-parser <- add_option(parser, c('--height'), type = 'integer', default = 7, help = 'inches height of the output file [7]', metavar = '<integer>')
+parser <- add_option(parser, c('--width'), type = 'double', default = 7.0, help = 'inches width of the output file [7.0]', metavar = '<float>')
+parser <- add_option(parser, c('--height'), type = 'double', default = 7.0, help = 'inches height of the output file [7.0]', metavar = '<float>')
 parser <- add_option(parser, c('--samples'), type = 'character', help = 'comma-separated list of samples to plot', metavar = '<list>')
 parser <- add_option(parser, c('--regions'), type = 'character', help = 'comma-separated list of regions to plot [all]', metavar = '<list>')
 parser <- add_option(parser, c('--fontsize'), type = 'integer', default = 12, help = 'font size [12]', metavar = '<integer>')
@@ -58,9 +58,9 @@ write(paste('mocha_plot.R', mocha_plot_version, 'https://github.com/freeseek/moc
 
 if (is.null(args$vcf)) {print_help(parser); stop('option --vcf is required')}
 if (is.null(args$samples)) {print_help(parser); stop('option --samples is required')}
-if (is.null(args$rules) && is.null(args$cytoband)) {print_help(parser); stop('either --rules or --cytoband is required')}
-if (!is.null(args$rules) && !is.null(args$cytoband)) {print_help(parser); stop('cannot use --rules and --cytoband at the same time')}
-if (!is.null(args$rules) && args$rules != 'GRCh37' && args$rules != 'GRCh38') {print_help(parser); stop('--rules accepts only GRCh37 or GRCh38')}
+if (is.null(args$genome) && is.null(args$cytoband)) {print_help(parser); stop('either --genome or --cytoband is required')}
+if (!is.null(args$genome) && !is.null(args$cytoband)) {print_help(parser); stop('cannot use --genome and --cytoband at the same time')}
+if (!is.null(args$genome) && args$genome != 'GRCh37' && args$genome != 'GRCh38') {print_help(parser); stop('--genome accepts only GRCh37 or GRCh38')}
 if (is.null(args$pdf) && is.null(args$png)) {print_help(parser); stop('either --pdf or --png is required')}
 if (!is.null(args$pdf) && !is.null(args$png)) {print_help(parser); stop('cannot use --pdf and --png at the same time')}
 regions <- unlist(strsplit(args$regions, ','))
@@ -86,12 +86,12 @@ if (!is.null(args$cytoband)) {
                   cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromStart')], c('chrom', 'name', 'x')), y = -1/2),
                   cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd')], c('chrom', 'name', 'x')), y = 0))
   df_chrs <- data.frame(chrlen = chrlen[chrs], cen_beg = cen_beg[chrs], cen_end = cen_end[chrs], CHROM = chrs)
-} else if (!is.null(args$rules)) {
-  if ( args$rules == 'GRCh37' ) {
+} else if (!is.null(args$genome)) {
+  if ( args$genome == 'GRCh37' ) {
     chrlen <- c(249251621, 243199373, 198022430, 191154276, 180915260, 171115067, 159138663, 146364022, 141213431, 135534747, 135006516, 133851895, 115169878, 107349540, 102531392, 90354753, 81195210, 78077248, 59128983, 63026520, 48129895, 51305566, 155270560, 59373566)
     cen_beg <- c(121535434, 92326171, 90504854, 49660117, 46405641, 58830166, 58054331, 43838887, 47367679, 39254935, 51644205, 34856694, 0, 0, 0, 35335801, 22263006, 15460898, 24681782, 26369569, 0, 0, 58632012, 10104553)
     cen_end <- c(142535434, 95326171, 93504854, 52660117, 49405641, 61830166, 61054331, 46838887, 65367679, 42254935, 54644205, 37856694, 19000000, 19000000, 20000000, 46335801, 25263006, 18460898, 27681782, 29369569, 14288129, 16000000, 61632012, 13104553)
-  } else if ( args$rules == 'GRCh38' ) {
+  } else if ( args$genome == 'GRCh38' ) {
     chrlen <- c(248956422, 242193529, 198295559, 190214555, 181538259, 170805979, 159345973, 145138636, 138394717, 133797422, 135086622, 133275309, 114364328, 107043718, 101991189, 90338345, 83257441, 80373285, 58617616, 64444167, 46709983, 50818468, 156040895, 57227415)
     cen_beg <- c(122026459, 92188145, 90772458, 49712061, 46485900, 58553888, 58169653, 44033744, 43389635, 39686682, 51078348, 34769407, 0, 0, 0, 36311158, 22813679, 15460899, 24498980, 26436232, 0, 0, 58605579, 10316944)
     cen_end <- c(143184587, 94090557, 93655574, 51743951, 50059807, 59829934, 61528020, 45877265, 60518558, 41593521, 54425074, 37185252, 18051248, 18173523, 19725254, 46280682, 26616164, 20861206, 27190874, 30038348, 12915808, 15054318, 62412542, 10544039)
@@ -233,7 +233,7 @@ if (!is.null(args$pdf)) {
 if ('all' %in% regions) {
   write(paste0('Plotting region: all (', sum(!is.na(df$BAF) & df$chrom %in% chrs), ' heterozygous sites)'), stderr())
   p <- ggplot(df[!is.na(df$BAF) & df$chrom %in% chrs,], aes(x = pos/1e6, y = BAF, color = color))
-  if (!is.null(args$cytoband) | !is.null(args$rules)) {
+  if (!is.null(args$cytoband) | !is.null(args$genome)) {
     p <- p + geom_vline(data = df_chrs, aes(xintercept = chrlen/1e6), color = 'black', size = 1, alpha = 1/2)
   }
   p <- p + geom_rect(data = df_chrs, mapping = aes(x = NULL, y = NULL, xmin = cen_beg/1e6, xmax = cen_end/1e6), color = 'transparent', fill = 'gray', ymin = 0, ymax = 1, alpha = 1/2) +

@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2017-2021 Giulio Genovese
+   Copyright (C) 2017-2022 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2021-10-15"
+#define MOCHATOOLS_VERSION "2022-01-12"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"

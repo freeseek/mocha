@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2018-2021 Giulio Genovese
+   Copyright (C) 2018-2022 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2021-10-15"
+#define EXTENDFMT_VERSION "2022-01-12"
 
 /******************************************
  * CIRCULAR BUFFER                        *
@@ -244,24 +244,28 @@ static const char *usage_text(void) {
            "Usage: bcftools +extendFMT [options] --format <ID> <in.vcf.gz>\n"
            "\n"
            "Plugin options:\n"
-           "    -f, --format <tag>                 FORMAT tag to be extended\n"
-           "    -p, --phase                        whether the format to be extended is for phased heterozygotes\n"
-           "    -d, --dist <int>                   maximum distance used to extend the calls [1e6]\n"
-           "        --no-version                   do not append version and command line to the header\n"
-           "    -o, --output <file>                write output to a file [standard output]\n"
-           "    -O, --output-type b|u|z|v          b: compressed BCF, u: uncompressed BCF, z: compressed VCF, v: "
-           "uncompressed VCF [v]\n"
-           "    -r, --regions <region>             restrict to comma-separated list of regions\n"
-           "    -R, --regions-file <file>          restrict to regions listed in a file\n"
-           "    -t, --targets [^]<region>          similar to -r but streams rather than index-jumps. Exclude regions "
+           "    -f, --format <tag>              FORMAT tag to be extended\n"
+           "    -p, --phase                     whether the format to be extended is for phased heterozygotes\n"
+           "    -d, --dist <int>                maximum distance used to extend the calls [1e6]\n"
+           "        --no-version                do not append version and command line to the header\n"
+           "    -o, --output <file>             write output to a file [standard output]\n"
+           "    -O, --output-type u|b|v|z[0-9]  u/b: un/compressed BCF, v/z: un/compressed VCF, 0-9: compression level "
+           "[v]\n"
+           "    -r, --regions <region>          restrict to comma-separated list of regions\n"
+           "    -R, --regions-file <file>       restrict to regions listed in a file\n"
+           "        --regions-overlap 0|1|2     Include if POS in the region (0), record overlaps (1), variant "
+           "overlaps (2) [1]\n"
+           "    -t, --targets [^]<region>       similar to -r but streams rather than index-jumps. Exclude regions "
            "with \"^\" prefix\n"
-           "    -T, --targets-file [^]<file>       similar to -R but streams rather than index-jumps. Exclude regions "
+           "    -T, --targets-file [^]<file>    similar to -R but streams rather than index-jumps. Exclude regions "
            "with \"^\" prefix\n"
-           "        --threads <int>                number of extra output compression threads [0]\n"
-           "    -s, --samples [^]<list>            comma separated list of samples to include (or exclude with \"^\" "
+           "        --targets-overlap 0|1|2     Include if POS in the region (0), record overlaps (1), variant "
+           "overlaps (2) [0]\n"
+           "        --threads <int>             number of extra output compression threads [0]\n"
+           "    -s, --samples [^]<list>         comma separated list of samples to include (or exclude with \"^\" "
            "prefix)\n"
-           "    -S, --samples-file [^]<file>       file of samples to include (or exclude with \"^\" prefix)\n"
-           "        --force-samples                only warn about unknown subset samples\n"
+           "    -S, --samples-file [^]<file>    file of samples to include (or exclude with \"^\" prefix)\n"
+           "        --force-samples             only warn about unknown subset samples\n"
            "\n"
            "Example:\n"
            "    bcftools +extendFMT --format AS --phase --dist 500000 file.bcf\n"
@@ -309,6 +313,9 @@ int run(int argc, char **argv) {
     int dist = 1e6;
     char *output_fname = NULL;
     int output_type = FT_VCF;
+    int regions_overlap = 1;
+    int targets_overlap = 0;
+    int clevel = -1;
     int n_threads = 0;
     int record_cmd_line = 1;
     char *targets_list = NULL;
@@ -322,16 +329,18 @@ int run(int argc, char **argv) {
     static struct option loptions[] = {{"format", required_argument, NULL, 'f'},
                                        {"phase", no_argument, NULL, 'p'},
                                        {"dist", required_argument, NULL, 'd'},
-                                       {"samples", required_argument, NULL, 's'},
-                                       {"samples-file", required_argument, NULL, 'S'},
-                                       {"force-samples", no_argument, NULL, 1},
                                        {"output", required_argument, NULL, 'o'},
                                        {"output-type", required_argument, NULL, 'O'},
                                        {"threads", required_argument, NULL, 9},
-                                       {"targets", required_argument, NULL, 't'},
-                                       {"targets-file", required_argument, NULL, 'T'},
                                        {"regions", required_argument, NULL, 'r'},
                                        {"regions-file", required_argument, NULL, 'R'},
+                                       {"regions-overlap", required_argument, NULL, 2},
+                                       {"targets", required_argument, NULL, 't'},
+                                       {"targets-file", required_argument, NULL, 'T'},
+                                       {"targets-overlap", required_argument, NULL, 3},
+                                       {"samples", required_argument, NULL, 's'},
+                                       {"samples-file", required_argument, NULL, 'S'},
+                                       {"force-samples", no_argument, NULL, 1},
                                        {"no-version", no_argument, NULL, 8},
                                        {0, 0, 0, 0}};
     int c;
@@ -366,8 +375,15 @@ int run(int argc, char **argv) {
             case 'v':
                 output_type = FT_VCF;
                 break;
-            default:
-                error("The output type \"%s\" not recognised\n", optarg);
+            default: {
+                clevel = strtol(optarg, &tmp, 10);
+                if (*tmp || clevel < 0 || clevel > 9) error("The output type \"%s\" not recognised\n", optarg);
+            }
+            }
+            if (optarg[1]) {
+                clevel = strtol(optarg + 1, &tmp, 10);
+                if (*tmp || clevel < 0 || clevel > 9)
+                    error("Could not parse argument: --compression-level %s\n", optarg + 1);
             }
             break;
         case 9:
@@ -377,6 +393,23 @@ int run(int argc, char **argv) {
         case 8:
             record_cmd_line = 0;
             break;
+        case 'r':
+            regions_list = optarg;
+            break;
+        case 'R':
+            regions_list = optarg;
+            regions_is_file = 1;
+            break;
+        case 2:
+            if (!strcasecmp(optarg, "0"))
+                regions_overlap = 0;
+            else if (!strcasecmp(optarg, "1"))
+                regions_overlap = 1;
+            else if (!strcasecmp(optarg, "2"))
+                regions_overlap = 2;
+            else
+                error("Could not parse: --regions-overlap %s\n", optarg);
+            break;
         case 't':
             targets_list = optarg;
             break;
@@ -384,12 +417,15 @@ int run(int argc, char **argv) {
             targets_list = optarg;
             targets_is_file = 1;
             break;
-        case 'r':
-            regions_list = optarg;
-            break;
-        case 'R':
-            regions_list = optarg;
-            regions_is_file = 1;
+        case 3:
+            if (!strcasecmp(optarg, "0"))
+                targets_overlap = 0;
+            else if (!strcasecmp(optarg, "1"))
+                targets_overlap = 1;
+            else if (!strcasecmp(optarg, "2"))
+                targets_overlap = 2;
+            else
+                error("Could not parse: --targets-overlap %s\n", optarg);
             break;
         case 's':
             sample_names = optarg;
@@ -426,10 +462,12 @@ int run(int argc, char **argv) {
 
     bcf_srs_t *srs = bcf_sr_init();
     if (regions_list) {
+        bcf_sr_set_opt(srs, BCF_SR_REGIONS_OVERLAP, regions_overlap);
         if (bcf_sr_set_regions(srs, regions_list, regions_is_file) < 0)
             error("Failed to read the regions: %s\n", regions_list);
     }
     if (targets_list) {
+        bcf_sr_set_opt(srs, BCF_SR_TARGETS_OVERLAP, targets_overlap);
         if (bcf_sr_set_targets(srs, targets_list, targets_is_file, 0) < 0)
             error("Failed to read the targets: %s\n", targets_list);
     }
@@ -459,8 +497,10 @@ int run(int argc, char **argv) {
     int fmt_id = bcf_hdr_id2int(hdr, BCF_DT_ID, format);
     if (fmt_id < 0) error("Format %s was not found in the input header\n", format);
 
-    htsFile *out_fh = hts_open(output_fname ? output_fname : "-", hts_bcf_wmode(output_type));
-    if (!out_fh) error("Can't write to \"%s\": %s\n", output_fname, strerror(errno));
+    char wmode[8];
+    set_wmode(wmode, output_type, (char *)output_fname, clevel);
+    htsFile *out_fh = hts_open(output_fname ? output_fname : "-", wmode);
+    if (out_fh == NULL) error("[%s] Error: cannot write to \"%s\": %s\n", __func__, output_fname, strerror(errno));
     if (n_threads) hts_set_opt(out_fh, HTS_OPT_THREAD_POOL, srs->p);
     if (bcf_hdr_write(out_fh, hdr) < 0) error("Unable to write to output VCF file\n");
 

@@ -1,15 +1,15 @@
 version development
 
-## Copyright (c) 2021 Giulio Genovese
+## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2021-10-15
+## Version 2022-01-12
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## Converts UK biobank genotype and intensity files back to Affymetrix format suitable for the MoChA WDL pipeline
 ##
 ## Cromwell version support
-## - Successfully tested on v70
+## - Successfully tested on v73
 ##
 ## Distributed under terms of the MIT License
 

@@ -1,15 +1,15 @@
 version development
 
-## Copyright (c) 2021 Giulio Genovese
+## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2021-10-15
+## Version 2022-01-12
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow computes poligenic risk scores
 ##
 ## Cromwell version support
-## - Successfully tested on v70
+## - Successfully tested on v73
 ##
 ## Distributed under terms of the MIT License
 
@@ -30,22 +30,22 @@ workflow score {
     Array[File] summary_files
     Array[File]? summary_idxs
     Array[Float]? q_score_thr
-    File? covars_file
+    File? covar_tsv_file
 
     String ref_name = "GRCh38"
     String? ref_path
     String? ref_fasta_fai
     Int? ref_n_chrs
 
-    String? data_path
-    File batch_tsv_file # batch_id path chr1_imp_vcf chr1_imp_vcf_index chr2_imp_vcf chr2_imp_vcf_index ...
+    File impute_tsv_file # batch_id path chr1_imp_vcf chr1_imp_vcf_index chr2_imp_vcf chr2_imp_vcf_index ...
+    String? impute_data_path
     File? samples_file
     String? exclude_str
     String? include_str
     String basic_bash_docker = "debian:stable-slim"
     String docker_repository = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.13-20211015"
-    String r_mocha_docker = "r_mocha:1.13-20211015"
+    String bcftools_docker = "bcftools:1.14-20220112"
+    String r_mocha_docker = "r_mocha:1.14-20220112"
   }
 
   String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
@@ -60,16 +60,16 @@ workflow score {
   String? chr_string = if defined(region) then sub(sub(select_first([region]), ":.*$", ""), "^chr", "") else None
 
   # read table with batches information (scatter could be avoided if there was a tail() function)
-  Array[Array[String]] batch_tsv = read_tsv(batch_tsv_file)
-  Int n_batches = length(batch_tsv)-1
-  scatter (idx in range(n_batches)) { Array[String] batch_tsv_rows = batch_tsv[(idx+1)] }
-  Map[String, Array[String]] batch_tbl = as_map(zip(batch_tsv[0], transpose(batch_tsv_rows)))
+  Array[Array[String]] impute_tsv = read_tsv(impute_tsv_file)
+  Int n_batches = length(impute_tsv)-1
+  scatter (idx in range(n_batches)) { Array[String] impute_tsv_rows = impute_tsv[(idx+1)] }
+  Map[String, Array[String]] impute_tbl = as_map(zip(impute_tsv[0], transpose(impute_tsv_rows)))
 
   # compute data paths for each batch, if available (scatter could be avoided if there was a contains_key() function)
-  scatter (key in keys(batch_tbl)) { Boolean? is_key_equal_path = if key == "path" then true else None }
+  scatter (key in keys(impute_tbl)) { Boolean? is_key_equal_path = if key == "path" then true else None }
   scatter (idx in range(n_batches)) {
-    String data_paths = select_first([data_path, if length(select_all(is_key_equal_path))>0 then batch_tbl["path"][idx] else ""])
-    String data_paths_with_sep = data_paths + (if data_paths == "" || sub(data_paths, "/$", "") != data_paths then "" else "/")
+    String impute_data_paths = select_first([impute_data_path, if length(select_all(is_key_equal_path))>0 then impute_tbl["path"][idx] else ""])
+    String impute_data_paths_with_sep = impute_data_paths + (if impute_data_paths == "" || sub(impute_data_paths, "/$", "") != impute_data_paths then "" else "/")
   }
 
   Array[Array[String]] ref_fasta_fai_tbl = transpose(read_tsv(ref.fasta_fai))
@@ -80,8 +80,8 @@ workflow score {
     String hdr = "chr" + (if defined(region) then select_first([chr_string]) else chr_strings[p.right]) + "_imp_vcf"
     call vcf_score {
       input:
-        vcf_file = data_paths_with_sep[p.left] + batch_tbl[hdr][p.left],
-        vcf_idx = data_paths_with_sep[p.left] + batch_tbl[(hdr + "_index")][p.left],
+        vcf_file = impute_data_paths_with_sep[p.left] + impute_tbl[hdr][p.left],
+        vcf_idx = impute_data_paths_with_sep[p.left] + impute_tbl[(hdr + "_index")][p.left],
         q_score_thr = q_score_thr,
         samples_file = samples_file,
         summary_files = prefix(summary_path_with_sep, summary_files),
@@ -91,7 +91,7 @@ workflow score {
         tag = tag,
         exclude_str = exclude_str,
         include_str = include_str,
-        filebase = basename(basename(data_paths_with_sep[p.left] + batch_tbl[hdr][p.left], ".bcf"), ".vcf.gz") + "." + ext_string,
+        filebase = basename(basename(impute_data_paths_with_sep[p.left] + impute_tbl[hdr][p.left], ".bcf"), ".vcf.gz") + "." + ext_string,
         docker = docker_repository_with_sep + bcftools_docker
     }
   }
@@ -102,7 +102,7 @@ workflow score {
       call score_summary {
         input:
           score_files = idx2score_files[idx],
-          filebase = sample_set_id + (if n_batches > 1 then "." + batch_tbl["batch_id"][idx] else "") + "." + ext_string,
+          filebase = sample_set_id + (if n_batches > 1 then "." + impute_tbl["batch_id"][idx] else "") + "." + ext_string,
           docker = basic_bash_docker
       }
     }
@@ -118,11 +118,11 @@ workflow score {
     }
   }
 
-  if (defined(covars_file)) {
+  if (defined(covar_tsv_file)) {
     call adj_scores {
       input:
-        scores_file = scores_file,
-        covars_file = select_first([covars_file]),
+        score_tsv_file = score_tsv_file,
+        covar_tsv_file = select_first([covar_tsv_file]),
         sample_header = sample_header,
         filebase = sample_set_id + "." + "adj_" + ext_string,
         docker = docker_repository_with_sep + r_mocha_docker
@@ -130,8 +130,14 @@ workflow score {
   }
 
   output {
-    File scores_file = select_first([tsv_concat.file, score_summary_file, vcf_score.file[0]])
-    File? adj_scores_file = adj_scores.file
+    File score_tsv_file = select_first([tsv_concat.file, score_summary_file, vcf_score.file[0]])
+    File? adj_score_tsv_file = adj_scores.file
+  }
+
+  meta {
+    author: "Giulio Genovese"
+    email: "giulio.genovese@gmail.com"
+    description: "See the [MoChA](https://github.com/freeseek/mocha) website for more information"
   }
 }
 
@@ -313,8 +319,8 @@ task tsv_concat {
 
 task adj_scores {
   input {
-    File scores_file
-    File covars_file
+    File score_tsv_file
+    File covar_tsv_file
     String sample_header
     String pfx_string = "adj_"
     String filebase
@@ -327,19 +333,19 @@ task adj_scores {
     Int maxRetries = 0
   }
 
-  Float scores_size = size(scores_file, "GiB")
-  Float covars_size = size(covars_file, "GiB")
+  Float scores_size = size(score_tsv_file, "GiB")
+  Float covars_size = size(covar_tsv_file, "GiB")
   Int disk_size = select_first([disk_size_override, ceil(10.0 + 2.0 * scores_size + covars_size)])
   Float memory = select_first([memory_override, 3.5 + 3.0 * scores_size + 2.0 * covars_size])
 
   command <<<
     set -euo pipefail
-    mv "~{scores_file}" .
-    mv "~{covars_file}" .
+    mv "~{score_tsv_file}" .
+    mv "~{covar_tsv_file}" .
     R --vanilla <<CODE
     library(data.table)
-    df_scores <- fread('~{basename(scores_file)}', sep = "\t", header = TRUE, data.table = FALSE)
-    df_covars <- fread('~{basename(covars_file)}', sep = "\t", header = TRUE, data.table = FALSE)
+    df_scores <- fread('~{basename(score_tsv_file)}', sep = "\t", header = TRUE, data.table = FALSE)
+    df_covars <- fread('~{basename(covar_tsv_file)}', sep = "\t", header = TRUE, data.table = FALSE)
     df <- merge(df_scores, df_covars, by = '~{sample_header}')
     df_adj <- data.frame(~{sample_header} = df[, '~{sample_header}'])
     scores <- names(df_scores)
@@ -355,8 +361,8 @@ task adj_scores {
     }
     write.table(df_adj, '~{filebase}.tsv', sep = '\t', quote = FALSE, row.names = FALSE)
     CODE
-    rm "~{basename(scores_file)}"
-    rm "~{basename(covars_file)}"
+    rm "~{basename(score_tsv_file)}"
+    rm "~{basename(covar_tsv_file)}"
   >>>
 
   output {

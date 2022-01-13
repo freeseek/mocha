@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2018-2021 Giulio Genovese
+   Copyright (C) 2018-2022 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -40,6 +40,7 @@
 #define GENDER_UNKNOWN 0
 #define GENDER_MALE 1
 #define GENDER_FEMALE 2
+#define GENDER_KLINEFELTER 3
 
 /****************************************
  * TSV FUNCTIONS                        *
@@ -148,6 +149,8 @@ int tsv_read_computed_gender(tsv_t *tsv, bcf1_t *rec, void *usr) {
         *computed_gender = GENDER_MALE;
     } else if (toupper(*tsv->ss) == 'F') {
         *computed_gender = GENDER_FEMALE;
+    } else if (toupper(*tsv->ss) == 'K') {
+        *computed_gender = GENDER_KLINEFELTER;
     } else if (toupper(*tsv->ss) == 'U' || toupper(*tsv->ss) == 'N') {
         *computed_gender = GENDER_UNKNOWN;
     } else {

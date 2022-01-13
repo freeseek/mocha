@@ -1,15 +1,15 @@
 version development
 
-## Copyright (c) 2021 Giulio Genovese
+## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2021-10-15
+## Version 2022-01-12
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs impute5 or beagle5 on a set of VCFs
 ##
 ## Cromwell version support
-## - Successfully tested on v70
+## - Successfully tested on v73
 ##
 ## Distributed under terms of the MIT License
 
@@ -46,8 +46,9 @@ workflow impute {
     String? panel_idx
     Int? n_panel_smpls
 
-    String? data_path
-    File batch_tsv_file # batch_id n_smpls path vcf vcf_index pgt_vcf pgt_vcf_index chr1_imp_vcf chr1_imp_vcf_index ...
+    File mocha_tsv_file # batch_id n_smpls path vcf vcf_index pgt_vcf pgt_vcf_index chr1_imp_vcf_index chr2_imp_vcf chr2_imp_vcf_index ...
+    String? mocha_data_path
+    String? impute_data_path
     File? remove_samples_file
     Boolean convert_panel = true
     Boolean beagle = false
@@ -58,9 +59,9 @@ workflow impute {
     String basic_bash_docker = "debian:stable-slim"
     String pandas_docker = "amancevice/pandas:slim"
     String docker_repository = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.13-20211015"
-    String impute5_docker = "impute5:1.13-20211015"
-    String beagle5_docker = "beagle5:1.13-20211015"
+    String bcftools_docker = "bcftools:1.14-20220112"
+    String impute5_docker = "impute5:1.14-20220112"
+    String beagle5_docker = "beagle5:1.14-20220112"
   }
 
   String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
@@ -78,16 +79,18 @@ workflow impute {
   }
 
   # read table with batches information (scatter could be avoided if there was a tail() function)
-  Array[Array[String]] batch_tsv = read_tsv(batch_tsv_file)
-  Int n_batches = length(batch_tsv)-1
-  scatter (idx in range(n_batches)) { Array[String] batch_tsv_rows = batch_tsv[(idx+1)] }
-  Map[String, Array[String]] batch_tbl = as_map(zip(batch_tsv[0], transpose(batch_tsv_rows)))
+  Array[Array[String]] mocha_tsv = read_tsv(mocha_tsv_file)
+  Int n_mocha_batches = length(mocha_tsv)-1
+  scatter (idx in range(n_mocha_batches)) { Array[String] mocha_tsv_rows = mocha_tsv[(idx+1)] }
+  Map[String, Array[String]] mocha_tbl = as_map(zip(mocha_tsv[0], transpose(mocha_tsv_rows)))
 
   # compute data paths for each batch, if available (scatter could be avoided if there was a contains_key() function)
-  scatter (key in keys(batch_tbl)) { Boolean? is_key_equal_path = if key == "path" then true else None }
-  scatter (idx in range(n_batches)) {
-    String data_paths = select_first([data_path, if length(select_all(is_key_equal_path))>0 then batch_tbl["path"][idx] else ""])
-    String data_paths_with_sep = data_paths + (if data_paths == "" || sub(data_paths, "/$", "") != data_paths then "" else "/")
+  scatter (key in keys(mocha_tbl)) { Boolean? is_key_equal_path = if key == "path" then true else None }
+  scatter (idx in range(n_mocha_batches)) {
+    String mocha_data_paths = select_first([mocha_data_path, if length(select_all(is_key_equal_path))>0 then mocha_tbl["path"][idx] else ""])
+    String mocha_data_paths_with_sep = mocha_data_paths + (if mocha_data_paths == "" || sub(mocha_data_paths, "/$", "") != mocha_data_paths then "" else "/")
+    String impute_data_paths = select_first([impute_data_path, if length(select_all(is_key_equal_path))>0 then mocha_tbl["path"][idx] else "", ""])
+    String impute_data_paths_with_sep = impute_data_paths + (if impute_data_paths == "" || sub(impute_data_paths, "/$", "") != impute_data_paths then "" else "/")
   }
 
   Array[Array[String]] ref_fasta_fai_tbl = transpose(read_tsv(ref.fasta_fai))
@@ -130,6 +133,7 @@ workflow impute {
     }
     Array[File] panel_flatten_vcf_files = flatten(panel_scatter_vcf_files)
     Array[File] panel_flatten_vcf_idxs = flatten(panel_scatter_vcf_idxs)
+    Array[Int] n_panel_flatten_markers = flatten(n_panel_scatter_markers)
 
     # convert reference panel
     scatter (idx in range(length(intervals_tbl[0]))) {
@@ -145,10 +149,10 @@ workflow impute {
     }
 
     # scatter target genotypes
-    scatter (idx in range(n_batches)) {
+    scatter (idx in range(n_mocha_batches)) {
       call vcf_scatter {
         input:
-          vcf_file = data_paths_with_sep[idx] + batch_tbl["pgt_vcf"][idx],
+          vcf_file = mocha_data_paths_with_sep[idx] + mocha_tbl["pgt_vcf"][idx],
           intervals_tsv = ref_scatter.intervals_tsv,
           remove_samples_file = remove_samples_file,
           docker = docker_repository_with_sep + bcftools_docker
@@ -156,16 +160,17 @@ workflow impute {
     }
 
     # impute genotypes
-    Array[Int] n_panel_flatten_markers = flatten(n_panel_scatter_markers)
     Map[String, Int] chr2int = as_map(zip(chrs, range(length(chrs))))
     String mhc_chr = sub(ref.mhc_reg, ":.*$", "")
     Int mhc_beg = sub(sub(ref.mhc_reg, "-.*$", ""), "^.*:", "")
     Int mhc_end = sub(ref.mhc_reg, "^.*-", "")
-    scatter (p in cross(range(n_batches), range(length(intervals_tbl[0])))) {
+    scatter (p in cross(range(n_mocha_batches), range(length(intervals_tbl[0])))) {
       if (vcf_scatter.n_markers[p.left][p.right] > 0) {
         Int cross_idx = p.left * n_chrs + chr2int[(intervals_tbl[0][p.right])]
-        Int beg = intervals_tbl[1][p.right] # cast string to integer
-        Int end = intervals_tbl[2][p.right] # cast string to integer
+        Int buffer_beg = intervals_tbl[1][p.right] # cast string to integer
+        Int buffer_end = intervals_tbl[2][p.right] # cast string to integer
+        Int beg = intervals_tbl[3][p.right] # cast string to integer
+        Int end = intervals_tbl[4][p.right] # cast string to integer
         call vcf_impute {
           input:
             n_smpls = vcf_scatter.n_smpls[p.left],
@@ -180,9 +185,9 @@ workflow impute {
             panel_sites_idx = init_panel.panel_sites_idx[p.right],
             ref_fasta_fai = ref.fasta_fai,
             chr = intervals_tbl[0][p.right],
-            mhc = intervals_tbl[0][p.right] == mhc_chr && beg < mhc_end && end > mhc_beg,
-            region = intervals_tbl[0][p.right] + ":" + intervals_tbl[3][p.right] + "-" + intervals_tbl[4][p.right],
-            buffer_region = intervals_tbl[0][p.right] + ":" + intervals_tbl[1][p.right] + "-" + intervals_tbl[2][p.right],
+            mhc = intervals_tbl[0][p.right] == mhc_chr && buffer_beg <= mhc_end && buffer_end > mhc_beg,
+            region = intervals_tbl[0][p.right] + ":" + (1 + beg) + "-" + end,
+            buffer_region = intervals_tbl[0][p.right] + ":" + (1 + buffer_beg) + "-" + buffer_end,
             beagle = beagle,
             out_ds= out_ds,
             out_gp= out_gp,
@@ -195,12 +200,12 @@ workflow impute {
 
     Map[Int, Array[File]] idx2vcf_files = collect_by_key(zip(select_all(cross_idx), select_all(vcf_impute.imp_vcf_file)))
     Map[Int, Array[File]] idx2vcf_idxs = collect_by_key(zip(select_all(cross_idx), select_all(vcf_impute.imp_vcf_idx)))
-    scatter (p in cross(range(n_batches), range(n_chrs))) {
+    scatter (p in cross(range(n_mocha_batches), range(n_chrs))) {
       if (length(idx2vcf_files[(p.left * n_chrs + p.right)]) > 1) {
         call vcf_concat {
           input:
             vcf_files = idx2vcf_files[(p.left * n_chrs + p.right)],
-            filebase = basename(basename(basename(batch_tbl["pgt_vcf"][p.left], ".bcf"), ".vcf.gz"), ".pgt") + ".chr" + chr_strings[p.right] + ".imp",
+            filebase = basename(basename(basename(mocha_tbl["pgt_vcf"][p.left], ".bcf"), ".vcf.gz"), ".pgt") + ".chr" + chr_strings[p.right] + ".imp",
             docker = docker_repository_with_sep + bcftools_docker
         }
       }
@@ -209,14 +214,14 @@ workflow impute {
     }
   }
 
-  Array[Int] n_smpls = if mode == "pgt" then select_first([vcf_scatter.n_smpls]) else batch_tbl["n_smpls"]
+  Array[Int] n_smpls = if mode == "pgt" then select_first([vcf_scatter.n_smpls]) else mocha_tbl["n_smpls"]
 
   if (target == "ext") {
-    scatter (p in cross(range(n_batches), range(n_chrs))) {
+    scatter (p in cross(range(n_mocha_batches), range(n_chrs))) {
       File vcf_file = if mode == "pgt" then select_first([chr_imp_vcf_files])[(p.left * n_chrs + p.right)]
-                      else data_paths_with_sep[p.left] + batch_tbl[("chr" +  chr_strings[p.right] + "_imp_vcf")][p.left]
+                      else impute_data_paths_with_sep[p.left] + mocha_tbl[("chr" +  chr_strings[p.right] + "_imp_vcf")][p.left]
       File vcf_idx = if mode == "pgt" then select_first([chr_imp_vcf_idxs])[(p.left * n_chrs + p.right)]
-                     else data_paths_with_sep[p.left] + batch_tbl[("chr" +  chr_strings[p.right] + "_imp_vcf_index")][p.left]
+                     else impute_data_paths_with_sep[p.left] + mocha_tbl[("chr" +  chr_strings[p.right] + "_imp_vcf_index")][p.left]
       call get_nrecords { input: vcf_idx = vcf_idx, docker = docker_repository_with_sep + bcftools_docker }
       call vcf_extend {
         input:
@@ -224,8 +229,8 @@ workflow impute {
           n_markers = get_nrecords.n,
           vcf_file = vcf_file,
           vcf_idx = vcf_idx,
-          annot_vcf_file = data_paths_with_sep[p.left] + batch_tbl["vcf"][p.left],
-          annot_vcf_idx = data_paths_with_sep[p.left] + batch_tbl["vcf_index"][p.left],
+          annot_vcf_file = mocha_data_paths_with_sep[p.left] + mocha_tbl["vcf"][p.left],
+          annot_vcf_idx = mocha_data_paths_with_sep[p.left] + mocha_tbl["vcf_index"][p.left],
           format_id = format_id,
           ext_string = ext_string,
           chr_string = chr_strings[p.right],
@@ -236,11 +241,11 @@ workflow impute {
 
   # generate a table summarizing the main output files and serialize the table to disk
   # vcf_files and vcf_idxs are defined in the output section
-  scatter (p in cross(range(n_batches), range(n_chrs))) {
+  scatter (p in cross(range(n_mocha_batches), range(n_chrs))) {
     Pair[String, String] output_vcfs = ("chr" + chr_strings[p.right] + "_imp_vcf", basename(vcf_files[(p.left * n_chrs + p.right)]))
     Pair[String, String] output_idxs = ("chr" + chr_strings[p.right] + "_imp_vcf_index", basename(vcf_idxs[(p.left * n_chrs + p.right)]))
   }
-  Map[String, Array[String]] output_map = as_map(flatten([[("batch_id", batch_tbl["batch_id"]),
+  Map[String, Array[String]] output_map = as_map(flatten([[("batch_id", mocha_tbl["batch_id"]),
     ("n_smpls", n_smpls)], as_pairs(collect_by_key(output_vcfs)), as_pairs(collect_by_key(output_idxs))]))
   # cannot use output_keys = keys(output_map) because of unresolved Cromwell bug
   # https://github.com/broadinstitute/cromwell/issues/5559
@@ -252,7 +257,7 @@ workflow impute {
   call write_tsv {
     input:
       tsv = flatten([[output_keys], transpose(output_tsv_cols)]),
-      filebase = sample_set_id + ".output",
+      filebase = sample_set_id + ".impute",
       docker = basic_bash_docker
   }
 
@@ -260,7 +265,13 @@ workflow impute {
     Array[File] vcf_files = select_first([vcf_extend.ext_vcf_file, chr_imp_vcf_files])
     Array[File] vcf_idxs = select_first([vcf_extend.ext_vcf_idx, chr_imp_vcf_idxs])
     Array[File]? logs = if mode == "pgt" then select_all(select_first([vcf_impute.log])) else None
-    File output_tsv_file = write_tsv.file
+    File impute_tsv_file = write_tsv.file
+  }
+
+  meta {
+    author: "Giulio Genovese"
+    email: "giulio.genovese@gmail.com"
+    description: "See the [MoChA](https://github.com/freeseek/mocha) website for more information"
   }
 }
 
@@ -372,9 +383,9 @@ task ref_scatter {
         cm_begs = (win_size - ~{overlap_size_cm}) * np.arange(1, n_win)
         cm_ends = (win_size - ~{overlap_size_cm}) * np.arange(1, n_win) + ~{overlap_size_cm}
         cm_mids = (win_size - 0.5 * ~{overlap_size_cm}) * np.arange(1, n_win - 1)
-        pos_begs = np.concatenate(([1], 1 + np.interp(cm_begs, df_group['CM'], df_group['POS'], period = np.inf).astype(int)))
+        pos_begs = np.concatenate(([0], 0 + np.interp(cm_begs, df_group['CM'], df_group['POS'], period = np.inf).astype(int)))
         pos_ends = np.concatenate((np.interp(cm_ends, df_group['CM'], df_group['POS'], period = np.inf).astype(int), [chr2len[fai_chr]]))
-        pos_begs2 = np.concatenate(([1], 1 + np.interp(cm_begs + 0.5 * ~{overlap_size_cm}, df_group['CM'], df_group['POS'], period = np.inf).astype(int)))
+        pos_begs2 = np.concatenate(([0], 0 + np.interp(cm_begs + 0.5 * ~{overlap_size_cm}, df_group['CM'], df_group['POS'], period = np.inf).astype(int)))
         pos_ends2 = np.concatenate((np.interp(cm_ends - 0.5 * ~{overlap_size_cm}, df_group['CM'], df_group['POS'], period = np.inf).astype(int), [chr2len[fai_chr]]))
         df_out[fai_chr] = pd.DataFrame.from_dict({'CHR': fai_chr, 'BEG': pos_begs, 'END': pos_ends, 'BEG2': pos_begs2, 'END2': pos_ends2})
     df = pd.concat([df_out[fai_chr] for fai_chr in chr2len.keys()])
@@ -401,7 +412,8 @@ task ref_scatter {
 task vcf_scatter {
   input {
     File vcf_file
-    File intervals_tsv
+    File intervals_tsv # zero-based intervals
+    Int clevel = 2
     File? remove_samples_file
     String? chr
 
@@ -429,7 +441,7 @@ task vcf_scatter {
       "rm \"" + basename(intervals_tsv, ".tsv") + ".all.tsv\""
       else ""}
     bcftools query --list-samples "~{basename(vcf_file)}" | wc -l > n_smpls.int
-    awk -F"\t" '{print $1":"$2"-"$3"\t"NR-1}' "~{basename(intervals_tsv)}" > regions.lines
+    awk -F"\t" '{print $1":"1+$2"-"$3"\t"NR-1}' "~{basename(intervals_tsv)}" > regions.lines
     bcftools annotate \
       --no-version \
       --output-type u \
@@ -443,18 +455,19 @@ task vcf_scatter {
       "  --samples-file ^\"" + basename(select_first([remove_samples_file])) + "\" | \\\n"
       else ""}bcftools norm \
       --no-version \
+      --output-type u \
       --rm-dup exact \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} | \
     bcftools +scatter \
       --no-version \
-      --output-type b \
+      --output-type b~{clevel} \
       --output vcfs \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       --scatter-file regions.lines \
       --prefix "~{filebase}."
     while read reg i; do
-      bcftools query --format "\n" "vcfs/~{filebase}.$i.bcf" | wc -l
       bcftools index --force "vcfs/~{filebase}.$i.bcf"
+      bcftools index --nrecords "vcfs/~{filebase}.$i.bcf.csi"
     done < regions.lines > n_markers.lines
     cut -f2 regions.lines | sed 's/^/vcfs\/~{filebase}./;s/$/.bcf/'
     cut -f2 regions.lines | sed 's/^/vcfs\/~{filebase}./;s/$/.bcf.csi/' > vcf_idxs.lines
@@ -551,7 +564,7 @@ task init_panel {
 }
 
 # hack https://github.com/samtools/bcftools/issues/1425 is employed in the end to fix the header
-# once bug fix https://github.com/samtools/bcftools/issues/1497 is incorporated in BCFtools, option --temp-prefix should be used
+# the command requires BCFtools 1.14 due to bug https://github.com/samtools/bcftools/issues/1497
 task vcf_impute {
   input {
     Int n_smpls
@@ -656,7 +669,7 @@ task vcf_impute {
       (if out_gp then "    --out-gp-field \\\n" else "") +
       (if out_ap then "    --out-ap-field \\\n" else "") +
       "    --o \"" + filebase + ".imp.bcf\" \\\n" +
-      (if cpu > 1 then "  --threads " + cpu + " \\\n" else "") +
+      (if cpu > 1 then "    --threads " + cpu + " \\\n" else "") +
       (if defined(impute_extra_args) then "  " + impute_extra_args + " \\\n" else "") +
       "    1>&2"}
     fi
@@ -674,7 +687,7 @@ task vcf_impute {
     ~{if defined(ref_fasta_fai) then
       "(echo -en \"##fileformat=VCFv4.2\\n#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\tFORMAT\\t\"\n" +
       "bcftools query -l \"" + filebase + ".imp.bcf\" | tr '\\n' '\\t' | sed 's/\\t$/\\n/') > tmp.vcf\n" +
-      "bcftools reheader --fai \"" + basename(select_first([ref_fasta_fai])) + "\" --output fai.vcf tmp.vcf\n" +
+      "bcftools reheader --fai \"" + basename(select_first([ref_fasta_fai])) + "\" --output fai.vcf --temp-prefix ./bcftools.XXXXXX tmp.vcf\n" +
       "mv \"" + filebase + ".imp.bcf\" \"" + filebase + ".tmp.bcf\"\n" +
       "bcftools concat \\\n" +
       "  --no-version \\\n" +
@@ -756,7 +769,6 @@ task vcf_concat {
   }
 }
 
-# due to bug https://github.com/samtools/bcftools/issues/1414 I need two bcftools annotate invocations
 task vcf_extend {
   input {
     Int n_smpls
@@ -767,8 +779,8 @@ task vcf_extend {
     File annot_vcf_idx
     String format_id
     String ext_string
-    Int dist = 500000
     String chr_string
+    Int dist = 500000
 
     String docker
     Int? cpu_override
@@ -785,48 +797,43 @@ task vcf_extend {
   Int disk_size = select_first([disk_size_override, ceil(10.0 + 2.0 * (vcf_size + annot_vcf_size))])
   Float memory = select_first([memory_override, 3.5 + mult * n_smpls * n_markers / 1024 / 1024 / 1024])
   Int cpu = select_first([cpu_override, if memory > 6.5 then 2 * ceil(memory / 13) else 1])
-  String filebase = basename(basename(basename(basename(vcf_file, ".bcf"), ".vcf.gz"), ".imp"), ".chr" + chr_string) + ".chr" + chr_string
+  String filebase = basename(basename(basename(basename(basename(vcf_file, ".bcf"), ".vcf.gz"), ".imp"), "." + ext_string), ".chr" + chr_string) + ".chr" + chr_string
+  String input_vcf_file = sub(sub(basename(vcf_file), "." + ext_string + ".bcf", ".bcf"), "." + ext_string + ".vcf.gz", ".vcf.gz")
+  String input_vcf_idx = sub(sub(sub(basename(vcf_idx), "." + ext_string + ".bcf.csi", ".bcf.csi"), "." + ext_string + ".vcf.gz.tbi", ".vcf.gz.tbi"), "." + ext_string + ".vcf.gz.csi", ".vcf.gz.csi")
 
   command <<<
     set -euo pipefail
-    mv "~{vcf_file}" .
-    mv "~{vcf_idx}" .
+    mv "~{vcf_file}" ~{if basename(vcf_file) != input_vcf_file then "\"" + input_vcf_file + "\"" else "."}
+    mv "~{vcf_idx}" ~{if basename(vcf_file) != input_vcf_file then "\"" + input_vcf_idx + "\"" else "."}
     mv "~{annot_vcf_file}" .
     mv "~{annot_vcf_idx}" .
     bcftools annotate \
       --no-version \
-      --output-type b \
-      --remove ID,QUAL,FILTER,INFO,^FMT/GT \
-      "~{basename(vcf_file)}" | \
-    tee "~{filebase}.pgt.bcf" | \
-    bcftools index --force --output "~{filebase}.pgt.bcf.csi"
-    bcftools annotate \
-      --no-version \
       --output-type u \
-      --columns "FMT/~{format_id}" \
       --annotations "~{basename(annot_vcf_file)}" \
-      "~{filebase}.pgt.bcf" | \
+      --columns "FMT/~{format_id}" \
+      --remove ID,QUAL,FILTER,INFO,^FMT/GT \
+      "~{input_vcf_file}" | \
     bcftools +extendFMT \
       --no-version \
       --output-type b \
       --format "~{format_id}" \
       --phase \
       --dist ~{dist} | \
-    tee "~{filebase}.pgt.~{ext_string}.bcf" | \
-    bcftools index --force --output "~{filebase}.pgt.~{ext_string}.bcf.csi"
-    rm "~{filebase}.pgt.bcf" "~{filebase}.pgt.bcf.csi"
+    tee "~{filebase}.~{ext_string}.pgt.bcf" | \
+    bcftools index --force --output "~{filebase}.~{ext_string}.pgt.bcf.csi"
     bcftools annotate \
       --no-version \
       --output-type b \
-      --annotations "~{filebase}.pgt.~{ext_string}.bcf" \
+      --annotations "~{filebase}.~{ext_string}.pgt.bcf" \
       --columns "FMT/~{format_id}" \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
-      "~{basename(vcf_file)}" | \
+      "~{input_vcf_file}" | \
     tee "~{filebase}.~{ext_string}.bcf" | \
     bcftools index --force --output "~{filebase}.~{ext_string}.bcf.csi"
-    rm "~{filebase}.pgt.~{ext_string}.bcf" "~{filebase}.pgt.~{ext_string}.bcf.csi"
-    rm "~{basename(vcf_file)}"
-    rm "~{basename(vcf_idx)}"
+    rm "~{filebase}.~{ext_string}.pgt.bcf" "~{filebase}.~{ext_string}.pgt.bcf.csi"
+    rm "~{input_vcf_file}"
+    rm "~{input_vcf_idx}"
     rm "~{basename(annot_vcf_file)}"
     rm "~{basename(annot_vcf_idx)}"
   >>>

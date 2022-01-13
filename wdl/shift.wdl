@@ -1,15 +1,15 @@
 version development
 
-## Copyright (c) 2021 Giulio Genovese
+## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2021-10-15
+## Version 2022-01-12
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs allelic shift imbalance analysis in a given region
 ##
 ## Cromwell version support
-## - Successfully tested on v70
+## - Successfully tested on v73
 ##
 ## Distributed under terms of the MIT License
 
@@ -24,6 +24,7 @@ struct Reference {
 workflow shift {
   input {
     String sample_set_id
+    File? keep_samples_file
     File? remove_samples_file
     File pheno_tsv_file
     String as_id = "AS"
@@ -34,16 +35,16 @@ workflow shift {
     String? chr_prefix
     File? cyto_file
 
-    String? data_path
-    File batch_tsv_file # batch_id path chr1_imp_vcf chr1_imp_vcf_index chr2_imp_vcf chr2_imp_vcf_index ...
+    File impute_tsv_file # batch_id path chr1_imp_vcf chr1_imp_vcf_index chr2_imp_vcf chr2_imp_vcf_index ...
+    String? impute_data_path
     Boolean fisher_exact = true
     Boolean drop_genotypes = true
     Boolean phred_score = true
     Boolean plot = true
     String basic_bash_docker = "debian:stable-slim"
     String docker_repository = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.13-20211015"
-    String r_mocha_docker = "r_mocha:1.13-20211015"
+    String bcftools_docker = "bcftools:1.14-20220112"
+    String r_mocha_docker = "r_mocha:1.14-20220112"
   }
 
   String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
@@ -70,37 +71,41 @@ workflow shift {
   }
 
   # read table with batches information (scatter could be avoided if there was a tail() function)
-  Array[Array[String]] batch_tsv = read_tsv(batch_tsv_file)
-  Int n_batches = length(batch_tsv)-1
-  scatter (idx in range(n_batches)) { Array[String] batch_tsv_rows = batch_tsv[(idx+1)] }
-  Map[String, Array[String]] batch_tbl = as_map(zip(batch_tsv[0], transpose(batch_tsv_rows)))
+  Array[Array[String]] impute_tsv = read_tsv(impute_tsv_file)
+  Int n_batches = length(impute_tsv)-1
+  scatter (idx in range(n_batches)) { Array[String] impute_tsv_rows = impute_tsv[(idx+1)] }
+  Map[String, Array[String]] impute_tbl = as_map(zip(impute_tsv[0], transpose(impute_tsv_rows)))
 
   # compute data paths for each batch, if available (scatter could be avoided if there was a contains_key() function)
-  scatter (key in keys(batch_tbl)) { Boolean? is_key_equal_path = if key == "path" then true else None }
+  scatter (key in keys(impute_tbl)) { Boolean? is_key_equal_path = if key == "path" then true else None }
   scatter (idx in range(n_batches)) {
-    String data_paths = select_first([data_path, if length(select_all(is_key_equal_path))>0 then batch_tbl["path"][idx] else ""])
-    String data_paths_with_sep = data_paths + (if data_paths == "" || sub(data_paths, "/$", "") != data_paths then "" else "/")
+    String impute_data_paths = select_first([impute_data_path, if length(select_all(is_key_equal_path))>0 then impute_tbl["path"][idx] else ""])
+    String impute_data_paths_with_sep = impute_data_paths + (if impute_data_paths == "" || sub(impute_data_paths, "/$", "") != impute_data_paths then "" else "/")
   }
 
   call lst_header { input: pheno_tsv_file = pheno_tsv_file, docker = basic_bash_docker }
   # compute phenotype regions to test
-  scatter (pheno in lst_header.phenos) {
-    String region_name = sub(pheno, "_.*$", "")
+  scatter (idx in range(length(lst_header.phenos))) {
+    String region_name = sub(lst_header.phenos[idx], "_.*$", "")
     String chr_string = sub(sub(region_name, "[pq]*$", ""), "Y", "X")
-    Int chr_idx = sub(chr_string, "^X$", "23")
-    String arm = sub(region_name, "^[0-9XY]*", "")
-    String pheno_regions = ref.chr_prefix + chr_string + if arm == "p" then ":1-" + ref.pcen[(chr_idx - 1)] else if arm == "q" then ":" + ref.qcen[(chr_idx - 1)] + "-" + ref.len[(chr_idx - 1)] else ""
+    if (sub(chr_string, "[0-9X]+", "") == "") {
+      Int pheno_idx = idx
+      Int chr_idx = sub(chr_string, "^X$", "23")
+      String arm = sub(region_name, "^[0-9XY]*", "")
+      String pheno_regions = ref.chr_prefix + chr_string + if arm == "p" then ":1-" + ref.pcen[(chr_idx - 1)] else if arm == "q" then ":" + ref.qcen[(chr_idx - 1)] + "-" + ref.len[(chr_idx - 1)] else ""
+    }
   }
 
   # scatter target genotypes
-  scatter (p in cross(range(n_batches), range(length(lst_header.phenos)))) {
+  scatter (p in cross(range(n_batches), select_all(pheno_idx))) {
     String cross_idx = p.right
     call vcf_summary {
       input:
-        vcf_file = data_paths_with_sep[p.left] + batch_tbl[("chr" + chr_string[p.right] + "_imp_vcf")][p.left],
-        vcf_idx = data_paths_with_sep[p.left] + batch_tbl[("chr" + chr_string[p.right] + "_imp_vcf_index")][p.left],
+        vcf_file = impute_data_paths_with_sep[p.left] + impute_tbl[("chr" + chr_string[p.right] + "_imp_vcf")][p.left],
+        vcf_idx = impute_data_paths_with_sep[p.left] + impute_tbl[("chr" + chr_string[p.right] + "_imp_vcf_index")][p.left],
         pheno_name = lst_header.phenos[p.right],
-        region = pheno_regions[p.right],
+        region = select_first([pheno_regions[p.right]]),
+        keep_samples_file = keep_samples_file,
         remove_samples_file = remove_samples_file,
         pheno_tsv_file = pheno_tsv_file,
         fisher_exact = fisher_exact,
@@ -111,7 +116,7 @@ workflow shift {
     }
   }
 
-  scatter (idx in range(length(lst_header.phenos))) {
+  scatter (idx in select_all(pheno_idx)) {
     Map[Int, Array[File]] idx2vcf_files = collect_by_key(zip(cross_idx, vcf_summary.as_vcf_file))
     Map[Int, Array[File]] idx2vcf_idxs = collect_by_key(zip(cross_idx, vcf_summary.as_vcf_idx))
     call vcf_merge {
@@ -127,11 +132,11 @@ workflow shift {
     }
 
     if (plot) {
-      call shift_plot {
+      call assoc_plot {
         input:
           vcf_file = vcf_merge.as_vcf_file,
           vcf_idx = vcf_merge.as_vcf_idx,
-          region = pheno_regions[idx],
+          region = select_first([pheno_regions[idx]]),
           cyto_file = ref.cyto_file,
           filebase = sample_set_id + "." + lst_header.phenos[idx],
           docker = docker_repository_with_sep + r_mocha_docker
@@ -142,7 +147,13 @@ workflow shift {
   output {
     Array[File] vcf_files = vcf_merge.as_vcf_file
     Array[File] vcf_idxs = vcf_merge.as_vcf_idx
-    Array[File?] png_files = shift_plot.png_file
+    Array[File]? png_files = if plot then select_all(assoc_plot.png_file) else None
+  }
+
+  meta {
+    author: "Giulio Genovese"
+    email: "giulio.genovese@gmail.com"
+    description: "See the [MoChA](https://github.com/freeseek/mocha) website for more information"
   }
 }
 
@@ -180,13 +191,14 @@ task lst_header {
   }
 }
 
-# for this task BCFtools 1.14 is needed https://github.com/samtools/bcftools/issues/1566
+# the command requires BCFtools 1.14 due to bug https://github.com/samtools/bcftools/issues/1566
 task vcf_summary {
   input {
     File vcf_file
     File vcf_idx
     String pheno_name
     String region
+    File? keep_samples_file
     File? remove_samples_file
     File pheno_tsv_file
     Boolean fisher_exact
@@ -208,7 +220,7 @@ task vcf_summary {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" select_all([vcf_file, vcf_idx, remove_samples_file, pheno_tsv_file])}" | \
+    echo "~{sep="\n" select_all([vcf_file, vcf_idx, keep_samples_file, remove_samples_file, pheno_tsv_file])}" | \
       tr '\n' '\0' | xargs -0 mv -t .
     ~{if fisher_exact then
       "awk -F\"\\t\" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}\n" +
@@ -222,6 +234,13 @@ task vcf_summary {
       --regions "~{region}" \
       --remove ID,QUAL,FILTER,INFO,^FMT/GT,FMT/~{as_id} \
       "~{basename(vcf_file)}" | \
+    ~{if defined(keep_samples_file) then
+      "bcftools view \\\n" +
+      "  --no-version \\\n" +
+      "  --output-type u \\\n" +
+      "  --samples-file \"" + basename(select_first([keep_samples_file])) + "\" \\\n" +
+      "  --force-samples |"
+      else ""} \
     ~{if defined(remove_samples_file) then
       "bcftools view \\\n" +
       "  --no-version \\\n" +
@@ -247,7 +266,7 @@ task vcf_summary {
     tee "~{filebase}.~{ext_string}.bcf" | \
     bcftools index --force --output "~{filebase}.~{ext_string}.bcf.csi"
     rm~{if fisher_exact then " \"" + filebase + ".controls.lines\"" else ""} "~{filebase}.cases.lines"
-    echo "~{sep="\n" select_all([vcf_file, vcf_idx, remove_samples_file, pheno_tsv_file])}" | \
+    echo "~{sep="\n" select_all([vcf_file, vcf_idx, keep_samples_file, remove_samples_file, pheno_tsv_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
 
@@ -331,7 +350,7 @@ task vcf_merge {
   }
 }
 
-task shift_plot {
+task assoc_plot {
   input {
     File vcf_file
     File vcf_idx
@@ -355,7 +374,7 @@ task shift_plot {
     mv "~{vcf_file}" .
     mv "~{vcf_idx}" .
     ~{if defined(cyto_file) then "mv \"" + select_first([cyto_file]) + "\" ." else ""}
-    shift_plot.R \
+    assoc_plot.R \
       ~{if defined(cyto_file) then "--cytoband \"" + basename(select_first([cyto_file])) + "\"" else ""} \
       --vcf "~{basename(vcf_file)}" \
       --region ~{region} \

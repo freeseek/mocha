@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2021 Giulio Genovese
+#  Copyright (C) 2017-2022 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-summary_plot_version <- '2021-10-15'
+summary_plot_version <- '2022-01-12'
 
 library(optparse)
 library(ggplot2)
@@ -37,8 +37,8 @@ parser <- add_option(parser, c('--calls'), type = 'character', help = 'input MoC
 parser <- add_option(parser, c('--call-rate-thr'), type = 'double', default = 0.97, help = 'minimum call rate threshold [0.97]', metavar = '<float>')
 parser <- add_option(parser, c('--baf-auto-thr'), type = 'double', default = 0.03, help = 'maximum BAF autocorrelation threshold [0.03]', metavar = '<float>')
 parser <- add_option(parser, c('--pdf'), type = 'character', help = 'output PDF file', metavar = '<file.pdf>')
-parser <- add_option(parser, c('--width'), type = 'integer', default = 7, help = 'inches width of the output file [7]', metavar = '<integer>')
-parser <- add_option(parser, c('--height'), type = 'integer', default = 7, help = 'inches height of the output file [7]', metavar = '<integer>')
+parser <- add_option(parser, c('--width'), type = 'double', default = 7.0, help = 'inches width of the output file [7.0]', metavar = '<float>')
+parser <- add_option(parser, c('--height'), type = 'double', default = 7.0, help = 'inches height of the output file [7.0]', metavar = '<float>')
 parser <- add_option(parser, c('--fontsize'), type = 'integer', default = 16, help = 'font size [16]', metavar = '<integer>')
 args <- parse_args(parser, commandArgs(trailingOnly = TRUE), convert_hyphens_to_underscores = TRUE)
 
@@ -114,7 +114,7 @@ p <- ggplot(df_stats, aes(x = 1 - call_rate, y = baf_auto, color = computed_gend
   geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_log10('1 - call rate') +
   scale_y_continuous('BAF auto-correlation') +
-  scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'U' = 'Undetermined')) +
+  scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'K' = 'orange', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'K' = 'Klinefelter', 'U' = 'Undetermined')) +
   theme_bw(base_size = args$fontsize) +
   theme(legend.position = 'bottom', legend.box = 'horizontal')
 print(p)
@@ -124,7 +124,7 @@ p <- ggplot(df_stats, aes(x = x_nonpar_adj_lrr_median, y = y_nonpar_adj_lrr_medi
   geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_continuous('X nonPAR median LRR (autosome corrected)') +
   scale_y_continuous('Y nonPAR median LRR (autosome corrected)') +
-  scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'U' = 'Undetermined')) +
+  scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'K' = 'orange', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'K' = 'Klinefelter', 'U' = 'Undetermined')) +
   theme_bw(base_size = args$fontsize) +
   theme(legend.position = 'bottom', legend.box = 'horizontal')
 print(p)
@@ -138,7 +138,7 @@ p <- ggplot(df_stats, aes_string(x = col_x, y = col_y, color = 'computed_gender'
   geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_continuous(lbl_x) +
   scale_y_continuous(lbl_y) +
-  scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'U' = 'Undetermined')) +
+  scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'K' = 'orange', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'K' = 'Klinefelter', 'U' = 'Undetermined')) +
   theme_bw(base_size = args$fontsize) +
   theme(legend.position = 'bottom', legend.box = 'horizontal')
 print(p)

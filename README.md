@@ -76,7 +76,7 @@ Output Options:
 HMM Options:
         --bdev-LRR-BAF <list>       comma separated list of inverse BAF deviations for LRR+BAF model [-2.0,-4.0,-6.0,10.0,6.0,4.0]
         --bdev-BAF-phase <list>     comma separated list of inverse BAF deviations for BAF+phase model
-                                    [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0]
+                                    [6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,130.0,210.0,340.0,550.0]
         --min-dist <int>            minimum base pair distance between consecutive sites for WGS data [400]
         --adjust-BAF-LRR <int>      minimum number of genotypes for a cluster to median adjust BAF and LRR (-1 for no adjustment) [5]
         --regress-BAF-LRR <int>     minimum number of genotypes for a cluster to regress BAF against LRR (-1 for no regression) [15]
@@ -91,6 +91,8 @@ HMM Options:
         --short-arm-chrs <list>     list of chromosomes with short arms [13,14,15,21,22,chr13,chr14,chr15,chr21,chr22]
         --use-short-arms            use variants in short arms [FALSE]
         --use-centromeres           use variants in centromeres [FALSE]
+        --use-males-xtr             use variants in XTR region for males [FALSE]
+        --use-males-par2            use variants in PAR2 region for males [FALSE]
         --use-no-rules-chrs         use chromosomes without centromere rules  [FALSE]
         --LRR-weight <float>        relative contribution from LRR for LRR+BAF  model [0.2]
         --LRR-hap2dip <float>       difference between LRR for haploid and diploid [0.45]
@@ -119,7 +121,7 @@ Preparation steps
 mkdir -p $HOME/bin $HOME/GRCh3[78] && cd /tmp
 ```
 
-We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a>. However, notice that you will require BCFtools version 1.11 or newer
+We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a>. However, notice that you will require BCFtools version 1.11 or newer and HTSlib 1.14 should be avoided due to a serious <a href="https://github.com/samtools/htslib/issues/1362">bug</a
 
 Download latest version of <a href="https://github.com/samtools/htslib">HTSlib</a> and <a href="https://github.com/samtools/bcftools">BCFtools</a> (if not downloaded already)
 ```
@@ -139,7 +141,7 @@ cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 -
 cd bcftools && make && cd ..
 /bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,extendFMT,score}.so} $HOME/bin/
 ```
-Notice that you will need some functionalities missing from the base version of BCFtools to run the pipeline
+It is important to avoid the HTSlib 1.14 release as it contains a <a href="https://github.com/samtools/htslib/issues/1362">bug</a> that interferes with VCF seeking in the MoChA plugin
 
 Make sure the directory with the plugins is available to BCFtools
 ```
@@ -588,8 +590,8 @@ computed_gender - inferred sample gender
      beg_XXXXXX - beginning base pair position for the call (according to XXXXXX genome reference)
      end_XXXXXX - end base pair position for the call (according to XXXXXX genome reference)
          length - base pair length of the call
-          p_arm - whether the call extends to the small arm and whether it reaches the telomere
-          q_arm - whether the call extends to the long arm and whether it reaches the telomere
+          p_arm - whether the call extends to the small arm and whether it reaches the telomere or just the centromere
+          q_arm - whether the call extends to the long arm and whether it reaches the telomere or just the centromere
         n_sites - number of sites used for the call
          n_hets - number of heterozygous sites used for the call
        n50_gets - N50 value for consecutive heterozygous sites distances
@@ -646,9 +648,7 @@ awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
 
 Generate list of samples with mosaic loss of chromosome Y (mLOY)
 ```
-awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-  NR>1 {chrom=$(f["chrom"]); sub("^chr", "", chrom);}
-  NR>1 && $(f["computed_gender"])=="M" && chrom=="X" &&
+awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i} NR>1 && $(f["computed_gender"])=="M" && $(f["chrom"])~"X" &&
   $(f["length"])>2e6 && $(f["rel_cov"])<2.5 {print $(f["sample_id"])}' $pfx.calls.tsv > $pfx.Y_loss.lines
 ```
 Requiring `rel_cov<2.5` should make sure to filter out XXY and XYY samples. This should generate a mLOY set similarly to how it was done in the <a href="http://doi.org/10.1038/s41598-020-59963-8">UK biboank</a>. Notice that this inference strategy is based on BAF imbalances over the PAR1 region which allows detection of loss-of-Y at much lower cell fractions that by using LRR statistics over the Y nonPAR region
@@ -656,9 +656,14 @@ Requiring `rel_cov<2.5` should make sure to filter out XXY and XYY samples. This
 Generate list of samples with mosaic loss of chromosome X (mLOX)
 ```
 awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-  NR>1 {chrom=$(f["chrom"]); sub("^chr", "", chrom)}
-  NR>1 && $(f["computed_gender"])=="F" && chrom=="X" &&
+  NR>1 && ($(f["computed_gender"])=="F" || $(f["computed_gender"])=="K") && $(f["chrom"])~"X" &&
   $(f["length"])>1e8 && $(f["rel_cov"])<2.5 {print $(f["sample_id"])}' $pfx.calls.tsv > $pfx.X_loss.lines
+awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR>1 && ($(f["computed_gender"])=="F" || $(f["computed_gender"])=="K") && $(f["chrom"])~"X" &&
+  $(f["length"])>1e8 && $(f["bdev"])>.01 && $(f["rel_cov"])<2.5 {print $(f["sample_id"])}' $pfx.calls.tsv > $pfx.X_loss_high.lines
+awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR>1 && ($(f["computed_gender"])=="F" || $(f["computed_gender"])=="K") && $(f["chrom"])~"X" &&
+  $(f["length"])>1e8 && $(f["bdev"])<=.01 && $(f["rel_cov"])<2.5 {print $(f["sample_id"])}' $pfx.calls.tsv > $pfx.X_loss_low.lines
 ```
 Requiring `rel_cov<2.5` should make sure to filter out XXY and XXX samples. Notice that we do not require that the event be identified as a loss by MoChA. MoChA determines the event type based on LRR median statistics and as we have observed that the LRR on chromosome X is quite noisy, for low cell fraction chromosome X calls determinining the type of event based on LRR is not reliable. Notice that this inference strategy is based on BAF imbalances over whole chromosome X which allows detection of loss-of-X at much lower cell fractions than by using LRR statistics over the X nonPAR region
 
@@ -675,6 +680,7 @@ awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i; print}
 
 Generate list of samples with mosaic autosomal alterations
 ```
+awk -F"\t" -v OFS="\t" 'NR==FNR && $3!="chrX" {x[$1]++} NR>FNR && $1 in x {print $1}' $pfx.mca.calls.tsv $pfx.stats.tsv > $pfx.auto.lines
 for chr in {1..12} {16..20}; do
   awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
     NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])=="T" && $(f["q_arm"])!="T" && $(f["rel_cov"])>1 {
@@ -684,6 +690,10 @@ for chr in {1..12} {16..20}; do
     NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])!="N" && $(f["rel_cov"])>1 {
     x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y>x) print $(f["sample_id"])}' \
     $pfx.mca.calls.tsv > $pfx.${chr}p_loss.lines
+  awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])=="T" && $(f["q_arm"])=="T" && $(f["rel_cov"])>1 {
+    x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y<-x) print $(f["sample_id"])}' \
+    $pfx.mca.calls.tsv > $pfx.${chr}_gain.lines
 done
 for chr in {1..22}; do
   awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
@@ -695,15 +705,9 @@ for chr in {1..22}; do
     x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y>x) print $(f["sample_id"])}' \
     $pfx.mca.calls.tsv > $pfx.${chr}q_loss.lines
 done
-for chr in {1..12} {16..20}; do
-  awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])=="T" && $(f["q_arm"])=="T" && $(f["rel_cov"])>1 {
-    x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y<-x) print $(f["sample_id"])}' \
-    $pfx.mca.calls.tsv > $pfx.${chr}_gain.lines
-done
 for chr in 13 14 15 21 22; do
   awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
-    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["q_arm"])=="T" && $(f["rel_cov"])>1 {
+    NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])=="C" && $(f["q_arm"])=="T" && $(f["rel_cov"])>1 {
     x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y<-x) print $(f["sample_id"])}' \
     $pfx.mca.calls.tsv > $pfx.${chr}_gain.lines
 done
@@ -713,16 +717,18 @@ cat $pfx.{{3,4,6,8,11,17,18}p_loss,{1,6,11,13,14,16,17,22}q_loss,13q_cnloh,{2,3,
 
 Generate phenotype table with mosaic loss of chromosome X and Y
 ```
-(echo -e "sample_id\tX_loss\tY_loss"
+(echo -e "sample_id\tY_loss\tX_loss\tX_loss_high\tX_loss_low"
 awk -F"\t" -v OFS="\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i} NR>1 {print $(f["sample_id"]),$(f["computed_gender"])}' $pfx.stats.tsv | \
-  awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]=1} NR>FNR {if ($2=="F") phe=0+x[$1]; else phe="NA"; print $1,$2,phe}' $pfx.X_loss.lines - | \
-  awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]=1} NR>FNR {if ($2=="M") phe=0+x[$1]; else phe="NA"; print $1,$3,phe}' $pfx.Y_loss.lines -) \
-  > $pfx.pheno.tsv
+  awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]=1} NR>FNR {if ($2=="M") phe=0+x[$1]; else phe="NA"; print $0,phe}' $pfx.Y_loss.lines - | \
+  awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]=1} NR>FNR {if ($2=="F" || $2=="K") phe=0+x[$1]; else phe="NA"; print $0,phe}' $pfx.X_loss.lines - | \
+  awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]=1} NR>FNR {if ($2=="F" || $2=="K") phe=0+x[$1]; else phe="NA"; print $0,phe}' $pfx.X_loss_high.lines - | \
+  awk -F"\t" -v OFS="\t" 'NR==FNR {x[$1]=1} NR>FNR {if ($2=="F" || $2=="K") phe=0+x[$1]; else phe="NA"; print $0,phe}' $pfx.X_loss_low.lines - | \
+  cut -f1,3-) > $pfx.pheno.tsv
 ```
 
-Generate phenotype table with mosaic loss of chromosome X and Y
+Include other mosaic chromosomal alteration events in the phenotype table  
 ```
-for type in {{{1..12},{16..20}}p,{1..22}q}_{cnloh,loss} {1..22}_gain cll; do
+for type in auto cll {{{1..12},{16..20}}p,{1..22}q}_{cnloh,loss} {1..22}_gain; do
   n=$(cat $pfx.$type.lines | wc -l);
   if [ "$n" -gt 0 ]; then
     awk -F"\t" -v OFS="\t" -v type=$type 'NR==FNR {x[$1]=1}

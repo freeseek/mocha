@@ -1,20 +1,21 @@
 version development
 
-## Copyright (c) 2021 Giulio Genovese
+## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2021-10-20
+## Version 2022-01-12
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs association analyses with REGENIE and PLINK2
 ##
 ## Cromwell version support
-## - Successfully tested on v70
+## - Successfully tested on v73
 ##
 ## Distributed under terms of the MIT License
 
 struct Reference {
   File fasta_fai
+  File cyto_file
   Int n_chrs
   File genetic_map_file
   String pca_exclusion_regions
@@ -23,20 +24,24 @@ struct Reference {
 workflow assoc {
   input {
     String sample_set_id
+    String? sex_specific # male female
     Float max_win_size_cm_step2 = 20.0
     File sample_tsv_file
+    File? keep_samples_file
     File? remove_samples_file
     Int min_mac = 10
+    Float? min_info
     Float min_maf = 0.01
     File? covar_tsv_file
     File pheno_tsv_file
     String dosage_field = "DS"
-    String? sex_specific # male female
     String space_character = "_"
     Boolean binary = true
     Int min_case_count = 20
     Int min_sex_count = 20
     Int bsize = 500
+    Int max_vif = 2000
+    Float max_corr = 0.9999
     Boolean loocv = true
     String? regenie_step0_extra_args
     String? regenie_step1_extra_args
@@ -47,6 +52,7 @@ workflow assoc {
     Boolean pca = false
     Boolean step2 = true
     Boolean cis = false
+    Boolean plot = true
     Int pca_ndim = 20
     File? input_loco_lst
     String? input_loco_path
@@ -59,23 +65,28 @@ workflow assoc {
     Int? ref_n_chrs
     String? genetic_map_file
     String? pca_exclusion_regions
+    File? cyto_file
 
-    File? batch_step1_tsv_file # batch_id path pgt_vcf pgt_vcf_index
-    String? data_step1_path
-    File? batch_step2_tsv_file # batch_id path chr1_imp_vcf chr1_imp_vcf_index chr2_imp_vcf chr2_imp_vcf_index ...
-    String? data_step2_path
+    File? mocha_tsv_file # batch_id path pgt_vcf pgt_vcf_index
+    String? mocha_data_path
+    File? impute_tsv_file # batch_id path chr1_imp_vcf chr1_imp_vcf_index chr2_imp_vcf chr2_imp_vcf_index ...
+    String? impute_data_path
     String basic_bash_docker = "debian:stable-slim"
     String pandas_docker = "amancevice/pandas:slim"
     String docker_repository = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.13-20211015"
-    String regenie_docker = "regenie:1.13-20211015"
+    String bcftools_docker = "bcftools:1.14-20220112"
+    String regenie_docker = "regenie:1.14-20220112"
+    String r_mocha_docker = "r_mocha:1.14-20220112"
   }
 
   String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
 
+  String filebase = sub(sample_set_id, "[ \t]", "_") + if defined(sex_specific) then space_character + select_first([sex_specific]) else ""
+
   String ref_path_with_sep = select_first([ref_path, ""]) + if defined(ref_path) && select_first([ref_path]) == sub(select_first([ref_path]), "/$", "") then "/" else ""
   Reference ref = object {
     fasta_fai: ref_path_with_sep + select_first([ref_fasta_fai, if ref_name == "GRCh38" then "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai" else if ref_name == "GRCh37" then "human_g1k_v37.fasta.fai" else None]),
+    cyto_file: if defined(ref_path) || defined(cyto_file) then ref_path_with_sep + select_first([cyto_file, "cytoBand.txt.gz"]) else None,
     n_chrs: select_first([ref_n_chrs, 23]),
     genetic_map_file: ref_path_with_sep + select_first([genetic_map_file, if ref_name == "GRCh38" then "genetic_map_hg38_withX.txt.gz" else if ref_name == "GRCh37" then "genetic_map_hg19_withX.txt.gz" else None]),
     pca_exclusion_regions: select_first([pca_exclusion_regions, if ref_name == "GRCh38" then "5:43999898-52204166,6:24999772-33532223,8:8142478-12142491,11:44978449-57232526" else if ref_name == "GRCh37" then "5:44000000-51500000,6:25000000-33500000,8:8000000-12000000,11:45000000-57000000" else None]),
@@ -89,16 +100,17 @@ workflow assoc {
 
   call prune_file {
     input:
+      sex_specific = sex_specific,
       sample_tsv_file = sample_tsv_file,
-      pheno_tsv_file = pheno_tsv_file,
+      keep_samples_file = keep_samples_file,
       remove_samples_file = remove_samples_file,
       covar_tsv_file = covar_tsv_file,
-      sex_specific = sex_specific,
+      pheno_tsv_file = pheno_tsv_file,
       space_character = space_character,
       binary = binary,
       min_case_count = min_case_count,
       min_sex_count = min_sex_count,
-      filebase = sample_set_id,
+      filebase = filebase,
       docker = basic_bash_docker
   }
 
@@ -116,23 +128,25 @@ workflow assoc {
     }
 
     # read table with batches information (scatter could be avoided if there was a tail() function)
-    Array[Array[String]] batch_step1_tsv = read_tsv(select_first([batch_step1_tsv_file]))
-    Int n_batches_step1 = length(batch_step1_tsv)-1
-    scatter (idx in range(n_batches_step1)) { Array[String] batch_step1_tsv_rows = batch_step1_tsv[(idx+1)] }
-    Map[String, Array[String]] batch_step1_tbl = as_map(zip(batch_step1_tsv[0], transpose(batch_step1_tsv_rows)))
+    Array[Array[String]] mocha_tsv = read_tsv(select_first([mocha_tsv_file]))
+    Int n_mocha_batches = length(mocha_tsv)-1
+    scatter (idx in range(n_mocha_batches)) { Array[String] mocha_tsv_rows = mocha_tsv[(idx+1)] }
+    Map[String, Array[String]] mocha_tbl = as_map(zip(mocha_tsv[0], transpose(mocha_tsv_rows)))
 
     # compute data paths for each batch, if available (scatter could be avoided if there was a contains_key() function)
-    scatter (key in keys(batch_step1_tbl)) { Boolean? is_key_step1_equal_path = if key == "path" then true else None }
-    scatter (idx in range(n_batches_step1)) {
-      String data_step1_paths = select_first([data_step1_path, if length(select_all(is_key_step1_equal_path))>0 then batch_step1_tbl["path"][idx] else ""])
-      String data_step1_paths_with_sep = data_step1_paths + (if data_step1_paths == "" || sub(data_step1_paths, "/$", "") != data_step1_paths then "" else "/")
+    scatter (key in keys(mocha_tbl)) { Boolean? is_key_mocha_equal_path = if key == "path" then true else None }
+    scatter (idx in range(n_mocha_batches)) {
+      String mocha_data_paths = select_first([mocha_data_path, if length(select_all(is_key_mocha_equal_path))>0 then mocha_tbl["path"][idx] else ""])
+      String mocha_data_paths_with_sep = mocha_data_paths + (if mocha_data_paths == "" || sub(mocha_data_paths, "/$", "") != mocha_data_paths then "" else "/")
     }
 
-    scatter (idx in range(n_batches_step1)) {
+    scatter (idx in range(n_mocha_batches)) {
       call vcf_scatter as pgt_scatter {
         input:
-          vcf_file = data_step1_paths_with_sep[idx] + batch_step1_tbl["pgt_vcf"][idx],
+          vcf_file = mocha_data_paths_with_sep[idx] + mocha_tbl["pgt_vcf"][idx],
           intervals_bed = ref_scatter_step1.intervals_bed,
+          keep_samples_file = prune_file.keep,
+          remove_samples_file = remove_samples_file,
           docker = docker_repository_with_sep + bcftools_docker
       }
     }
@@ -143,7 +157,7 @@ workflow assoc {
         call vcf_merge as pgt_merge {
           input:
             vcf_files = interval_slices[idx],
-            filebase = sample_set_id + "." + idx,
+            filebase = filebase + "." + idx,
             docker = docker_repository_with_sep + bcftools_docker
         }
       }
@@ -152,8 +166,6 @@ workflow assoc {
         input:
           vcf_file = select_first([pgt_merge.vcf_file, interval_slices[idx][0]]),
           sample_tsv_file = sample_tsv_file,
-          remove_samples_file = remove_samples_file,
-          sex_specific = sex_specific,
           space_character = space_character,
           min_mac = min_mac,
           min_maf = min_maf,
@@ -178,7 +190,7 @@ workflow assoc {
             bsize = bsize,
             loocv = loocv,
             regenie_step0_extra_args = regenie_step0_extra_args,
-            filebase = sample_set_id,
+            filebase = filebase,
             docker = docker_repository_with_sep + regenie_docker
         }
       }
@@ -189,7 +201,7 @@ workflow assoc {
         bed_files = pgt_prune.bed_file,
         bim_files = pgt_prune.bim_file,
         fam_files = pgt_prune.fam_file,
-        filebase = sample_set_id + ".prune",
+        filebase = filebase + ".prune",
         docker = basic_bash_docker
     }
 
@@ -203,7 +215,7 @@ workflow assoc {
           bim_file = pgt_concat.bim_file,
           fam_file = pgt_concat.fam_file,
           exclusion_regions = ref.pca_exclusion_regions,
-          filebase = sample_set_id,
+          filebase = filebase,
           docker = docker_repository_with_sep + regenie_docker
       }
     }
@@ -227,7 +239,7 @@ workflow assoc {
             bsize = bsize,
             loocv = loocv,
             regenie_step1_extra_args = regenie_step1_extra_args,
-            filebase = sample_set_id,
+            filebase = filebase + space_character + prune_file.pheno_names[idx],
             docker = docker_repository_with_sep + regenie_docker
         }
         String? loco_lines = if regenie_step1.loco_line == "" then None else regenie_step1.loco_line
@@ -238,9 +250,9 @@ workflow assoc {
         }
       }
       # unnecessary task for compatibility with Terra https://support.terra.bio/hc/en-us/community/posts/360071465631-write-lines-write-map-write-tsv-write-json-fail-when-run-in-a-workflow-rather-than-in-a-task
-      call serialize_lines as loco_lst { input: lines = select_all(loco_lines), filename = sample_set_id + "_pred.list", docker = basic_bash_docker }
+      call serialize_lines as loco_lst { input: lines = select_all(loco_lines), filename = filebase + "_pred.list", docker = basic_bash_docker }
       if (binary) {
-        call serialize_lines as firth_lst { input: lines = select_all(firth_lines), filename = sample_set_id + "_firth.list", docker = basic_bash_docker }
+        call serialize_lines as firth_lst { input: lines = select_all(firth_lines), filename = filebase + "_firth.list", docker = basic_bash_docker }
       }
     }
   }
@@ -277,25 +289,27 @@ workflow assoc {
     Map[String, Array[Int]] chr_map = collect_by_key(zip(intervals_tbl[0], range(length(intervals_tbl[0]))))
 
     # read table with batches information (scatter could be avoided if there was a tail() function)
-    Array[Array[String]] batch_step2_tsv = read_tsv(select_first([batch_step2_tsv_file]))
-    Int n_batches_step2 = length(batch_step2_tsv)-1
-    scatter (idx in range(n_batches_step2)) { Array[String] batch_step2_tsv_rows = batch_step2_tsv[(idx+1)] }
-    Map[String, Array[String]] batch_step2_tbl = as_map(zip(batch_step2_tsv[0], transpose(batch_step2_tsv_rows)))
+    Array[Array[String]] impute_tsv = read_tsv(select_first([impute_tsv_file]))
+    Int n_impute_batches = length(impute_tsv)-1
+    scatter (idx in range(n_impute_batches)) { Array[String] impute_tsv_rows = impute_tsv[(idx+1)] }
+    Map[String, Array[String]] impute_tbl = as_map(zip(impute_tsv[0], transpose(impute_tsv_rows)))
 
     # compute data paths for each batch, if available (scatter could be avoided if there was a contains_key() function)
-    scatter (key in keys(batch_step2_tbl)) { Boolean? is_key_step2_equal_path = if key == "path" then true else None }
-    scatter (idx in range(n_batches_step2)) {
-      String data_step2_paths = select_first([data_step2_path, if length(select_all(is_key_step2_equal_path))>0 then batch_step2_tbl["path"][idx] else ""])
-      String data_step2_paths_with_sep = data_step2_paths + (if data_step2_paths == "" || sub(data_step2_paths, "/$", "") != data_step2_paths then "" else "/")
+    scatter (key in keys(impute_tbl)) { Boolean? is_key_impute_equal_path = if key == "path" then true else None }
+    scatter (idx in range(n_impute_batches)) {
+      String impute_data_paths = select_first([impute_data_path, if length(select_all(is_key_impute_equal_path))>0 then impute_tbl["path"][idx] else ""])
+      String impute_data_paths_with_sep = impute_data_paths + (if impute_data_paths == "" || sub(impute_data_paths, "/$", "") != impute_data_paths then "" else "/")
     }
 
-    scatter (p in cross(range(n_batches_step2), range(ref.n_chrs))) {
-      File imp_vcf_file = data_step2_paths_with_sep[p.left] + batch_step2_tbl[("chr" + sub(chrs[p.right], "^chr", "") + "_imp_vcf")][p.left]
+    scatter (p in cross(range(n_impute_batches), range(ref.n_chrs))) {
+      File imp_vcf_file = impute_data_paths_with_sep[p.left] + impute_tbl[("chr" + sub(chrs[p.right], "^chr", "") + "_imp_vcf")][p.left]
       if (length(chr_map[(chrs[p.right])]) > 1) {
         call vcf_scatter {
           input:
             vcf_file = imp_vcf_file,
             intervals_bed = ref_scatter_step2.intervals_bed,
+            keep_samples_file = prune_file.keep,
+            remove_samples_file = remove_samples_file,
             chr = chrs[p.right],
             dosage_field = dosage_field,
             docker = docker_repository_with_sep + bcftools_docker
@@ -323,7 +337,7 @@ workflow assoc {
         call vcf_merge {
           input:
             vcf_files = matrix_vcf_files[idx],
-            filebase = sample_set_id + "." + idx,
+            filebase = filebase + "." + idx,
             docker = docker_repository_with_sep + bcftools_docker
         }
       }
@@ -332,10 +346,8 @@ workflow assoc {
         input:
           vcf_file = select_first([vcf_merge.vcf_file, matrix_vcf_files[idx][0]]),
           sample_tsv_file = sample_tsv_file,
-          remove_samples_file = remove_samples_file,
           dosage_field = dosage_field,
           ref_name = ref_name,
-          sex_specific = sex_specific,
           space_character = space_character,
           docker = docker_repository_with_sep + regenie_docker
       }
@@ -350,9 +362,10 @@ workflow assoc {
             psam_file = vcf2pgen.psam_file,
             covar_file = prune_file.covar,
             pheno_file = prune_file.pheno,
-            suffix = select_first([regenie_suffix]), # https://github.com/broadinstitute/cromwell/issues/5549
+            regenie_suffix = select_first([regenie_suffix]), # https://github.com/broadinstitute/cromwell/issues/5549
             binary = binary,
             bsize = bsize,
+            min_info = min_info,
             regenie_step2_extra_args = regenie_step2_extra_args,
             loco_lst = select_first([loco_lst.file, input_loco_lst]),
             loco_files = select_first([loco_files, input_loco_files]),
@@ -369,8 +382,17 @@ workflow assoc {
         call assoc_concat as regenie_concat {
           input:
             assoc_files = regenie_matrix_files[idx],
-            filebase = sample_set_id + "_" + select_first([regenie_suffix])[idx],
+            filebase = filebase + "." + select_first([regenie_suffix])[idx],
             docker = docker_repository_with_sep + bcftools_docker
+        }
+        if (plot && regenie_concat.has_data) {
+          call assoc_plot as regenie_plot {
+            input:
+              assoc_file = regenie_concat.file,
+              genome = ref_name,
+              filebase = basename(filebase + "." + select_first([regenie_suffix])[idx], ".gz"),
+              docker = docker_repository_with_sep + r_mocha_docker
+          }
         }
       }
     }
@@ -401,10 +423,12 @@ workflow assoc {
             pgen_file = vcf2pgen.pgen_file[p.right],
             pvar_file = vcf2pgen.pvar_file[p.right],
             psam_file = vcf2pgen.psam_file[p.right],
+            loco_file =  if defined(loco_files) || defined(input_loco_files) then select_first([loco_files, input_loco_files])[p.left] else None,
             covar_file = prune_file.covar,
             pheno_file = prune_file.pheno,
             binary = binary,
-            loco_file =  if defined(loco_files) || defined(input_loco_files) then select_first([loco_files, input_loco_files])[p.left] else None,
+            max_vif = max_vif,
+            max_corr = max_corr,
             plink_extra_args = plink_extra_args,
             docker = docker_repository_with_sep + regenie_docker
         }
@@ -416,8 +440,17 @@ workflow assoc {
           input:
             assoc_files = idx2assoc_files[idx],
             zst = true,
-            filebase = sample_set_id + "_" + plink_pheno_names[idx] + ".glm." + (if binary then "logistic.hybrid" else "linear") + ".gz",
+            filebase = filebase + "." + plink_pheno_names[idx] + ".glm." + (if binary then "logistic.hybrid" else "linear") + ".gz",
             docker = docker_repository_with_sep + regenie_docker
+        }
+        if (plot && plink_concat.has_data) {
+          call assoc_plot as plink_plot {
+            input:
+              assoc_file = plink_concat.file,
+              cyto_file = ref.cyto_file,
+              filebase = filebase + "." + plink_pheno_names[idx] + ".glm." + (if binary then "logistic.hybrid" else "linear"),
+              docker = docker_repository_with_sep + r_mocha_docker
+          }
         }
       }
     }
@@ -435,8 +468,20 @@ workflow assoc {
     Array[File]? firth_files = if defined(firth_file) then select_all(select_first([firth_file])) else None
     Array[File]? regenie_files = regenie_concat.file
     Array[File]? regenie_indexes = regenie_concat.index
+    Array[File]? regenie_png_files = if step2 && plot then select_all(select_first([regenie_plot.png_file])) else None
     Array[File]? plink_files = plink_concat.file
     Array[File]? plink_indexes = plink_concat.index
+    Array[File]? plink_png_files = if cis && plot then select_all(select_first([plink_plot.png_file])) else None
+    Array[File]? regenie_step0_logs = if step1 then select_all(select_first([regenie_step0.log_file])) else None
+    Array[File]? regenie_step1_logs = if step1 then select_all(select_first([regenie_step1.log_file])) else None
+    Array[File]? regenie_step2_logs = if step2 then select_all(select_first([regenie_step2.log_file])) else None
+    Array[File]? plink_logs = plink_glm.log_file
+  }
+
+  meta {
+    author: "Giulio Genovese"
+    email: "giulio.genovese@gmail.com"
+    description: "See the [MoChA](https://github.com/freeseek/mocha) website for more information"
   }
 }
 
@@ -476,11 +521,12 @@ task get_n {
 # use of !(a!=b) due to bug Cromwell team will not fix: https://github.com/broadinstitute/cromwell/issues/5602
 task prune_file {
   input {
+    String? sex_specific
     File sample_tsv_file
-    File pheno_tsv_file
+    File? keep_samples_file
     File? remove_samples_file
     File? covar_tsv_file
-    String? sex_specific
+    File pheno_tsv_file
     String space_character
     Boolean binary
     Int min_case_count
@@ -497,7 +543,7 @@ task prune_file {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" select_all([sample_tsv_file, pheno_tsv_file, remove_samples_file, covar_tsv_file])}" | \
+    echo "~{sep="\n" select_all([sample_tsv_file, keep_samples_file, remove_samples_file, covar_tsv_file, pheno_tsv_file])}" | \
       tr '\n' '\0' | xargs -0 mv -t .
     awk -F"\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
       NR>1 {sex=substr($(f["computed_gender"]),1,1); if (toupper(sex)=="M" || sex==1) printf "%s\t1\n",$(f["sample_id"])}' \
@@ -505,17 +551,22 @@ task prune_file {
     awk -F"\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
       NR>1 {sex=substr($(f["computed_gender"]),1,1); if (toupper(sex)=="F" || sex==2) printf "%s\t2\n",$(f["sample_id"])}' \
       "~{basename(sample_tsv_file)}" > "~{filebase}.female"
-    cat "~{filebase + "." + if defined(sex_specific) then select_first([sex_specific]) else "male\" \"" + filebase + ".female"}" | \
+    ~{if defined(sex_specific) || defined(keep_samples_file) then "cut -f1 \"" + filebase + "." +
+      (if defined(sex_specific) then select_first([sex_specific]) else "male\" \"" + filebase + ".female") + "\"" +
+      (if defined(keep_samples_file) then " | \\\n  awk -F\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && $1 in x' \"" + basename(select_first([keep_samples_file])) + "\" -" else "") +
+      (if defined(remove_samples_file) then " | \\\n  awk -F\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && !($1 in x)' \"" + basename(select_first([remove_samples_file])) + "\" -" else "") +
+      " > \"" + filebase + ".keep.lines\"\n"
+      else ""}cat "~{filebase + "." + if defined(sex_specific) then select_first([sex_specific]) else "male\" \"" + filebase + ".female"}" | \
       ~{if defined(remove_samples_file) then
-        "awk -F\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && !($1 in x)' \"" + basename(select_first([remove_samples_file])) + "\" - | \\\n"
+        "awk -F\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && !($1 in x)' \"" + basename(select_first([remove_samples_file])) + "\" - | \\\n  "
         else "" + if defined(covar_tsv_file) then
-        "awk -F\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && $1 in x' \"" + basename(select_first([covar_tsv_file])) + "\" - | \\\n"
+        "awk -F\"\\t\" 'NR==FNR {x[$1]++} NR>FNR && $1 in x' \"" + basename(select_first([covar_tsv_file])) + "\" - | \\\n  "
         else ""}awk -F"\t" 'NR==FNR {x[$1]++} NR>FNR && (FNR==1 || $1 in x)' - "~{basename(pheno_tsv_file)}" > "~{filebase}.tmp"
     cat "~{filebase}.male" "~{filebase}.female" | \
-      awk -F"\t" 'NR==FNR {sex[$1]=$2} NR>FRN && FNR==1 {for (i=2; i<=NF; i++) pheno[i] = $i}
+      awk -F"\t" 'NR==FNR {sex[$1]=$2} NR>FNR && FNR==1 {for (i=2; i<=NF; i++) pheno[i] = $i}
       NR>FNR && FNR>1 {for (i=2; i<=NF; i++) {if ($i==0) ctrls[i]++; if ($i==1) cases[i]++
       if (sex[$1]==1 && $i!="NA") males[i]++; if (sex[$1]==2 && $i!="NA") females[i]++}}
-      END {for (i in pheno); printf "%s\t%d\t%d\t%d\t%d\n",pheno[i],ctrls[i],cases[i],males[i],females[i]}' \
+      END {for (i in pheno) printf "%s\t%d\t%d\t%d\t%d\n",pheno[i],ctrls[i],cases[i],males[i],females[i]}' \
       - "~{filebase}.tmp" > "~{filebase}.cnt"
     awk -F"\t" 'NR==FNR ~{if binary then "&& $2>=" + min_case_count + " && $3>=" + min_case_count else ""} && $~{
       if defined(sex_specific) && !(select_first([sex_specific]) != "male") then "4"
@@ -525,20 +576,25 @@ task prune_file {
       else {gsub(" ","~{space_character}",$1); printf "0\t%s",$1} for (i=0; i<j; i++) printf "\t%s",$col[i]; printf "\n"}' \
       "~{filebase}.cnt" "~{filebase}.tmp" > "~{filebase}.phe"
     ~{if defined(covar_tsv_file) then "cat \"" + filebase + "." +
-      (if defined(sex_specific) then select_first([sex_specific]) else "male\" + \"" + filebase + ".female") + "\" | \\\n" +
-      "  awk -F\"\\t\" 'NR==FNR {sex[$1]=$2} NR>FNR {if (FNR==1) {col=\"sex\"; $1=\"FID\\tIID\"}\n" +
-      "  if (FNR>1) {col=sex[$1]; gsub(\" \",\"" + space_character + "\",$1); $1=\"0\\t\"$1} printf \"%s\\t%s\\n\",$0,col}' \\\n" +
+      (if defined(sex_specific) then select_first([sex_specific]) else "male\" \"" + filebase + ".female") + "\" | \\\n" +
+      "  awk -F\"\\t\" 'NR==FNR {sex[$1]=$2} NR>FNR && (FNR==1 || $1 in sex) {if (FNR==1) printf \"FID\\tIID" + (if defined(sex_specific) then "" else "\\tsex") + "\"\n" +
+      "  else {gsub(\" \",\"" + space_character + "\",$1); printf \"0\\t%s" + (if defined(sex_specific) then "" else "\\t%s") + "\",$1" + (if defined(sex_specific) then "" else ",sex[$1]") + "}\n" +
+      "  for (i=2; i<=NF; i++) printf \"\\t%s\",$i; printf \"\\n\"}' \\\n" +
       "  - \"" + basename(select_first([covar_tsv_file])) + "\" > \"" + filebase + ".cov\"\n"
+      else if !defined(sex_specific) then
+      "cat \"" + filebase + ".male\" \"" + filebase + ".female\" | \\\n" +
+      "  awk -F\"\\t\" '{if (NR==1) print \"FID\\tIID\\tsex\"; else printf \"0\\t%s\\t%s\\n\",$1,$2}' > \"" + filebase + ".cov\"\n"
       else ""}head -n1 "~{filebase}.phe" | cut -f3- | tr '\t' '\n'
     rm "~{filebase}.male" "~{filebase}.female" "~{filebase}.tmp" "~{filebase}.cnt"
-    echo "~{sep="\n" select_all([sample_tsv_file, pheno_tsv_file, remove_samples_file, covar_tsv_file])}" | \
+    echo "~{sep="\n" select_all([sample_tsv_file, keep_samples_file, remove_samples_file, covar_tsv_file, pheno_tsv_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
     Array[String] pheno_names = read_lines(stdout())
+    File? keep = if defined(sex_specific) || defined(keep_samples_file) then filebase + ".keep.lines" else None
     File pheno = filebase + ".phe"
-    File? covar = if defined(covar_tsv_file) then filebase + ".cov" else None
+    File? covar = if defined(covar_tsv_file) || !defined(sex_specific) then filebase + ".cov" else None
   }
 
   runtime {
@@ -590,7 +646,7 @@ task ref_scatter {
         win_size = (chr_cm_len - ~{overlap_size_cm}) / n_win + ~{overlap_size_cm}
         cm_begs = (win_size - ~{overlap_size_cm}) * np.arange(1, n_win)
         cm_ends = (win_size - ~{overlap_size_cm}) * np.arange(1, n_win) + ~{overlap_size_cm}
-        pos_begs = np.concatenate(([1], np.interp(cm_begs, df_group['CM'], df_group['POS'], period = np.inf).astype(int)))
+        pos_begs = np.concatenate(([0], 0 + np.interp(cm_begs, df_group['CM'], df_group['POS'], period = np.inf).astype(int)))
         pos_ends = np.concatenate((np.interp(cm_ends, df_group['CM'], df_group['POS'], period = np.inf).astype(int), [chr2len[fai_chr]]))
         df_out[fai_chr] = pd.DataFrame.from_dict({'CHR': fai_chr, 'BEG': pos_begs, 'END': pos_ends})
     df = pd.concat([df_out[fai_chr] for fai_chr in chr2len.keys()])
@@ -614,10 +670,14 @@ task ref_scatter {
   }
 }
 
+# the command requires BCFtools 1.15 due to bug https://github.com/samtools/bcftools/issues/1631
 task vcf_scatter {
   input {
     File vcf_file
-    File intervals_bed
+    File intervals_bed # zero-based intervals
+    File? keep_samples_file
+    File? remove_samples_file
+    Int clevel = 2
     String? chr
     String? dosage_field
 
@@ -637,49 +697,51 @@ task vcf_scatter {
 
   command <<<
     set -euo pipefail
-    mv "~{vcf_file}" .
-    mv "~{intervals_bed}" .
+    echo "~{sep="\n" select_all([vcf_file, intervals_bed, keep_samples_file, remove_samples_file])}" | \
+      tr '\n' '\0' | xargs -0 mv -t .
     ~{if defined(chr) then
       "mv \"" + basename(intervals_bed) + "\" \"" + basename(intervals_bed, ".bed") + ".all.bed\"\n" +
       "awk -v chr=\"" + chr + "\" '$1==chr' \"" + basename(intervals_bed, ".bed") + ".all.bed\" > \"" + basename(intervals_bed) + "\"\n" +
       "rm \"" + basename(intervals_bed, ".bed") + ".all.bed\""
       else ""}
-    bcftools query --list-samples "~{basename(vcf_file)}" | wc -l > n_smpls.int
-    awk -F"\t" '{print $1":"$2"-"$3"\t"NR-1}' "~{basename(intervals_bed)}" > regions.lines
-    bcftools annotate \
+    bcftools query --force-samples --list-samples ~{if defined(keep_samples_file) then
+      "--samples-file \"" + basename(select_first([keep_samples_file])) + "\" "
+    else if defined (remove_samples_file) then
+      "--samples-file \"^" + basename(select_first([remove_samples_file])) + "\" "
+    else ""}"~{basename(vcf_file)}" | wc -l > n_smpls.int
+    awk -F"\t" '{print $1":"1+$2"-"$3"\t"NR-1}' "~{basename(intervals_bed)}" > regions.lines
+    ~{if defined(keep_samples_file) then
+      "bcftools view --no-version -Ou --samples-file \"" + basename(select_first([keep_samples_file])) + "\" --force-samples \"" + basename(vcf_file) + "\" |\n  "
+    else if defined (remove_samples_file) then
+      "bcftools view --no-version -Ou --samples-file \"^" + basename(select_first([remove_samples_file])) + "\" --force-samples \"" + basename(vcf_file) + "\" |\n  "
+    else ""}bcftools annotate \
       --no-version \
       --output-type u \
       --remove ID,QUAL,FILTER,INFO,^FMT/GT~{if defined(dosage_field) then ",^FMT/DS" else ""} \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
-      "~{basename(vcf_file)}" | \
+      ~{if defined(keep_samples_file) || defined(remove_samples_file) then "" else "\"" + basename(vcf_file) + "\" "} | \
     bcftools norm \
       --no-version \
+      --output-type u \
       --rm-dup exact \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} | \
     bcftools +scatter \
       --no-version \
-      --output-type b \
+      --output-type b~{clevel} \
       --output vcfs \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} \
       --scatter-file regions.lines \
       --prefix "~{filebase}."
-    while read reg i; do
-      bcftools query --format "\n" "vcfs/~{filebase}.$i.bcf" | wc -l
-      bcftools index --force "vcfs/~{filebase}.$i.bcf"
-    done < regions.lines > n_markers.lines
     cut -f2 regions.lines | sed 's/^/vcfs\/~{filebase}./;s/$/.bcf/'
-    cut -f2 regions.lines | sed 's/^/vcfs\/~{filebase}./;s/$/.bcf.csi/' > vcf_idxs.lines
-    rm "~{basename(vcf_file)}"
-    rm "~{basename(intervals_bed)}"
+    echo "~{sep="\n" select_all([vcf_file, intervals_bed, keep_samples_file, remove_samples_file])}" | \
+      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
     rm regions.lines
   >>>
 
   output {
     Int n_smpls = read_int("n_smpls.int")
-    Array[Int] n_markers = read_lines("n_markers.lines")
     Directory vcfs = "vcfs"
     Array[File] vcf_files = read_lines(stdout())
-    Array[File] vcf_idxs = read_lines("vcf_idxs.lines")
   }
 
   runtime {
@@ -695,8 +757,8 @@ task vcf_scatter {
 task vcf_merge {
   input {
     Array[File]+ vcf_files
+    Int clevel = 2
     String filebase
-    Boolean wgs = false
 
     String docker
     Int? cpu_override
@@ -718,22 +780,19 @@ task vcf_merge {
       "sed -i 's/^.*\\///' $vcf_files\n" +
       "bcftools merge \\\n" +
       "  --no-version \\\n" +
-      "  --output-type b \\\n" +
+      "  --output-type b" + clevel + " \\\n" +
       "  --output \"" + filebase + ".bcf\" \\\n" +
-      (if wgs then "--missing-to-ref \\\n" else "") +
       "  --file-list $vcf_files \\\n" +
       "  --merge none \\\n" +
       "  --no-index \\\n" +
       (if cpu > 1 then "  --threads " + (cpu - 1) else "")
       else "mv \"" + vcf_files[0] + "\" \"" + filebase + ".bcf\""}
-    bcftools index --force "~{filebase}.bcf"
     bcftools query --list-samples "~{filebase}.bcf" | wc -l
     ~{if length(vcf_files) > 1 then "cat $vcf_files | tr '\\n' '\\0' | xargs -0 rm" else ""}
   >>>
 
   output {
     File vcf_file = filebase + ".bcf"
-    File vcf_idx = filebase + ".bcf.csi"
     Int n_smpls = read_int(stdout())
   }
 
@@ -747,18 +806,14 @@ task vcf_merge {
   }
 }
 
-# this command needs PLINK 1.9 as conversion from VCF using PLINK 2.0 is inefficient
-# https://groups.google.com/g/plink2-users/c/hsByNOklyA0
-# the U sex needs to be encoded as 0 as this is the only accepted value for PLINK 1.9
-# https://groups.google.com/g/plink2-users/c/z7YJYa677NQ
-# --compression-level is not working in BCFtools 1.13 https://github.com/samtools/bcftools/issues/1528
+# this command needs PLINK 1.9 as conversion from VCF using PLINK 2.0 is inefficient: https://groups.google.com/g/plink2-users/c/hsByNOklyA0
+# the U sex needs to be encoded as 0 as this is the only accepted value for PLINK 1.9: https://groups.google.com/g/plink2-users/c/z7YJYa677NQ
 # use of !(a!=b) due to bug Cromwell team will not fix: https://github.com/broadinstitute/cromwell/issues/5602
+# the command requires BCFtools 1.14 due to bug https://github.com/samtools/bcftools/issues/1528
 task pgt_prune {
   input {
     File vcf_file
-    File? sample_tsv_file
-    File? remove_samples_file
-    String? sex_specific
+    File sample_tsv_file
     String space_character
     Int min_mac
     Float min_maf
@@ -777,52 +832,44 @@ task pgt_prune {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" select_all([vcf_file, sample_tsv_file, remove_samples_file])}" | \
-      tr '\n' '\0' | xargs -0 mv -t .
-    ~{if defined(sample_tsv_file) then
-        "awk 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}\n" +
-        "  NR>1 {id=$(f[\"sample_id\"]); gsub(\" \",\"" + space_character + "\",id);\n" +
-        "  print 0,id,toupper(substr($(f[\"computed_gender\"]),1,1))}' \"" + basename(select_first([sample_tsv_file])) + "\" | \\\n" +
-        "  sed 's/U$/0/' > \"" + filebase + ".sex\"\n"
-      else ""}~{if defined (sex_specific) && !(select_first([sex_specific]) != "male") then
-        "  awk '$3==\"M\" || $3==1' \"" + filebase + ".sex\" > " + select_first([sex_specific]) + ".fam\n"
-      else if defined (sex_specific) && !(select_first([sex_specific]) != "female") then
-        "  awk '$3==\"F\" || $3==2' \"" + filebase + ".sex\" > " + select_first([sex_specific]) + ".fam\n"
-      else ""}~{if defined(remove_samples_file) then "bcftools view --no-version -Ou --samples-file \"^" + basename(select_first([remove_samples_file])) + "\" --force-samples \"" + basename(vcf_file) + "\" |\n  "
-      else ""}bcftools +fill-tags --no-version -Ou --include 'sum(AC)>=~{min_mac} && AN-sum(AC)>=~{min_mac} && MAF>=~{min_maf}' ~{if defined(remove_samples_file) then""
-      else "\"" + basename(vcf_file) + "\" "}-- --tags AC,AN,MAF | \
-      bcftools +add-variantkey --no-version -Ou | \
-      bcftools annotate --no-version -Ob --set-id +'%VKX' --remove FILTER,INFO,^FMT/GT | \
-#      bcftools view --no-version -Ob --compression-level 0 | \
-      plink1.9 \
-        --bcf /dev/stdin \
-        ~{if defined(sample_tsv_file) then "--update-sex \"" + filebase + ".sex\"" else ""} \
-        ~{if defined(sex_specific) then "--keep " + select_first([sex_specific]) + ".fam" else ""} \
-        --keep-allele-order \
-        --vcf-idspace-to ~{space_character} \
-        --const-fid \
-        --allow-extra-chr 0 \
-        --make-bed \
-        --out "~{filebase}" \
-        1>&2
-    ~{if defined (sex_specific) then "rm " + select_first([sex_specific]) + ".fam" else ""}
-    echo "~{sep="\n" select_all([vcf_file, sample_tsv_file, remove_samples_file])}" | \
-      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
+    mv "~{vcf_file}" .
+    mv "~{sample_tsv_file}" .
+    awk 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+      NR>1 {id=$(f["sample_id"]); gsub(" ","~{space_character}",id);
+      print 0,id,toupper(substr($(f["computed_gender"]),1,1))}' "~{basename(sample_tsv_file)}" | \
+      sed 's/U$/0/' > "~{filebase}.sex"
+    rm "~{basename(sample_tsv_file)}"
+    bcftools +fill-tags --no-version -Ou --include 'sum(AC)>=~{min_mac} && AN-sum(AC)>=~{min_mac} && MAF>=~{min_maf}' "~{basename(vcf_file)}" -- --tags AC,AN,MAF | \
+    bcftools annotate --no-version -Ob0 --set-id "%VKX" --remove FILTER,INFO,^FMT/GT | \
     plink1.9 \
+      --threads ~{cpu} \
+      --bcf /dev/stdin \
+      --update-sex "~{filebase}.sex" \
+      --keep-allele-order \
+      --vcf-idspace-to ~{space_character} \
+      --const-fid \
+      --allow-extra-chr 0 \
+      --make-bed \
+      --out "~{filebase}" \
+      1>&2
+    rm "~{basename(vcf_file)}" "~{filebase}.sex" "~{filebase}.nosex"
+    plink1.9 \
+      --threads ~{cpu} \
       --bfile "~{filebase}" \
       --keep-allele-order \
       --indep 50 5 2 \
       --out "~{filebase}" \
       1>&2
+    rm "~{filebase}.prune.out"
     cat "~{filebase}.prune.in" | wc -l
     plink1.9 \
+      --threads ~{cpu} \
       --bfile "~{filebase}" \
       --keep-allele-order \
       --extract "~{filebase}.prune.in" \
       --make-bed \
       --out "~{filebase}.prune" \
       1>&2
-    ~{if defined(sample_tsv_file) then "rm \"" + filebase + ".sex\"" else ""}
     rm "~{filebase}.bed" "~{filebase}.bim" "~{filebase}.fam" "~{filebase}.prune.in"
   >>>
 
@@ -929,6 +976,7 @@ task plink_pca {
     echo "~{exclusion_regions}" | \
       tr ',[:\-]' '\n ' | awk '{print $0,"r"NR}' > exclusion_regions.txt
     plink2 \
+      --threads ~{cpu} \
       --bed "~{basename(bed_file)}" \
       --bim "~{basename(bim_file)}" \
       --fam "~{basename(fam_file)}" \
@@ -996,7 +1044,7 @@ task regenie_step0 {
     set -euo pipefail
     echo "~{sep="\n" select_all([bed_file, bim_file, fam_file, covar_file, pheno_file])}" | \
       tr '\n' '\0' | xargs -0 mv -t .
-    echo -e "~{n_markers} ~{bsize}\n~{filebase}_job~{idx+1} ~{n_bins} ~{n_markers}" > ~{filebase}_~{idx+1}.master
+    echo -e "~{n_markers} ~{bsize}\n~{filebase}_job~{idx+1} ~{n_bins} ~{n_markers}" > "~{filebase}_~{idx+1}.master"
     cut -f2 "~{basename(bim_file)}" > "~{filebase}_job~{idx+1}.snplist"
     regenie \
       --step 1 \
@@ -1012,6 +1060,9 @@ task regenie_step0 {
       --threads ~{cpu} \
       --out "~{filebase}" \
       1>&2
+    rm "~{filebase}_~{idx+1}.master" "~{filebase}_job~{idx+1}.snplist"
+    mkdir logs
+    mv "~{filebase}.log" "logs/~{filebase}.~{idx+1}.step0.log"
     mkdir l0
     seq 1 ~{n_phenos} | sed 's/^/~{filebase}_job~{idx+1}_l0_Y/' | tr '\n' '\0' | xargs -0 mv -t l0
     seq 1 ~{n_phenos} | sed 's/^/l0\/~{filebase}_job~{idx+1}_l0_Y/'
@@ -1020,7 +1071,7 @@ task regenie_step0 {
   >>>
 
   output {
-    File master_file = filebase + "_" + (idx + 1) + ".master"
+    File log_file = "logs/" + filebase + "." + (idx + 1) + ".step0.log"
     Directory l0_dir = "l0"
     Array[File] l0_files = read_lines(stdout())
   }
@@ -1082,8 +1133,9 @@ task regenie_step1 {
     sed -i 's/^.*\///;s/[0-9]*$/1/' $l0_files
     awk -F"\t" -v OFS="\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
       {print $(f["FID"]),$(f["IID"]),$(f["~{pheno_name}"])}' "~{basename(pheno_file)}" > "~{basename(pheno_file)}.~{pheno_name}"
-    awk 'BEGIN {print "~{n_markers} ~{bsize}"} {print "~{filebase}_job"NR,1+int(($0-1)/~{bsize}),$0}' \
-      $markers_lines > "~{filebase}.master"
+    paste $l0_files $markers_lines | \
+      awk -F"\t" 'BEGIN {print "~{n_markers} ~{bsize}"}
+      {sub("_l0_Y1$","",$1); print $1,1+int(($2-1)/~{bsize}),$2}' > "~{filebase}.master"
     regenie \
       --step 1 \
       --bed "~{basename(bed_file, ".bed")}" \
@@ -1101,30 +1153,33 @@ task regenie_step1 {
       --out "~{filebase}" \
       1>&2
     rm "~{basename(pheno_file)}.~{pheno_name}" "~{filebase}.master"
+    mkdir logs
+    mv "~{filebase}.log" "logs/~{filebase}.step1.log"
     mkdir loco
     if [ -f "~{filebase}_1.loco.gz" ]; then
-      mv "~{filebase}_1.loco.gz" "loco/~{filebase}_~{pheno_name}.loco.gz"
-      sed -i 's/\([^ \t]*\) .*\//\1 /;s/_1.loco.gz/_~{pheno_name}.loco.gz/' "~{filebase}_pred.list"
+      mv "~{filebase}_1.loco.gz" "loco/~{filebase}.loco.gz"
+      sed -i 's/\([^ \t]*\) .*\//\1 /;s/_1\.loco\.gz$/.loco.gz/' "~{filebase}_pred.list"
     else
-      touch "loco/~{filebase}_~{pheno_name}.loco.gz"
+      touch "loco/~{filebase}.loco.gz"
     fi
     ~{if binary then
       "mkdir firth\n" +
       "if [ -f \"" + filebase + "_1.firth.gz\" ]; then\n" +
-      "  mv \"" +  filebase + "_1.firth.gz\" \"firth/" + filebase + "_" + pheno_name + ".firth.gz\"\n" +
-      "  sed -i 's/\\([^ \\t]*\\) .*\\//\\1 /;s/_1.firth.gz/_" + pheno_name + ".firth.gz/' \"" + filebase + "_firth.list\"\n" +
+      "  mv \"" +  filebase + "_1.firth.gz\" \"firth/" + filebase + ".firth.gz\"\n" +
+      "  sed -i 's/\\([^ \\t]*\\) .*\\//\\1 /;s/_1\\.firth\\.gz$/.firth.gz/' \"" + filebase + "_firth.list\"\n" +
       "else\n" +
-      "  touch \"firth/" + filebase + "_" + pheno_name + ".firth.gz\"\n" +
+      "  touch \"firth/" + filebase + ".firth.gz\"\n" +
       "fi" else ""}
     echo "~{sep="\n" select_all([bed_file, bim_file, fam_file, covar_file, pheno_file])}" | \
       sed 's/^.*\///' | cat - $l0_files | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
+    File log_file = "logs/" + filebase + ".step1.log"
     String loco_line = read_string(filebase + "_pred.list")
-    File loco_file = "loco/" + filebase + "_" + pheno_name + ".loco.gz"
+    File loco_file = "loco/" + filebase + ".loco.gz"
     String? firth_line = if binary then read_string(filebase + "_firth.list") else None
-    File? firth_file = if binary then "firth/" + filebase + "_" + pheno_name + ".firth.gz" else None
+    File? firth_file = if binary then "firth/" + filebase + ".firth.gz" else None
   }
 
   runtime {
@@ -1175,11 +1230,9 @@ task serialize_lines {
 task vcf2pgen {
   input {
     File vcf_file
-    File? sample_tsv_file
-    File? remove_samples_file
+    File sample_tsv_file
     String dosage_field
     String? ref_name
-    String? sex_specific
     String space_character
 
     String docker
@@ -1196,21 +1249,16 @@ task vcf2pgen {
 
   command <<<
     set -euo pipefail
-    echo "~{sep="\n" select_all([vcf_file, sample_tsv_file, remove_samples_file])}" | \
-      tr '\n' '\0' | xargs -0 mv -t .
-    ~{if defined(sample_tsv_file) then
-        "awk 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}\n" +
-        "  NR>1 {id=$(f[\"sample_id\"]); gsub(\" \",\"" + space_character + "\",id);\n" +
-        "  print 0,id,$(f[\"computed_gender\"])}' \"" + basename(select_first([sample_tsv_file])) + "\" > \"" + filebase + ".sex\""
-      else ""}
-    ~{if defined(remove_samples_file) then
-      "sed -i 's/ /" + space_character + "/g;s/^/0\\t/' \"" + basename(select_first([remove_samples_file])) + "\""
-      else ""}
+    mv "~{vcf_file}" .
+    mv "~{sample_tsv_file}" .
+    awk 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+      NR>1 {id=$(f["sample_id"]); gsub(" ","~{space_character}",id);
+      print 0,id,$(f["computed_gender"])}' "~{basename(sample_tsv_file)}" > "~{filebase}.sex"
     bcftools query -l "~{basename(vcf_file)}" | wc -l
     plink2 \
+      --threads ~{cpu} \
       --bcf "~{basename(vcf_file)}" dosage=~{dosage_field} \
-      ~{if defined(sample_tsv_file) then "--update-sex \"" + filebase + ".sex\" " else ""}\
-      ~{if defined(sex_specific) then "--keep-" + select_first([sex_specific]) + "s " else ""}\
+      --update-sex "~{filebase}.sex" \
       --vcf-idspace-to ~{space_character} \
       --const-fid \
       --allow-extra-chr 0 \
@@ -1219,9 +1267,9 @@ task vcf2pgen {
       --out "~{filebase}" \
       1>&2
     grep -v ^# "~{filebase}.pvar" | wc -l > "~{filebase}.nvar"
-    ~{if defined(sample_tsv_file) then "rm \"" + filebase + ".sex\"" else ""}
-    echo "~{sep="\n" select_all([vcf_file, sample_tsv_file, remove_samples_file])}" | \
-      sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
+    rm "~{filebase}.sex"
+    rm "~{basename(vcf_file)}"
+    rm "~{basename(sample_tsv_file)}"
   >>>
 
   output {
@@ -1253,13 +1301,14 @@ task regenie_step2 {
     File psam_file
     File? covar_file
     File pheno_file
-    Array[String] suffix # suffix array passed due to bug https://github.com/broadinstitute/cromwell/issues/5549
+    Array[String] regenie_suffix # suffix array passed due to bug https://github.com/broadinstitute/cromwell/issues/5549
     Boolean binary
     File loco_lst
     Array[File] loco_files
     File? firth_lst
     Array[File]? firth_files
     Int bsize
+    Float? min_info
     String? regenie_step2_extra_args
 
     String docker
@@ -1296,18 +1345,22 @@ task regenie_step2 {
       --bsize ~{bsize} \
       --firth --approx --firth-se \
       ~{if binary && defined(firth_lst) then "--use-null-firth \"" +  basename(select_first([firth_lst])) + "\"" else ""} \
+      ~{if defined(min_info) then "--minINFO " + min_info else ""} \
       ~{if defined(regenie_step2_extra_args) then regenie_step2_extra_args else ""} \
       --gz \
       --threads ~{cpu} \
       --out "~{filebase}" \
       1>&2
+    mkdir logs
+    mv "~{filebase}.log" "logs/~{filebase}.step2.log"
     ~{if defined(firth_lst) then "rm \"" + basename(loco_lst) + ".alt\"" else ""}
     echo "~{sep="\n" select_all([pgen_file, pvar_file, psam_file, covar_file, pheno_file, loco_lst, firth_lst])}" | \
       cat - $loco_files~{if defined(firth_files) then " $firth_files" else ""} | sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
-    Array[File] regenie_files = prefix(filebase + "_", suffix) # suffix array passed due to bug https://github.com/broadinstitute/cromwell/issues/5549
+    File log_file = "logs/" + filebase + ".step2.log"
+    Array[File] regenie_files = prefix(filebase + "_", regenie_suffix) # suffix array passed due to bug https://github.com/broadinstitute/cromwell/issues/5549
   }
 
   runtime {
@@ -1344,15 +1397,62 @@ task assoc_concat {
     sed -i 's/^.*\///' $assoc_files
     cat $assoc_files | tr '\n' '\0' | xargs -0 ~{if zst then "-n1 plink2 --zst-decompress" else "zcat"} | \
       awk 'NR==1 || $0!~"^CHROM" && $0!~"^#CHROM"' | \
-      sed 's/^23/X/;s/^PAR[12]/X/' | tr ' ' '\t' | \
+      sed 's/^CHROM/#CHROM/;s/^23/X/;s/^PAR[12]/X/' | tr ' ' '\t' | \
       bgzip > "~{filebase}"
-    tabix --begin 2 --end 2 --force --skip-lines 1 "~{filebase}"
+    tabix --begin 2 --end 2 --force "~{filebase}"
+    tabix --only-header "~{filebase}" | wc -l
     cat $assoc_files | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
     File file = filebase
     File index = filebase + ".tbi"
+    Boolean has_data = if read_int(stdout()) == 0 then false else true
+  }
+
+  runtime {
+    docker: docker
+    cpu: cpu
+    disks: "local-disk " + disk_size + " HDD"
+    memory: memory + " GiB"
+    preemptible: preemptible
+    maxRetries: maxRetries
+  }
+}
+
+task assoc_plot {
+  input {
+    File assoc_file
+    String? genome
+    File? cyto_file
+    String filebase
+
+    String docker
+    Int cpu = 1
+    Int? disk_size_override
+    Float memory = 3.5
+    Int preemptible = 1
+    Int maxRetries = 0
+  }
+
+  Float assoc_size = size(assoc_file, "GiB")
+  Int disk_size = select_first([disk_size_override, ceil(10.0 + assoc_size)])
+
+  command <<<
+    set -euo pipefail
+    mv "~{assoc_file}" .
+    ~{if defined(cyto_file) then "mv \"" + select_first([cyto_file]) + "\" ." else ""}
+    assoc_plot.R \
+      ~{if defined(genome) then "--genome \"" + select_first([genome]) + "\"" else ""} \
+      ~{if defined(cyto_file) then "--cytoband \"" + basename(select_first([cyto_file])) + "\"" else ""} \
+      --tbx "~{basename(assoc_file)}" \
+      --png "~{filebase}.png"
+    rm "~{basename(assoc_file)}"
+    ~{if defined(cyto_file) then "rm \"" + basename(select_first([cyto_file])) + "\"" else ""}
+  >>>
+
+  output {
+    File png_file = filebase + '.png'
   }
 
   runtime {
@@ -1366,7 +1466,7 @@ task assoc_concat {
 }
 
 # use of !(a!=b) due to bug Cromwell team will not fix: https://github.com/broadinstitute/cromwell/issues/5602
-# plink2 will return error code 7 when covariate-only Firth regression fails to converge
+# plink2 will return error code 7 when covariate-only Firth regression fails to converge or when variance inflation factor is too high
 # plink2 will return error code 13 when no diploid variants remain for --glm hetonly
 task plink_glm {
   input {
@@ -1381,6 +1481,8 @@ task plink_glm {
     File? covar_file
     File pheno_file
     Boolean binary
+    Int? max_vif
+    Float? max_corr
     String? plink_extra_args
 
     String docker
@@ -1411,6 +1513,7 @@ task plink_glm {
       "> \"" +  filebase + ".cov\""
     else ""}
     plink2 \
+      --threads ~{cpu} \
       --pgen "~{basename(pgen_file)}" \
       --pvar "~{basename(pvar_file)}" \
       --psam "~{basename(psam_file)}" \
@@ -1421,18 +1524,23 @@ task plink_glm {
       --1 --pheno "~{basename(pheno_file)}" \
       --pheno-name ~{pheno_name} \
       --require-pheno \
-      --glm zs log10 hetonly hide-covar~{if !defined(loco_file) && !defined(covar_file) then " allow-no-covars" else ""} cc-residualize firth-residualize cols=+a1freq,+machr2 \
+      --glm zs log10 hetonly hide-covar~{if !defined(loco_file) && !defined(covar_file) then " allow-no-covars" else ""} cc-residualize cols=+a1freq,+machr2 \
+      ~{if defined(max_vif) then "--vif " + select_first([max_vif]) else ""} \
+      ~{if defined(max_corr) then "--max-corr " + select_first([max_corr]) else ""} \
       ~{if defined(plink_extra_args) then plink_extra_args else ""} \
       --out "~{filebase}" \
       1>&2 || if [[ $? -eq 7 || $? -eq 13 ]]; then
         echo -en "\x28\xb5\x2f\xfd\x24\x00\x01\x00\x00\x99\xe9\xd8\x51" > "~{filebase}.~{pheno_name}.glm.~{if binary then "logistic.hybrid" else "linear"}.zst"
       else exit $?; fi
     ~{if defined(loco_file) then "rm \"" + filebase + ".cov\"" else ""}
+    mkdir logs
+    mv "~{filebase}.log" "logs/~{filebase}.~{pheno_name}.glm.log"
     echo "~{sep="\n" select_all([pgen_file, pvar_file, psam_file, covar_file, pheno_file, loco_file])}" | \
       sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {
+    File log_file = "logs/" + filebase + "." + pheno_name + ".glm.log"
     File assoc_file = filebase + "." + pheno_name + ".glm." + (if binary then "logistic.hybrid" else "linear") + ".zst"
   }
 

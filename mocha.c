@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2015-2021 Giulio Genovese
+   Copyright (C) 2015-2022 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2021-10-15"
+#define MOCHA_VERSION "2022-01-12"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -52,7 +52,7 @@
 #define SIGN(x) (((x) > 0) - ((x) < 0))
 
 #define BDEV_LRR_BAF_DFLT "-2.0,-4.0,-6.0,10.0,6.0,4.0"
-#define BDEV_BAF_PHASE_DFLT "6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,100.0,150.0,200.0"
+#define BDEV_BAF_PHASE_DFLT "6.0,8.0,10.0,15.0,20.0,30.0,50.0,80.0,130.0,210.0,340.0,550.0"
 #define MIN_DST_DFLT "400"
 #define ADJ_BAF_LRR_DFLT "5"
 #define REGRESS_BAF_LRR_DFLT "15"
@@ -77,7 +77,9 @@
 #define NO_ANNOT (1 << 4)
 #define USE_SHORT_ARMS (1 << 5)
 #define USE_CENTROMERES (1 << 6)
-#define USE_NO_RULES_CHRS (1 << 7)
+#define USE_MALES_XTR (1 << 7)
+#define USE_MALES_PAR2 (1 << 8)
+#define USE_NO_RULES_CHRS (1 << 9)
 
 #define LRR 0
 #define BAF 1
@@ -98,8 +100,9 @@
 #define MOCHA_CNP_CNV 6
 
 #define MOCHA_NOT 0
-#define MOCHA_ARM 1
-#define MOCHA_TEL 2
+#define MOCHA_CEN 1
+#define MOCHA_ARM 2
+#define MOCHA_TEL 3
 
 #define GT_NC 0
 #define GT_AA 1
@@ -661,48 +664,70 @@ static int cnp_edge_is_not_cn2_lrr_baf(const float *lrr, const float *baf, int n
 }
 
 // return the LOD likelihood for a segment
-static double lrr_baf_lod(const float *lrr_arr, const float *baf_arr, int n, const int *imap, float err_log_prb,
-                          float lrr_bias, float lrr_hap2dip, float lrr_sd, float baf_sd, double bdev_lrr_baf) {
-    if (n == 0 || bdev_lrr_baf < -0.5 || bdev_lrr_baf > 0.25) return -INFINITY; // kmin_brent does not handle NAN
+typedef struct {
+    const float *lrr_arr;
+    const float *baf_arr;
+    int n;
+    const int *imap;
+    float err_log_prb;
+    float lrr_bias;
+    float lrr_hap2dip;
+    float lrr_sd;
+    float baf_sd;
+} minus_lrr_baf_lod_t;
 
-    float ldev = -logf(1.0f - 2.0f * (float)bdev_lrr_baf) / (float)M_LN2 * lrr_hap2dip;
+static double minus_lrr_baf_lod(double bdev_lrr_baf, void *ap) {
+    minus_lrr_baf_lod_t *data = (minus_lrr_baf_lod_t *)ap;
+    if (data->n == 0 || bdev_lrr_baf < -0.5 || bdev_lrr_baf > 0.25) return INFINITY; // kmin_brent does not handle NAN
+    float ldev = -logf(1.0f - 2.0f * (float)bdev_lrr_baf) / (float)M_LN2 * data->lrr_hap2dip;
     float ret = 0.0f;
-    for (int i = 0; i < n; i++) {
-        float lrr = imap ? lrr_arr[imap[i]] : lrr_arr[i];
-        float baf = imap ? baf_arr[imap[i]] : baf_arr[i];
-        float log_lkl = lrr_baf_log_lkl(lrr, baf, ldev, (float)bdev_lrr_baf, lrr_sd, baf_sd, lrr_bias)
-                        - lrr_baf_log_lkl(lrr, baf, 0.0f, 0.0f, lrr_sd, baf_sd, lrr_bias);
-        if (!isnan(err_log_prb)) {
-            if (log_lkl < err_log_prb)
-                log_lkl = err_log_prb;
-            else if (log_lkl > -err_log_prb)
-                log_lkl = -err_log_prb;
+    for (int i = 0; i < data->n; i++) {
+        float lrr = data->imap ? data->lrr_arr[data->imap[i]] : data->lrr_arr[i];
+        float baf = data->imap ? data->baf_arr[data->imap[i]] : data->baf_arr[i];
+        float log_lkl = lrr_baf_log_lkl(lrr, baf, ldev, (float)bdev_lrr_baf, data->lrr_sd, data->baf_sd, data->lrr_bias)
+                        - lrr_baf_log_lkl(lrr, baf, 0.0f, 0.0f, data->lrr_sd, data->baf_sd, data->lrr_bias);
+        if (!isnan(data->err_log_prb)) {
+            if (log_lkl < data->err_log_prb)
+                log_lkl = data->err_log_prb;
+            else if (log_lkl > -data->err_log_prb)
+                log_lkl = -data->err_log_prb;
         }
         ret += log_lkl;
     }
-    return (double)ret * M_LOG10E;
+    return -(double)ret * M_LOG10E;
 }
 
 // return the LOD likelihood for a segment
-static double baf_phase_lod(const float *baf_arr, const int8_t *gt_phase, int n, const int *imap, const int8_t *as,
-                            float err_log_prb, float baf_sd, double bdev) {
-    if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
+typedef struct {
+    const float *baf_arr;
+    const int8_t *gt_phase;
+    int n;
+    const int *imap;
+    const int8_t *as;
+    float err_log_prb;
+    float baf_sd;
+} minus_baf_phase_lod_t;
+
+static double minus_baf_phase_lod(double bdev, void *ap) {
+    minus_baf_phase_lod_t *data = (minus_baf_phase_lod_t *)ap;
+    if (data->n == 0 || bdev < 0.0 || bdev > 0.5) return INFINITY; // kmin_brent does not handle NAN
 
     float ret = 0.0f;
-    for (int i = 0; i < n; i++) {
-        float baf = imap ? baf_arr[imap[i]] : baf_arr[i];
-        int8_t p = imap ? gt_phase[imap[i]] : gt_phase[i];
-        if (as) p *= (int8_t)SIGN(as[i]); // notice as has no imap
-        float log_lkl = baf_phase_log_lkl(baf, p, (float)bdev, baf_sd) - baf_phase_log_lkl(baf, 0, 0.0f, baf_sd);
-        if (!isnan(err_log_prb)) {
-            if (log_lkl < err_log_prb)
-                log_lkl = err_log_prb;
-            else if (log_lkl > -err_log_prb)
-                log_lkl = -err_log_prb;
+    for (int i = 0; i < data->n; i++) {
+        float baf = data->imap ? data->baf_arr[data->imap[i]] : data->baf_arr[i];
+        int8_t p = data->imap ? data->gt_phase[data->imap[i]] : data->gt_phase[i];
+        if (data->as) p *= (int8_t)SIGN(data->as[i]); // notice as has no imap
+        float log_lkl =
+            baf_phase_log_lkl(baf, p, (float)bdev, data->baf_sd) - baf_phase_log_lkl(baf, 0, 0.0f, data->baf_sd);
+        if (!isnan(data->err_log_prb)) {
+            if (log_lkl < data->err_log_prb)
+                log_lkl = data->err_log_prb;
+            else if (log_lkl > -data->err_log_prb)
+                log_lkl = -data->err_log_prb;
         }
         ret += log_lkl;
     }
-    return (double)ret * M_LOG10E;
+    return -(double)ret * M_LOG10E;
 }
 
 // TODO find a better title for this function
@@ -716,24 +741,32 @@ static float compare_models(const float *baf, const int8_t *gt_phase, int n, con
     int n_flips = 0;
     for (int i = 1; i < n; i++)
         if (path[i - 1] && path[i] && path[i - 1] != path[i]) n_flips++;
-    double f(double x, void *data) { return -baf_phase_lod(baf, gt_phase, n, imap, path, err_log_prb, baf_sd, x); }
-    double x, fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
+    minus_baf_phase_lod_t data = {baf, gt_phase, n, imap, path, err_log_prb, baf_sd};
+    double x, fx = kmin_brent(minus_baf_phase_lod, 0.1, 0.2, (void *)&data, KMIN_EPS, &x);
     free(path);
     return -(float)fx + (float)n_flips * flip_log_prb * (float)M_LOG10E;
 }
 
-static double baf_log_lkl(const float *baf_arr, int n, const int *imap, float baf_sd, double bdev) {
-    if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
+typedef struct {
+    const float *baf_arr;
+    int n;
+    const int *imap;
+    float baf_sd;
+} minus_baf_log_lkl_t;
+
+static double minus_baf_log_lkl(double bdev, void *ap) {
+    minus_baf_log_lkl_t *data = (minus_baf_log_lkl_t *)ap;
+    if (data->n == 0 || bdev < 0.0 || bdev > 0.5) return INFINITY; // kmin_brent does not handle NAN
 
     double ret = 0.0;
-    for (int i = 0; i < n; i++) {
-        float baf = imap ? baf_arr[imap[i]] : baf_arr[i];
+    for (int i = 0; i < data->n; i++) {
+        float baf = data->imap ? data->baf_arr[data->imap[i]] : data->baf_arr[i];
         if (isnan(baf)) continue;
-        float log_lkl = log_mean_expf(norm_log_lkl(baf - 0.5f, (float)bdev, baf_sd, 1.0f),
-                                      norm_log_lkl(baf - 0.5f, -(float)bdev, baf_sd, 1.0f));
+        float log_lkl = log_mean_expf(norm_log_lkl(baf - 0.5f, (float)bdev, data->baf_sd, 1.0f),
+                                      norm_log_lkl(baf - 0.5f, -(float)bdev, data->baf_sd, 1.0f));
         ret += (double)log_lkl;
     }
-    return ret * M_LOG10E;
+    return -ret * M_LOG10E;
 }
 
 static float get_sample_mean(const float *v, int n, const int *imap) {
@@ -763,8 +796,8 @@ static float get_baf_bdev(const float *baf_arr, int n, const int *imap, float ba
     bdev /= j;
     // simple method to compute bdev should work well for germline duplications
     if ((float)bdev > 2.0f * baf_sd) return (float)bdev;
-    double f(double x, void *data) { return -baf_log_lkl(baf_arr, n, imap, baf_sd, x); }
-    kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
+    minus_baf_log_lkl_t data = {baf_arr, n, imap, baf_sd};
+    kmin_brent(minus_baf_log_lkl, 0.1, 0.2, (void *)&data, KMIN_EPS, &bdev);
     return (float)bdev < 1e-4 ? (float)NAN : (float)bdev;
 }
 
@@ -782,29 +815,37 @@ static void get_max_sum(const int16_t *ad0, const int16_t *ad1, int n, const int
     }
 }
 
-static double ad_log_lkl(const int16_t *ad0_arr, const int16_t *ad1_arr, int n, const int *imap, float ad_rho,
-                         double bdev) {
-    if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
+typedef struct {
+    const int16_t *ad0_arr;
+    const int16_t *ad1_arr;
+    int n;
+    const int *imap;
+    float ad_rho;
+} minus_ad_log_lkl_t;
+
+static double minus_ad_log_lkl(double bdev, void *ap) {
+    minus_ad_log_lkl_t *data = (minus_ad_log_lkl_t *)ap;
+    if (data->n == 0 || bdev < 0.0 || bdev > 0.5) return INFINITY; // kmin_brent does not handle NAN
 
     int n1, n2;
-    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
-    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, ad_rho, n1, n2);
+    get_max_sum(data->ad0_arr, data->ad1_arr, data->n, data->imap, &n1, &n2);
+    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, data->ad_rho, n1, n2);
 
     double ret = 0.0;
-    for (int i = 0; i < n; i++) {
-        int16_t ad0 = imap ? ad0_arr[imap[i]] : ad0_arr[i];
-        int16_t ad1 = imap ? ad1_arr[imap[i]] : ad1_arr[i];
+    for (int i = 0; i < data->n; i++) {
+        int16_t ad0 = data->imap ? data->ad0_arr[data->imap[i]] : data->ad0_arr[i];
+        int16_t ad1 = data->imap ? data->ad1_arr[data->imap[i]] : data->ad1_arr[i];
         float log_lkl =
             log_mean_expf(beta_binom_log_lkl(beta_binom_alt, ad0, ad1), beta_binom_log_lkl(beta_binom_alt, ad1, ad0));
         ret += (double)log_lkl;
     }
-    return (double)ret * M_LOG10E;
+    return -(double)ret * M_LOG10E;
 }
 
 static float get_ad_bdev(const int16_t *ad0_arr, const int16_t *ad1_arr, int n, const int *imap, float ad_rho) {
     double bdev = 0.0;
-    double f(double x, void *data) { return -ad_log_lkl(ad0_arr, ad1_arr, n, imap, ad_rho, x); }
-    kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
+    minus_ad_log_lkl_t data = {ad0_arr, ad1_arr, n, imap, ad_rho};
+    kmin_brent(minus_ad_log_lkl, 0.1, 0.2, (void *)&data, KMIN_EPS, &bdev);
     return (float)bdev < 1e-4 ? (float)NAN : (float)bdev;
 }
 
@@ -931,59 +972,82 @@ static int cnp_edge_is_not_cn2_lrr_ad(const float *lrr, int16_t *ad0, int16_t *a
 }
 
 // return the LOD likelihood for a segment
-static double lrr_ad_lod(const float *lrr_arr, const int16_t *ad0_arr, const int16_t *ad1_arr, int n, const int *imap,
-                         float err_log_prb, float lrr_bias, float lrr_hap2dip, float lrr_sd, float ad_rho,
-                         double bdev_lrr_baf) {
-    if (n == 0 || bdev_lrr_baf < -0.5 || bdev_lrr_baf > 0.25) return -INFINITY; // kmin_brent does not handle NAN
+typedef struct {
+    const float *lrr_arr;
+    const int16_t *ad0_arr;
+    const int16_t *ad1_arr;
+    int n;
+    const int *imap;
+    float err_log_prb;
+    float lrr_bias;
+    float lrr_hap2dip;
+    float lrr_sd;
+    float ad_rho;
+} minus_lrr_ad_lod_t;
 
-    float ldev = -logf(1.0f - 2.0f * (float)bdev_lrr_baf) / (float)M_LN2 * lrr_hap2dip;
+static double minus_lrr_ad_lod(double bdev_lrr_baf, void *ap) {
+    minus_lrr_ad_lod_t *data = (minus_lrr_ad_lod_t *)ap;
+    if (data->n == 0 || bdev_lrr_baf < -0.5 || bdev_lrr_baf > 0.25) return INFINITY; // kmin_brent does not handle NAN
+
+    float ldev = -logf(1.0f - 2.0f * (float)bdev_lrr_baf) / (float)M_LN2 * data->lrr_hap2dip;
     int n1, n2;
-    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
-    beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
-    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev_lrr_baf, ad_rho, n1, n2);
+    get_max_sum(data->ad0_arr, data->ad1_arr, data->n, data->imap, &n1, &n2);
+    beta_binom_update(beta_binom_null, 0.5f, data->ad_rho, n1, n2);
+    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev_lrr_baf, data->ad_rho, n1, n2);
     float ret = 0.0f;
-    for (int i = 0; i < n; i++) {
-        float lrr = imap ? lrr_arr[imap[i]] : lrr_arr[i];
-        int16_t ad0 = imap ? ad0_arr[imap[i]] : ad0_arr[i];
-        int16_t ad1 = imap ? ad1_arr[imap[i]] : ad1_arr[i];
-        float log_lkl = lrr_ad_log_lkl(lrr, ad0, ad1, ldev, lrr_sd, lrr_bias, beta_binom_alt)
-                        - lrr_ad_log_lkl(lrr, ad0, ad1, 0.0f, lrr_sd, lrr_bias, beta_binom_null);
-        if (!isnan(err_log_prb)) {
-            if (log_lkl < err_log_prb)
-                log_lkl = err_log_prb;
-            else if (log_lkl > -err_log_prb)
-                log_lkl = -err_log_prb;
+    for (int i = 0; i < data->n; i++) {
+        float lrr = data->imap ? data->lrr_arr[data->imap[i]] : data->lrr_arr[i];
+        int16_t ad0 = data->imap ? data->ad0_arr[data->imap[i]] : data->ad0_arr[i];
+        int16_t ad1 = data->imap ? data->ad1_arr[data->imap[i]] : data->ad1_arr[i];
+        float log_lkl = lrr_ad_log_lkl(lrr, ad0, ad1, ldev, data->lrr_sd, data->lrr_bias, beta_binom_alt)
+                        - lrr_ad_log_lkl(lrr, ad0, ad1, 0.0f, data->lrr_sd, data->lrr_bias, beta_binom_null);
+        if (!isnan(data->err_log_prb)) {
+            if (log_lkl < data->err_log_prb)
+                log_lkl = data->err_log_prb;
+            else if (log_lkl > -data->err_log_prb)
+                log_lkl = -data->err_log_prb;
         }
         ret += log_lkl;
     }
-    return (double)ret * M_LOG10E;
+    return -(double)ret * M_LOG10E;
 }
 
 // return the LOD likelihood for a segment
-static double ad_phase_lod(const int16_t *ad0_arr, const int16_t *ad1_arr, const int8_t *gt_phase, int n,
-                           const int *imap, const int8_t *as, float err_log_prb, float ad_rho, double bdev) {
-    if (n == 0 || bdev < 0.0 || bdev > 0.5) return -INFINITY; // kmin_brent does not handle NAN
+typedef struct {
+    const int16_t *ad0_arr;
+    const int16_t *ad1_arr;
+    const int8_t *gt_phase;
+    int n;
+    const int *imap;
+    const int8_t *as;
+    float err_log_prb;
+    float ad_rho;
+} minus_ad_phase_lod_t;
+
+static double minus_ad_phase_lod(double bdev, void *ap) {
+    minus_ad_phase_lod_t *data = (minus_ad_phase_lod_t *)ap;
+    if (data->n == 0 || bdev < 0.0 || bdev > 0.5) return INFINITY; // kmin_brent does not handle NAN
 
     int n1, n2;
-    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
-    beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
-    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, ad_rho, n1, n2);
+    get_max_sum(data->ad0_arr, data->ad1_arr, data->n, data->imap, &n1, &n2);
+    beta_binom_update(beta_binom_null, 0.5f, data->ad_rho, n1, n2);
+    beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, data->ad_rho, n1, n2);
     float ret = 0.0f;
-    for (int i = 0; i < n; i++) {
-        int16_t ad0 = imap ? ad0_arr[imap[i]] : ad0_arr[i];
-        int16_t ad1 = imap ? ad1_arr[imap[i]] : ad1_arr[i];
-        int8_t p = imap ? gt_phase[imap[i]] : gt_phase[i];
-        if (as) p *= (int8_t)SIGN(as[i]); // notice as has no imap
+    for (int i = 0; i < data->n; i++) {
+        int16_t ad0 = data->imap ? data->ad0_arr[data->imap[i]] : data->ad0_arr[i];
+        int16_t ad1 = data->imap ? data->ad1_arr[data->imap[i]] : data->ad1_arr[i];
+        int8_t p = data->imap ? data->gt_phase[data->imap[i]] : data->gt_phase[i];
+        if (data->as) p *= (int8_t)SIGN(data->as[i]); // notice as has no imap
         float log_lkl = ad_phase_log_lkl(ad0, ad1, p, beta_binom_alt) - ad_phase_log_lkl(ad0, ad1, 0, beta_binom_null);
-        if (!isnan(err_log_prb)) {
-            if (log_lkl < err_log_prb)
-                log_lkl = err_log_prb;
-            else if (log_lkl > -err_log_prb)
-                log_lkl = -err_log_prb;
+        if (!isnan(data->err_log_prb)) {
+            if (log_lkl < data->err_log_prb)
+                log_lkl = data->err_log_prb;
+            else if (log_lkl > -data->err_log_prb)
+                log_lkl = -data->err_log_prb;
         }
         ret += log_lkl;
     }
-    return (double)ret * M_LOG10E;
+    return -(double)ret * M_LOG10E;
 }
 
 // TODO find a better title for this function
@@ -998,26 +1062,33 @@ static float compare_wgs_models(const int16_t *ad0, const int16_t *ad1, const in
     int n_flips = 0;
     for (int i = 1; i < n; i++)
         if (path[i - 1] && path[i] && path[i - 1] != path[i]) n_flips++;
-    double f(double x, void *data) { return -ad_phase_lod(ad0, ad1, gt_phase, n, imap, path, err_log_prb, ad_rho, x); }
-    double x, fx = kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x);
+    minus_ad_phase_lod_t data = {ad0, ad1, gt_phase, n, imap, path, err_log_prb, ad_rho};
+    double x, fx = kmin_brent(minus_ad_phase_lod, 0.1, 0.2, (void *)&data, KMIN_EPS, &x);
     free(path);
     return -(float)fx + (float)n_flips * flip_log_prb * (float)M_LOG10E;
 }
 
 // TODO change this or integrate with ad_lod
-static double lod_lkl_beta_binomial(const int16_t *ad0_arr, const int16_t *ad1_arr, int n, const int *imap,
-                                    double ad_rho) {
-    if (n == 0 || ad_rho <= 0.0 || ad_rho >= 1.0) return -INFINITY;
+typedef struct {
+    const int16_t *ad0_arr;
+    const int16_t *ad1_arr;
+    int n;
+    const int *imap;
+} minus_lod_lkl_beta_binomial_t;
+
+static double minus_lod_lkl_beta_binomial(double ad_rho, void *ap) {
+    minus_lod_lkl_beta_binomial_t *data = (minus_lod_lkl_beta_binomial_t *)ap;
+    if (data->n == 0 || ad_rho <= 0.0 || ad_rho >= 1.0) return INFINITY;
     float ret = 0.0f;
     int n1, n2;
-    get_max_sum(ad0_arr, ad1_arr, n, imap, &n1, &n2);
+    get_max_sum(data->ad0_arr, data->ad1_arr, data->n, data->imap, &n1, &n2);
     beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
-    for (int i = 0; i < n; i++) {
-        int16_t ad0 = imap ? ad0_arr[imap[i]] : ad0_arr[i];
-        int16_t ad1 = imap ? ad1_arr[imap[i]] : ad1_arr[i];
+    for (int i = 0; i < data->n; i++) {
+        int16_t ad0 = data->imap ? data->ad0_arr[data->imap[i]] : data->ad0_arr[i];
+        int16_t ad1 = data->imap ? data->ad1_arr[data->imap[i]] : data->ad1_arr[i];
         ret += beta_binom_log_lkl(beta_binom_null, ad0, ad1);
     }
-    return (double)ret * M_LOG10E;
+    return -(double)ret * M_LOG10E;
 }
 
 /*********************************
@@ -1216,10 +1287,11 @@ static void mocha_print_ucsc(FILE *restrict stream, const mocha_t *mocha, int n,
 static void mocha_print_calls(FILE *restrict stream, const mocha_t *mocha, int n, const bcf_hdr_t *hdr, int flags,
                               char *genome, float lrr_hap2dip) {
     if (stream == NULL) return;
-    char gender[3];
+    char gender[4];
     gender[GENDER_UNKNOWN] = 'U';
     gender[GENDER_MALE] = 'M';
     gender[GENDER_FEMALE] = 'F';
+    gender[GENDER_KLINEFELTER] = 'K';
     const char *type[6];
     type[MOCHA_UNDET] = "Undetermined";
     type[MOCHA_LOSS] = "Loss";
@@ -1227,8 +1299,9 @@ static void mocha_print_calls(FILE *restrict stream, const mocha_t *mocha, int n
     type[MOCHA_CNLOH] = "CN-LOH";
     type[MOCHA_CNP_LOSS] = "CNP_Loss";
     type[MOCHA_CNP_GAIN] = "CNP_Gain";
-    char arm_type[3];
+    char arm_type[4];
     arm_type[MOCHA_NOT] = 'N';
+    arm_type[MOCHA_CEN] = 'C';
     arm_type[MOCHA_ARM] = 'Y';
     arm_type[MOCHA_TEL] = 'T';
     fputs("sample_id", stream);
@@ -1320,14 +1393,22 @@ static int get_cnp_edges(const int *pos, int n, int beg, int end, int *a, int *b
 // LDEV = -log2( 1 - 2 x BDEV ) * LRR-hap2dip for gains
 // LDEV = -log2( 1 + 2 x BDEV ) * LRR-hap2dip for losses
 static int8_t mocha_type(float ldev, float ldev_se, float bdev, float bdev_se, int n_hets, float lrr_hap2dip,
-                         int8_t p_arm, int8_t q_arm) {
+                         int8_t p_arm, int8_t q_arm, int is_short_arm) {
     // a LOD score can be computed from a chi-squared statistic by dividing by 2ln(10) ~ 4.6
     float z2_cnloh = sqf(ldev / ldev_se);
-    // equivalent of a 2 LOD score bonus for ending in one but not two telomeres
-    if ((p_arm != MOCHA_TEL && q_arm != MOCHA_TEL) || (p_arm == MOCHA_TEL && q_arm == MOCHA_TEL))
-        z2_cnloh += 4.0f * M_LN10;
-    else
-        z2_cnloh -= 4.0f * M_LN10;
+
+    // equivalent of a 2 LOD score bonus for ending in one but not two telomeres (unless it is a short arm autosome)
+    if (is_short_arm) {
+        if (q_arm != MOCHA_TEL)
+            z2_cnloh += 4.0f * M_LN10; // CN-LOH less likely
+        else if (p_arm != MOCHA_CEN)
+            z2_cnloh -= 4.0f * M_LN10; // CN-LOH more likely
+    } else {
+        if ((p_arm == MOCHA_TEL) == (q_arm == MOCHA_TEL))
+            z2_cnloh += 4.0f * M_LN10; // CN-LOH less likely
+        else
+            z2_cnloh -= 4.0f * M_LN10; // CN-LOH more likely
+    }
 
     // if one model has 4 LOD scores point more than the other model, select the better model
     if (ldev > 0) {
@@ -1395,40 +1476,43 @@ static float mocha_cell_fraction(float ldev, float ldev_se, float bdev, int n_he
 }
 
 static void get_mocha_stats(const int *pos, const float *lrr, const float *baf, const int8_t *gt_phase, int n, int a,
-                            int b, int cen_beg, int cen_end, int length, float baf_conc, mocha_t *mocha) {
+                            int b, int cen_beg, int cen_end, int length, float baf_conc, int is_short_arm,
+                            mocha_t *mocha) {
     mocha->n_sites = b + 1 - a;
 
-    if (a == 0)
+    if (a == 0) {
+        mocha->p_arm = is_short_arm ? MOCHA_CEN : MOCHA_TEL;
         if (pos[a] < cen_beg)
             mocha->beg_pos = 0;
         else
             mocha->beg_pos = cen_end;
-    else
+    } else {
         mocha->beg_pos = pos[a];
+        if (mocha->beg_pos < cen_beg)
+            mocha->p_arm = MOCHA_ARM;
+        else if (mocha->beg_pos <= cen_end)
+            mocha->p_arm = MOCHA_CEN;
+        else
+            mocha->p_arm = MOCHA_NOT;
+    }
 
-    if (b == n - 1)
+    if (b == n - 1) {
+        mocha->q_arm = MOCHA_TEL;
         if (pos[b] >= cen_end)
             mocha->end_pos = length;
         else
             mocha->end_pos = cen_beg;
-    else
+    } else {
         mocha->end_pos = pos[b];
+        if (mocha->end_pos > cen_end)
+            mocha->q_arm = MOCHA_ARM;
+        else if (mocha->end_pos >= cen_beg)
+            mocha->q_arm = MOCHA_CEN;
+        else
+            mocha->q_arm = MOCHA_NOT;
+    }
 
     mocha->length = mocha->end_pos - mocha->beg_pos;
-
-    if (mocha->beg_pos == 0)
-        mocha->p_arm = MOCHA_TEL;
-    else if (mocha->beg_pos < cen_beg)
-        mocha->p_arm = MOCHA_ARM;
-    else
-        mocha->p_arm = MOCHA_NOT;
-
-    if (mocha->end_pos == length)
-        mocha->q_arm = MOCHA_TEL;
-    else if (mocha->end_pos > cen_end)
-        mocha->q_arm = MOCHA_ARM;
-    else
-        mocha->q_arm = MOCHA_NOT;
 
     mocha->ldev_se = get_se_mean(lrr + a, b + 1 - a, NULL);
     mocha->n_hets = 0;
@@ -1540,11 +1624,27 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
     int16_t *ldev = (int16_t *)calloc(n, sizeof(int16_t));
     int16_t *bdev = (int16_t *)calloc(n, sizeof(int16_t));
 
-    if (model->rid == model->genome_rules->x_rid && self->computed_gender == GENDER_MALE) {
-        for (int i = 0; i < n; i++) {
-            if (pos[i] > model->genome_rules->x_nonpar_beg && pos[i] < model->genome_rules->x_nonpar_end) {
-                lrr[i] = NAN;
-                baf[i] = NAN;
+    if (model->rid == model->genome_rules->x_rid) {
+        if (self->computed_gender == GENDER_MALE) {
+            for (int i = 0; i < n; i++) {
+                if (pos[i] > model->genome_rules->x_nonpar_beg && pos[i] < model->genome_rules->x_xtr_beg)
+                    lrr[i] = baf[i] = NAN;
+                else if (pos[i] > model->genome_rules->x_xtr_end && pos[i] < model->genome_rules->x_nonpar_end)
+                    lrr[i] = baf[i] = NAN;
+                else if (!(model->flags & USE_MALES_XTR) && pos[i] >= model->genome_rules->x_xtr_beg
+                         && pos[i] <= model->genome_rules->x_xtr_end)
+                    lrr[i] = baf[i] = NAN;
+                else if (!(model->flags & USE_MALES_PAR2) && pos[i] >= model->genome_rules->x_nonpar_end)
+                    lrr[i] = baf[i] = NAN;
+            }
+        } else if (self->computed_gender == GENDER_KLINEFELTER) { // only analyze diploid region for XXY individuals
+            for (int i = 0; i < n; i++) {
+                if (pos[i] <= model->genome_rules->x_nonpar_beg)
+                    lrr[i] = baf[i] = NAN;
+                else if (pos[i] >= model->genome_rules->x_xtr_beg && pos[i] <= model->genome_rules->x_xtr_end)
+                    lrr[i] = baf[i] = NAN;
+                else if (pos[i] >= model->genome_rules->x_nonpar_end)
+                    lrr[i] = baf[i] = NAN;
             }
         }
     }
@@ -1559,14 +1659,30 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                 mocha.type = MOCHA_UNDET;
                 mocha.ldev = get_median(lrr + a, b + 1 - a, NULL);
                 if (mocha.ldev > 0 && (cnp_type == MOCHA_CNP_GAIN || cnp_type == MOCHA_CNP_CNV)) {
-                    if (model->flags & WGS_DATA)
-                        mocha.lod_lrr_baf =
-                            lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias,
-                                       model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, 1.0f / 6.0f);
-                    else
-                        mocha.lod_lrr_baf =
-                            lrr_baf_lod(lrr + a, baf + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias,
-                                        model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, 1.0f / 6.0f);
+                    if (model->flags & WGS_DATA) {
+                        minus_lrr_ad_lod_t data = {lrr + a,
+                                                   ad0 + a,
+                                                   ad1 + a,
+                                                   b + 1 - a,
+                                                   NULL,
+                                                   model->err_log_prb,
+                                                   model->lrr_bias,
+                                                   model->lrr_hap2dip,
+                                                   self->adjlrr_sd,
+                                                   self->stats.dispersion};
+                        mocha.lod_lrr_baf = -minus_lrr_ad_lod(1.0f / 6.0f, (void *)&data);
+                    } else {
+                        minus_lrr_baf_lod_t data = {lrr + a,
+                                                    baf + a,
+                                                    b + 1 - a,
+                                                    NULL,
+                                                    model->err_log_prb,
+                                                    model->lrr_bias,
+                                                    model->lrr_hap2dip,
+                                                    self->adjlrr_sd,
+                                                    self->stats.dispersion};
+                        mocha.lod_lrr_baf = -minus_lrr_baf_lod(1.0f / 6.0f, (void *)&data);
+                    }
                     if (mocha.lod_lrr_baf
                         > -(model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f * (float)M_LOG10E) {
                         mocha.type = MOCHA_CNP_GAIN;
@@ -1575,14 +1691,30 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                         exp_bdev = 1.0f / 6.0f;
                     }
                 } else if (mocha.ldev <= 0 && (cnp_type == MOCHA_CNP_LOSS || cnp_type == MOCHA_CNP_CNV)) {
-                    if (model->flags & WGS_DATA)
-                        mocha.lod_lrr_baf =
-                            lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias,
-                                       model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, -0.5f);
-                    else
-                        mocha.lod_lrr_baf =
-                            lrr_baf_lod(lrr + a, baf + a, b + 1 - a, NULL, model->err_log_prb, model->lrr_bias,
-                                        model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, -0.5f);
+                    if (model->flags & WGS_DATA) {
+                        minus_lrr_ad_lod_t data = {lrr + a,
+                                                   ad0 + a,
+                                                   ad1 + a,
+                                                   b + 1 - a,
+                                                   NULL,
+                                                   model->err_log_prb,
+                                                   model->lrr_bias,
+                                                   model->lrr_hap2dip,
+                                                   self->adjlrr_sd,
+                                                   self->stats.dispersion};
+                        mocha.lod_lrr_baf = -minus_lrr_ad_lod(-0.5f, (void *)&data);
+                    } else {
+                        minus_lrr_baf_lod_t data = {lrr + a,
+                                                    baf + a,
+                                                    b + 1 - a,
+                                                    NULL,
+                                                    model->err_log_prb,
+                                                    model->lrr_bias,
+                                                    model->lrr_hap2dip,
+                                                    self->adjlrr_sd,
+                                                    self->stats.dispersion};
+                        mocha.lod_lrr_baf = -minus_lrr_baf_lod(-0.5f, (void *)&data);
+                    }
                     if (mocha.lod_lrr_baf
                         > -(model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f * (float)M_LOG10E) {
                         mocha.type = MOCHA_CNP_LOSS;
@@ -1606,7 +1738,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                             continue;
                     }
                     get_mocha_stats(pos, lrr, baf, gt_phase, n, a, b, cen_beg, cen_end, length, self->stats.baf_conc,
-                                    &mocha);
+                                    model->genome_rules->is_short_arm[model->rid], &mocha);
                     // compute bdev, if possible
                     if (mocha.n_hets > 0) {
                         mocha.bdev = model->flags & WGS_DATA
@@ -1733,26 +1865,38 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
             }
 
             mocha.ldev = get_median(lrr + a, b + 1 - a, NULL);
-            get_mocha_stats(pos, lrr, baf, gt_phase, n, a, b, cen_beg, cen_end, length, self->stats.baf_conc, &mocha);
+            get_mocha_stats(pos, lrr, baf, gt_phase, n, a, b, cen_beg, cen_end, length, self->stats.baf_conc,
+                            model->genome_rules->is_short_arm[model->rid], &mocha);
 
-            double f(double x, void *data) {
-                if (model->flags & WGS_DATA)
-                    return -lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.n_sites, NULL, NAN, model->lrr_bias,
-                                       model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, x);
-                else
-                    return -lrr_baf_lod(lrr + a, baf + a, mocha.n_sites, NULL, NAN, model->lrr_bias, model->lrr_hap2dip,
-                                        self->adjlrr_sd, self->stats.dispersion, x);
-            }
             double bdev_lrr_baf;
-            kmin_brent(f, -0.15, 0.15, NULL, KMIN_EPS, &bdev_lrr_baf);
-            if (model->flags & WGS_DATA)
-                mocha.lod_lrr_baf =
-                    lrr_ad_lod(lrr + a, ad0 + a, ad1 + a, mocha.n_sites, NULL, model->err_log_prb, model->lrr_bias,
-                               model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, bdev_lrr_baf);
-            else
-                mocha.lod_lrr_baf =
-                    lrr_baf_lod(lrr + a, baf + a, mocha.n_sites, NULL, model->err_log_prb, model->lrr_bias,
-                                model->lrr_hap2dip, self->adjlrr_sd, self->stats.dispersion, bdev_lrr_baf);
+            if (model->flags & WGS_DATA) {
+                minus_lrr_ad_lod_t data = {lrr + a,
+                                           ad0 + a,
+                                           ad1 + a,
+                                           mocha.n_sites,
+                                           NULL,
+                                           NAN,
+                                           model->lrr_bias,
+                                           model->lrr_hap2dip,
+                                           self->adjlrr_sd,
+                                           self->stats.dispersion};
+                kmin_brent(minus_lrr_ad_lod, -0.15, 0.15, (void *)&data, KMIN_EPS, &bdev_lrr_baf);
+                data.err_log_prb = model->err_log_prb;
+                mocha.lod_lrr_baf = -minus_lrr_ad_lod(bdev_lrr_baf, (void *)&data);
+            } else {
+                minus_lrr_baf_lod_t data = {lrr + a,
+                                            baf + a,
+                                            mocha.n_sites,
+                                            NULL,
+                                            NAN,
+                                            model->lrr_bias,
+                                            model->lrr_hap2dip,
+                                            self->adjlrr_sd,
+                                            self->stats.dispersion};
+                kmin_brent(minus_lrr_baf_lod, -0.15, 0.15, (void *)&data, KMIN_EPS, &bdev_lrr_baf);
+                data.err_log_prb = model->err_log_prb;
+                mocha.lod_lrr_baf = -minus_lrr_baf_lod(bdev_lrr_baf, (void *)&data);
+            }
 
             if (hmm_model == LRR_BAF) {
                 // here you need to check whether the call would have been
@@ -1796,26 +1940,27 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                     if (path[j] != path[j + 1]) mocha.n_flips++;
 
                 if (model->flags & WGS_DATA) {
-                    double f(double x, void *data) {
-                        return -ad_phase_lod(ad0, ad1, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i], NAN,
-                                             self->stats.dispersion, x);
-                    }
+                    minus_ad_phase_lod_t data = {ad0,
+                                                 ad1,
+                                                 gt_phase,
+                                                 mocha.n_hets,
+                                                 imap_arr + beg[i],
+                                                 path + beg[i],
+                                                 NAN,
+                                                 self->stats.dispersion};
                     double bdev;
-                    kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
+                    kmin_brent(minus_ad_phase_lod, 0.1, 0.2, (void *)&data, KMIN_EPS, &bdev);
                     mocha.bdev = fabsf((float)bdev);
-                    mocha.lod_baf_phase =
-                        ad_phase_lod(ad0, ad1, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i],
-                                     model->err_log_prb, self->stats.dispersion, mocha.bdev);
+                    data.err_log_prb = model->err_log_prb;
+                    mocha.lod_baf_phase = -minus_ad_phase_lod(mocha.bdev, (void *)&data);
                 } else {
-                    double f(double x, void *data) {
-                        return -baf_phase_lod(baf, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i], NAN,
-                                              self->stats.dispersion, x);
-                    }
                     double bdev;
-                    kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &bdev);
+                    minus_baf_phase_lod_t data = {baf,           gt_phase, mocha.n_hets,          imap_arr + beg[i],
+                                                  path + beg[i], NAN,      self->stats.dispersion};
+                    kmin_brent(minus_baf_phase_lod, 0.1, 0.2, (void *)&data, KMIN_EPS, &bdev);
                     mocha.bdev = fabsf((float)bdev);
-                    mocha.lod_baf_phase = baf_phase_lod(baf, gt_phase, mocha.n_hets, imap_arr + beg[i], path + beg[i],
-                                                        model->err_log_prb, self->stats.dispersion, mocha.bdev);
+                    data.err_log_prb = model->err_log_prb;
+                    mocha.lod_baf_phase = -minus_baf_phase_lod(mocha.bdev, (void *)&data);
                     // for larger bdev estimates, a model with phase might underestimate the deviation due to switch
                     // errors
                     if (mocha.bdev > self->stats.dispersion) {
@@ -1831,8 +1976,9 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                 for (int j = beg[i]; j <= end[i]; j++) as[imap_arr[j]] = (int8_t)SIGN(path[j]) * gt_phase[imap_arr[j]];
             }
 
-            mocha.type = mocha_type(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.bdev_se, mocha.n_hets,
-                                    model->lrr_hap2dip, mocha.p_arm, mocha.q_arm);
+            mocha.type =
+                mocha_type(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.bdev_se, mocha.n_hets, model->lrr_hap2dip,
+                           mocha.p_arm, mocha.q_arm, model->genome_rules->is_short_arm[model->rid]);
             mocha.cf = mocha_cell_fraction(mocha.ldev, mocha.ldev_se, mocha.bdev, mocha.n_hets, mocha.type,
                                            model->lrr_hap2dip);
             mocha_table->n++;
@@ -1968,9 +2114,10 @@ static void sample_stats(sample_t *self, const model_t *model) {
         self->x_nonpar_lrr_median = get_median(lrr, n_imap, imap_arr);
 
         if (model->flags & WGS_DATA) {
-            double f(double x, void *data) { return -lod_lkl_beta_binomial(ad0, ad1, n_imap, imap_arr, x); }
+            minus_lod_lkl_beta_binomial_t data = {ad0, ad1, n_imap, imap_arr};
             double x;
-            kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x); // dispersions above 0.5 are not allowed
+            kmin_brent(minus_lod_lkl_beta_binomial, 0.1, 0.2, (void *)&data, KMIN_EPS,
+                       &x); // dispersions above 0.5 are not allowed
             self->x_nonpar_dispersion = (float)x;
         } else {
             self->x_nonpar_dispersion = get_sample_sd(baf, n_imap, imap_arr);
@@ -1995,9 +2142,10 @@ static void sample_stats(sample_t *self, const model_t *model) {
         hts_expand(stats_t, self->n_stats, self->m_stats, self->stats_arr);
 
         if (model->flags & WGS_DATA) {
-            double f(double x, void *data) { return -lod_lkl_beta_binomial(ad0, ad1, n, NULL, x); }
+            minus_lod_lkl_beta_binomial_t data = {ad0, ad1, n, NULL};
             double x;
-            kmin_brent(f, 0.1, 0.2, NULL, KMIN_EPS, &x); // dispersions above 0.5 are not allowed
+            kmin_brent(minus_lod_lkl_beta_binomial, 0.1, 0.2, (void *)&data, KMIN_EPS,
+                       &x); // dispersions above 0.5 are not allowed
             self->stats_arr[self->n_stats - 1].dispersion = (float)x;
         } else {
             self->stats_arr[self->n_stats - 1].dispersion = get_sample_sd(baf, n, NULL);
@@ -2108,10 +2256,11 @@ static void sample_summary(sample_t *self, int n, model_t *model, int compute_ge
 static void mocha_print_stats(FILE *restrict stream, const sample_t *self, int n, int lrr_gc_order,
                               const bcf_hdr_t *hdr, int flags) {
     if (stream == NULL) return;
-    char gender[3];
+    char gender[4];
     gender[GENDER_UNKNOWN] = 'U';
     gender[GENDER_MALE] = 'M';
     gender[GENDER_FEMALE] = 'F';
+    gender[GENDER_KLINEFELTER] = 'K';
     fputs("sample_id", stream);
     fputs("\tcomputed_gender", stream);
     fputs("\tcall_rate", stream);
@@ -2436,7 +2585,7 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
                 if (model->regress_baf_lrr != -1 && model->regress_baf_lrr <= k) {
                     float xss = 0.0f, yss = 0.0f, xyss = 0.0f;
                     get_cov((float *)lrr_fmt->p, (float *)baf_fmt->p, k, imap_arr, &xss, &yss, &xyss);
-                    baf_m = xyss / xss;
+                    baf_m = xss == 0.0f ? 0.0f : xyss / xss;
                     for (int j = 0; j < k; j++)
                         ((float *)baf_fmt->p)[imap_arr[j]] -= baf_m * ((float *)lrr_fmt->p)[imap_arr[j]];
                 }
@@ -2639,84 +2788,90 @@ static const char *usage_text(void) {
            "    -G, --genome-file <file>        genome reference rules, space/tab-delimited CHROM:FROM-TO,TYPE\n"
            "\n"
            "General Options:\n"
-           "    -v, --variants [^]<file>       tabix-indexed [compressed] VCF/BCF file containing variants\n"
-           "    -f, --apply-filters <list>     require at least one of the listed FILTER strings (e.g. \"PASS,.\")\n"
-           "                                   to include (or exclude with \"^\" prefix) in the analysis\n"
-           "    -e, --exclude <expr>           exclude sites for which the expression is true\n"
-           "    -i, --include <expr>           select sites for which the expression is true\n"
-           "    -r, --regions <region>         restrict to comma-separated list of regions\n"
-           "    -R, --regions-file <file>      restrict to regions listed in a file\n"
-           "    -t, --targets [^]<region>      restrict to comma-separated list of regions. Exclude regions with \"^\" "
+           "    -v, --variants [^]<file>        tabix-indexed [compressed] VCF/BCF file containing variants\n"
+           "    -f, --apply-filters <list>      require at least one of the listed FILTER strings (e.g. \"PASS,.\")\n"
+           "                                    to include (or exclude with \"^\" prefix) in the analysis\n"
+           "    -e, --exclude <expr>            exclude sites for which the expression is true\n"
+           "    -i, --include <expr>            select sites for which the expression is true\n"
+           "    -r, --regions <region>          restrict to comma-separated list of regions\n"
+           "    -R, --regions-file <file>       restrict to regions listed in a file\n"
+           "        --regions-overlap 0|1|2     Include if POS in the region (0), record overlaps (1), variant "
+           "overlaps (2) [1]\n"
+           "    -t, --targets [^]<region>       restrict to comma-separated list of regions. Exclude regions with "
+           "\"^\" prefix\n"
+           "    -T, --targets-file [^]<file>    restrict to regions listed in a file. Exclude regions with \"^\" "
            "prefix\n"
-           "    -T, --targets-file [^]<file>   restrict to regions listed in a file. Exclude regions with \"^\" "
-           "prefix\n"
-           "    -s, --samples [^]<list>        comma separated list of samples to include (or exclude with \"^\" "
+           "        --targets-overlap 0|1|2     Include if POS in the region (0), record overlaps (1), variant "
+           "overlaps (2) [0]\n"
+           "    -s, --samples [^]<list>         comma separated list of samples to include (or exclude with \"^\" "
            "prefix)\n"
-           "    -S, --samples-file [^]<file>   file of samples to include (or exclude with \"^\" prefix)\n"
-           "        --force-samples            only warn about unknown subset samples\n"
-           "        --input-stats <file>       input samples genome-wide statistics file\n"
-           "        --only-stats               compute genome-wide statistics without detecting mosaic chromosomal "
+           "    -S, --samples-file [^]<file>    file of samples to include (or exclude with \"^\" prefix)\n"
+           "        --force-samples             only warn about unknown subset samples\n"
+           "        --input-stats <file>        input samples genome-wide statistics file\n"
+           "        --only-stats                compute genome-wide statistics without detecting mosaic chromosomal "
            "alterations\n"
-           "    -p  --cnp <file>               list of regions to genotype in BED format\n"
-           "        --mhc <region>             MHC region to exclude from analysis (will be retained in the output)\n"
-           "        --kir <region>             KIR region to exclude from analysis (will be retained in the output)\n"
-           "        --threads <int>            number of extra output compression threads [0]\n"
+           "    -p  --cnp <file>                list of regions to genotype in BED format\n"
+           "        --mhc <region>              MHC region to exclude from analysis (will be retained in the output)\n"
+           "        --kir <region>              KIR region to exclude from analysis (will be retained in the output)\n"
+           "        --threads <int>             number of extra output compression threads [0]\n"
            "\n"
            "Output Options:\n"
-           "    -o, --output <file>            write output to a file [no output]\n"
-           "    -O, --output-type <b|u|z|v>    b: compressed BCF, u: uncompressed BCF, z: compressed VCF, v: "
-           "uncompressed VCF [v]\n"
-           "        --no-version               do not append version and command line to the header\n"
-           "    -a  --no-annotations           omit Ldev and Bdev FORMAT from output VCF (requires --output)\n"
-           "        --no-log                   suppress progress report on standard error\n"
-           "    -l  --log <file>               write log to file [standard error]\n"
-           "    -c, --calls <file>             write chromosomal alterations calls table to a file [standard output]\n"
-           "    -z  --stats <file>             write samples genome-wide statistics table to a file [no output]\n"
-           "    -u, --ucsc-bed <file>          write UCSC bed track to a file [no output]\n"
+           "    -o, --output <file>             write output to a file [no output]\n"
+           "    -O, --output-type u|b|v|z[0-9]  u/b: un/compressed BCF, v/z: un/compressed VCF, 0-9: compression level "
+           "[v]\n"
+           "        --no-version                do not append version and command line to the header\n"
+           "    -a  --no-annotations            omit Ldev and Bdev FORMAT from output VCF (requires --output)\n"
+           "        --no-log                    suppress progress report on standard error\n"
+           "    -l  --log <file>                write log to file [standard error]\n"
+           "    -c, --calls <file>              write chromosomal alterations calls table to a file [standard output]\n"
+           "    -z  --stats <file>              write samples genome-wide statistics table to a file [no output]\n"
+           "    -u, --ucsc-bed <file>           write UCSC bed track to a file [no output]\n"
            "\n"
            "HMM Options:\n"
-           "        --bdev-LRR-BAF <list>      comma separated list of inverse BAF deviations for LRR+BAF model "
+           "        --bdev-LRR-BAF <list>       comma separated list of inverse BAF deviations for LRR+BAF model "
            "[" BDEV_LRR_BAF_DFLT
            "]\n"
-           "        --bdev-BAF-phase <list>    comma separated list of inverse BAF deviations for BAF+phase model\n"
-           "                                   [" BDEV_BAF_PHASE_DFLT
+           "        --bdev-BAF-phase <list>     comma separated list of inverse BAF deviations for BAF+phase model\n"
+           "                                    [" BDEV_BAF_PHASE_DFLT
            "]\n"
-           "        --min-dist <int>           minimum base pair distance between consecutive sites for WGS data "
+           "        --min-dist <int>            minimum base pair distance between consecutive sites for WGS data "
            "[" MIN_DST_DFLT
            "]\n"
-           "        --adjust-BAF-LRR <int>     minimum number of genotypes for a cluster to median adjust BAF and LRR "
+           "        --adjust-BAF-LRR <int>      minimum number of genotypes for a cluster to median adjust BAF and LRR "
            "(-1 for no adjustment) [" ADJ_BAF_LRR_DFLT
            "]\n"
-           "        --regress-BAF-LRR <int>    minimum number of genotypes for a cluster to regress BAF against LRR "
+           "        --regress-BAF-LRR <int>     minimum number of genotypes for a cluster to regress BAF against LRR "
            "(-1 for no regression) [" REGRESS_BAF_LRR_DFLT
            "]\n"
-           "        --LRR-GC-order <int>       order of polynomial to regress LRR against local GC content (-1 for no "
+           "        --LRR-GC-order <int>        order of polynomial to regress LRR against local GC content (-1 for no "
            "regression) [" LRR_GC_ORDER_DFLT
            "]\n"
-           "        --xy-major-pl              major transition phred-scaled likelihood [" XY_MAJOR_PL_DFLT
+           "        --xy-major-pl               major transition phred-scaled likelihood [" XY_MAJOR_PL_DFLT
            "]\n"
-           "        --xy-minor-pl              minor transition phred-scaled likelihood [" XY_MINOR_PL_DFLT
+           "        --xy-minor-pl               minor transition phred-scaled likelihood [" XY_MINOR_PL_DFLT
            "]\n"
-           "        --auto-tel-pl              autosomal telomeres phred-scaled likelihood [" AUTO_TEL_PL_DFLT
+           "        --auto-tel-pl               autosomal telomeres phred-scaled likelihood [" AUTO_TEL_PL_DFLT
            "]\n"
-           "        --chrX-tel-pl              chromosome X telomeres phred-scaled likelihood [" CHRX_TEL_PL_DFLT
+           "        --chrX-tel-pl               chromosome X telomeres phred-scaled likelihood [" CHRX_TEL_PL_DFLT
            "]\n"
-           "        --chrY-tel-pl              chromosome Y telomeres phred-scaled likelihood [" CHRY_TEL_PL_DFLT
+           "        --chrY-tel-pl               chromosome Y telomeres phred-scaled likelihood [" CHRY_TEL_PL_DFLT
            "]\n"
-           "        --error-pl                 uniform error phred-scaled likelihood [" ERR_PL_DFLT
+           "        --error-pl                  uniform error phred-scaled likelihood [" ERR_PL_DFLT
            "]\n"
-           "        --flip-pl                  phase flip phred-scaled likelihood [" FLIP_PL_DFLT
+           "        --flip-pl                   phase flip phred-scaled likelihood [" FLIP_PL_DFLT
            "]\n"
-           "        --short-arm-chrs <list>    list of chromosomes with short arms [" SHORT_ARM_CHRS_DFLT
+           "        --short-arm-chrs <list>     list of chromosomes with short arms [" SHORT_ARM_CHRS_DFLT
            "]\n"
-           "        --use-short-arms           use variants in short arms [FALSE]\n"
-           "        --use-centromeres          use variants in centromeres [FALSE]\n"
-           "        --use-no-rules-chrs        use chromosomes without centromere rules  [FALSE]\n"
-           "        --LRR-weight <float>       relative contribution from LRR for LRR+BAF  model [" LRR_BIAS_DFLT
+           "        --use-short-arms            use variants in short arms [FALSE]\n"
+           "        --use-centromeres           use variants in centromeres [FALSE]\n"
+           "        --use-males-xtr             use variants in XTR region for males [FALSE]\n"
+           "        --use-males-par2            use variants in PAR2 region for males [FALSE]\n"
+           "        --use-no-rules-chrs         use chromosomes without centromere rules  [FALSE]\n"
+           "        --LRR-weight <float>        relative contribution from LRR for LRR+BAF  model [" LRR_BIAS_DFLT
            "]\n"
-           "        --LRR-hap2dip <float>      difference between LRR for haploid and diploid [" LRR_HAP2DIP_DFLT
+           "        --LRR-hap2dip <float>       difference between LRR for haploid and diploid [" LRR_HAP2DIP_DFLT
            "]\n"
-           "        --LRR-cutoff <float>       cutoff between LRR for haploid and diploid used to infer gender "
+           "        --LRR-cutoff <float>        cutoff between LRR for haploid and diploid used to infer gender "
            "[estimated from X nonPAR]\n"
            "\n"
            "Examples:\n"
@@ -2794,6 +2949,9 @@ int run(int argc, char *argv[]) {
     int sample_is_file = 0;
     int force_samples = 0;
     int output_type = FT_VCF;
+    int regions_overlap = 1;
+    int targets_overlap = 0;
+    int clevel = -1;
     int n_threads = 0;
     int record_cmd_line = 1;
     const char *filter_fname = NULL;
@@ -2850,16 +3008,18 @@ int run(int argc, char *argv[]) {
                                        {"include", required_argument, NULL, 'i'},
                                        {"regions", required_argument, NULL, 'r'},
                                        {"regions-file", required_argument, NULL, 'R'},
+                                       {"regions-overlap", required_argument, NULL, 1},
                                        {"targets", required_argument, NULL, 't'},
                                        {"targets-file", required_argument, NULL, 'T'},
+                                       {"targets-overlap", required_argument, NULL, 2},
                                        {"samples", required_argument, NULL, 's'},
                                        {"samples-file", required_argument, NULL, 'S'},
-                                       {"force-samples", no_argument, NULL, 1},
+                                       {"force-samples", no_argument, NULL, 3},
                                        {"cnp", required_argument, NULL, 'p'},
-                                       {"input-stats", required_argument, NULL, 2},
-                                       {"only-stats", no_argument, NULL, 3},
-                                       {"mhc", required_argument, NULL, 4},
-                                       {"kir", required_argument, NULL, 5},
+                                       {"input-stats", required_argument, NULL, 4},
+                                       {"only-stats", no_argument, NULL, 5},
+                                       {"mhc", required_argument, NULL, 6},
+                                       {"kir", required_argument, NULL, 7},
                                        {"threads", required_argument, NULL, 9},
                                        {"output", required_argument, NULL, 'o'},
                                        {"output-type", required_argument, NULL, 'O'},
@@ -2886,10 +3046,12 @@ int run(int argc, char *argv[]) {
                                        {"short-arm-chrs", required_argument, NULL, 24},
                                        {"use-short-arms", no_argument, NULL, 25},
                                        {"use-centromeres", no_argument, NULL, 26},
-                                       {"use-no-rules-chrs", no_argument, NULL, 27},
-                                       {"LRR-weight", required_argument, NULL, 28},
-                                       {"LRR-hap2dip", required_argument, NULL, 29},
-                                       {"LRR-cutoff", required_argument, NULL, 30},
+                                       {"use-males-xtr", no_argument, NULL, 27},
+                                       {"use-males-par2", no_argument, NULL, 28},
+                                       {"use-no-rules-chrs", no_argument, NULL, 29},
+                                       {"LRR-weight", required_argument, NULL, 30},
+                                       {"LRR-hap2dip", required_argument, NULL, 31},
+                                       {"LRR-cutoff", required_argument, NULL, 32},
                                        {NULL, 0, NULL, 0}};
     int c;
     while ((c = getopt_long(argc, argv, "h?g:G:v:f:e:i:r:R:t:T:s:S:p:o:O:al:c:z:u:", loptions, NULL)) >= 0) {
@@ -2928,12 +3090,32 @@ int run(int argc, char *argv[]) {
             regions_list = optarg;
             regions_is_file = 1;
             break;
+        case 1:
+            if (!strcasecmp(optarg, "0"))
+                regions_overlap = 0;
+            else if (!strcasecmp(optarg, "1"))
+                regions_overlap = 1;
+            else if (!strcasecmp(optarg, "2"))
+                regions_overlap = 2;
+            else
+                error("Could not parse: --regions-overlap %s\n", optarg);
+            break;
         case 't':
             targets_list = optarg;
             break;
         case 'T':
             targets_list = optarg;
             targets_is_file = 1;
+            break;
+        case 2:
+            if (!strcasecmp(optarg, "0"))
+                targets_overlap = 0;
+            else if (!strcasecmp(optarg, "1"))
+                targets_overlap = 1;
+            else if (!strcasecmp(optarg, "2"))
+                targets_overlap = 2;
+            else
+                error("Could not parse: --targets-overlap %s\n", optarg);
             break;
         case 's':
             sample_names = optarg;
@@ -2942,22 +3124,22 @@ int run(int argc, char *argv[]) {
             sample_names = optarg;
             sample_is_file = 1;
             break;
-        case 1:
+        case 3:
             force_samples = 1;
             break;
-        case 2:
+        case 4:
             stats_fname = optarg;
             break;
-        case 3:
+        case 5:
             only_stats = 1;
             break;
         case 'p':
             cnp_fname = optarg;
             break;
-        case 4:
+        case 6:
             mhc_reg = optarg;
             break;
-        case 5:
+        case 7:
             kir_reg = optarg;
             break;
         case 9:
@@ -2981,9 +3163,16 @@ int run(int argc, char *argv[]) {
             case 'v':
                 output_type = FT_VCF;
                 break;
-            default:
-                error("The output type \"%s\" not recognised\n", optarg);
-            };
+            default: {
+                clevel = strtol(optarg, &tmp, 10);
+                if (*tmp || clevel < 0 || clevel > 9) error("The output type \"%s\" not recognised\n", optarg);
+            }
+            }
+            if (optarg[1]) {
+                clevel = strtol(optarg + 1, &tmp, 10);
+                if (*tmp || clevel < 0 || clevel > 9)
+                    error("Could not parse argument: --compression-level %s\n", optarg + 1);
+            }
             break;
         case 8:
             record_cmd_line = 0;
@@ -3066,17 +3255,23 @@ int run(int argc, char *argv[]) {
             model.flags |= USE_CENTROMERES;
             break;
         case 27:
-            model.flags |= USE_NO_RULES_CHRS;
+            model.flags |= USE_MALES_XTR;
             break;
         case 28:
+            model.flags |= USE_MALES_PAR2;
+            break;
+        case 29:
+            model.flags |= USE_NO_RULES_CHRS;
+            break;
+        case 30:
             model.lrr_bias = strtof(optarg, &tmp);
             if (*tmp) error("Could not parse: --LRR-weight %s\n", optarg);
             break;
-        case 29:
+        case 31:
             model.lrr_hap2dip = strtof(optarg, &tmp);
             if (*tmp) error("Could not parse: --LRR-hap2dip %s\n", optarg);
             break;
-        case 30:
+        case 32:
             model.lrr_cutoff = strtof(optarg, &tmp);
             if (*tmp) error("Could not parse: --LRR-cutoff %s\n", optarg);
             break;
@@ -3096,6 +3291,8 @@ int run(int argc, char *argv[]) {
     int len = strlen(rules);
     if (!rules_is_file && (strncmp(rules, "list", 4) == 0 || rules[len - 1] == '?'))
         genome_init_alias(log_file, rules, NULL);
+
+    if (argc - optind > 1) error("Only one input VCF is allowed\n");
 
     if (model.filter_logic == (FLT_EXCLUDE | FLT_INCLUDE)) error("Only one of --include or --exclude can be given.\n");
 
@@ -3181,10 +3378,12 @@ int run(int argc, char *argv[]) {
 
     // read in the regions from the command line
     if (regions_list) {
+        bcf_sr_set_opt(sr, BCF_SR_REGIONS_OVERLAP, regions_overlap);
         if (bcf_sr_set_regions(sr, regions_list, regions_is_file) < 0)
             error("Failed to read the regions: %s\n", regions_list);
     }
     if (targets_list) {
+        bcf_sr_set_opt(sr, BCF_SR_TARGETS_OVERLAP, targets_overlap);
         if (bcf_sr_set_targets(sr, targets_list, targets_is_file, 0) < 0)
             error("Failed to read the targets: %s\n", targets_list);
     }
@@ -3321,8 +3520,10 @@ int run(int argc, char *argv[]) {
 
     // output VCF
     if (output_fname) {
-        out_fh = hts_open(output_fname, hts_bcf_wmode(output_type));
-        if (out_fh == NULL) error("Cannot write to \"%s\": %s\n", output_fname, strerror(errno));
+        char wmode[8];
+        set_wmode(wmode, output_type, output_fname, clevel);
+        out_fh = hts_open(output_fname, wmode);
+        if (out_fh == NULL) error("[%s] Error: cannot write to \"%s\": %s\n", __func__, output_fname, strerror(errno));
         if (n_threads) hts_set_opt(out_fh, HTS_OPT_THREAD_POOL, sr->p);
         out_hdr = print_hdr(out_fh, hdr, argc, argv, record_cmd_line, model.flags);
     }
@@ -3371,11 +3572,17 @@ int run(int argc, char *argv[]) {
         sample_summary(sample, nsmpl, &model, stats_fname == NULL);
     }
 
-    int cnt[3] = {0, 0, 0};
+    int cnt[4] = {0, 0, 0, 0};
     for (int i = 0; i < nsmpl; i++) cnt[sample[i].computed_gender]++;
-    if (!(model.flags & NO_LOG))
-        fprintf(log_file, "Estimated %d sample(s) of unknown gender, %d male(s) and %d female(s)\n",
-                cnt[GENDER_UNKNOWN], cnt[GENDER_MALE], cnt[GENDER_FEMALE]);
+    if (!(model.flags & NO_LOG)) {
+        if (cnt[GENDER_KLINEFELTER] > 0)
+            fprintf(log_file,
+                    "Estimated %d sample(s) of unknown gender, %d male(s), %d female(s), and %d Klinefelter(s)\n",
+                    cnt[GENDER_UNKNOWN], cnt[GENDER_MALE], cnt[GENDER_FEMALE], cnt[GENDER_KLINEFELTER]);
+        else
+            fprintf(log_file, "Estimated %d sample(s) of unknown gender, %d male(s), and %d female(s)\n",
+                    cnt[GENDER_UNKNOWN], cnt[GENDER_MALE], cnt[GENDER_FEMALE]);
+    }
     mocha_print_stats(out_fz, sample, nsmpl, model.lrr_gc_order, hdr, model.flags);
 
     if (!only_stats) {
