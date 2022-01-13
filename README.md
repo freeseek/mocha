@@ -121,7 +121,7 @@ Preparation steps
 mkdir -p $HOME/bin $HOME/GRCh3[78] && cd /tmp
 ```
 
-We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a>. However, notice that you will require BCFtools version 1.11 or newer and HTSlib 1.14 should be avoided due to a serious <a href="https://github.com/samtools/htslib/issues/1362">bug</a
+We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a>. However, notice that HTSlib 1.14 should be avoided due to a serious <a href="https://github.com/samtools/htslib/issues/1362">bug</a>
 
 Download latest version of <a href="https://github.com/samtools/htslib">HTSlib</a> and <a href="https://github.com/samtools/bcftools">BCFtools</a> (if not downloaded already)
 ```
