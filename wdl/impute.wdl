@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2022-01-12
+## Version 2022-01-14
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -798,8 +798,8 @@ task vcf_extend {
   Float memory = select_first([memory_override, 3.5 + mult * n_smpls * n_markers / 1024 / 1024 / 1024])
   Int cpu = select_first([cpu_override, if memory > 6.5 then 2 * ceil(memory / 13) else 1])
   String filebase = basename(basename(basename(basename(basename(vcf_file, ".bcf"), ".vcf.gz"), ".imp"), "." + ext_string), ".chr" + chr_string) + ".chr" + chr_string
-  String input_vcf_file = sub(sub(basename(vcf_file), "." + ext_string + ".bcf", ".bcf"), "." + ext_string + ".vcf.gz", ".vcf.gz")
-  String input_vcf_idx = sub(sub(sub(basename(vcf_idx), "." + ext_string + ".bcf.csi", ".bcf.csi"), "." + ext_string + ".vcf.gz.tbi", ".vcf.gz.tbi"), "." + ext_string + ".vcf.gz.csi", ".vcf.gz.csi")
+  String input_vcf_file = sub(sub(basename(vcf_file), "\\." + ext_string + "\\.bcf$", ".bcf"), "\\." + ext_string + "\\.vcf\\.gz$", ".vcf.gz")
+  String input_vcf_idx = sub(sub(sub(basename(vcf_idx), "\\." + ext_string + "\\.bcf\\.csi$", ".bcf.csi"), "\\." + ext_string + "\\.vcf\\.gz\\.tbi$", ".vcf.gz.tbi"), "\\." + ext_string + "\\.vcf\\.gz\\.csi$", ".vcf.gz.csi")
 
   command <<<
     set -euo pipefail

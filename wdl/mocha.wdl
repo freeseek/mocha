@@ -2,7 +2,7 @@ version development
 
 ## Copyright (c) 2020-2022 Giulio Genovese
 ##
-## Version 2022-01-12
+## Version 2022-01-14
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
@@ -2075,8 +2075,8 @@ task vcf_mocha {
   Float memory = select_first([memory_override, 3.5 + 18.0 * n_smpls * max_n_markers / 1024 / 1024 / 1024])
   Int cpu = select_first([cpu_override, if memory > 6.5 then 2 * ceil(memory / 13) else 1])
   String filebase = basename(basename(basename(basename(pvcf_file, ".bcf"), ".vcf.gz"), '.phased'), "." + ext_string)
-  String input_pvcf_file = sub(sub(basename(pvcf_file), "." + ext_string + ".bcf", ".bcf"), "." + ext_string + ".vcf.gz", ".vcf.gz")
-  String input_pvcf_idx = sub(sub(sub(basename(pvcf_idx), "." + ext_string + ".bcf.csi", ".bcf.csi"), "." + ext_string + ".vcf.gz.tbi", ".vcf.gz.tbi"), "." + ext_string + ".vcf.gz.csi", ".vcf.gz.csi")
+  String input_pvcf_file = sub(sub(basename(pvcf_file), "\\." + ext_string + ".bcf$", ".bcf"), "\\." + ext_string + ".vcf.gz$", ".vcf.gz")
+  String input_pvcf_idx = sub(sub(sub(basename(pvcf_idx), "\\." + ext_string + "\\.bcf\\.csi$", ".bcf.csi"), "\\." + ext_string + "\\.vcf\\.gz\\.tbi$", ".vcf.gz.tbi"), "\\." + ext_string + "\\.vcf\\.gz\\.csi$", ".vcf.gz.csi")
 
   command <<<
     set -euo pipefail
@@ -2109,8 +2109,8 @@ task vcf_mocha {
   >>>
 
   output {
-    File mocha_vcf_file = sub(filebase, "." + ext_string, "") + "." + ext_string + ".bcf"
-    File mocha_vcf_idx = sub(filebase, "." + ext_string, "") + "." + ext_string + ".bcf.csi"
+    File mocha_vcf_file = sub(filebase, "\\." + ext_string + "$", "") + "." + ext_string + ".bcf"
+    File mocha_vcf_idx = sub(filebase, "\\." + ext_string + "$", "") + "." + ext_string + ".bcf.csi"
     File calls_tsv = filebase + ".calls.tsv"
     File stats_tsv = filebase + ".stats.tsv"
     File ucsc_bed = filebase + ".ucsc.bed"
