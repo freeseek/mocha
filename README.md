@@ -10,7 +10,7 @@ instruments for clonal selection (2020). [PMID: 32581363] [DOI: 10.1038/s41586-0
 ```
 and this website. For any feedback or questions, contact the <a href="mailto:giulio.genovese@gmail.com">author</a>
 
-WARNING: MoChA will not yield useful results for VCFs from whole exome sequencing data as MoChA does not model the reference allele bias in these assays. Furthermore, whole exome sequencing does not include enough heterozygous sites to allow for detection of mosaic chromosomal alterations at low cell fractions
+WARNING: MoChA will not yield useful results for VCFs from whole exome sequencing data as MoChA does not model the reference allele bias in these assays. Furthermore, whole exome sequencing does not include enough heterozygous sites to allow for detection of mosaic chromosomal alterations at low cell fractions. Similarly, low coverage whole genome sequencing will not provide a sufficient sampling of molecules to detect mosaic chromosomal alterations at low cell fractions, even in the unlikely ideal scenario of most heterozygous sites correctly genotyped and phased 
 
 <!--ts-->
    * [Usage](#usage)
@@ -171,6 +171,8 @@ wget -P $HOME/bin http://faculty.washington.edu/browning/beagle/b{eagle,ref3}.28
 Download resources for GRCh37
 =============================
 
+You can find the required GRCh37 resources <a href="http://software.broadinstitute.org/software/mocha">here</a> or you can generate them as follows
+
 Human genome reference
 ```
 wget -O- ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/human_g1k_v37.fasta.gz | \
@@ -256,6 +258,8 @@ cyto="$HOME/GRCh37/cytoBand.txt.gz"
 Download resources for GRCh38
 =============================
 
+You can find the required GRCh38 resources <a href="http://software.broadinstitute.org/software/mocha">here</a> or you can generate them as follows
+
 Human genome reference (following the suggestion from <a href="http://lh3.github.io/2017/11/13/which-human-reference-genome-to-use">Heng Li</a>)
 ```
 wget -O- ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz | \
@@ -271,7 +275,7 @@ wget -P $HOME/GRCh38 https://data.broadinstitute.org/alkesgroup/Eagle/downloads/
 1000 Genomes project phase 3
 ```
 cd $HOME/GRCh38
-wget http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr{{1..22}.filtered.shapeit2-duohmm,X.filtered.eagle2}-phased.vcf.gz
+wegt http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr{{1..22}.filtered.shapeit2-duohmm-phased,X.filtered.eagle2-phased.v2}.vcf.gz
 for chr in {1..22}; do
   bcftools view --no-version -Ou -c 2 CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.shapeit2-duohmm-phased.vcf.gz | \
   bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
@@ -626,10 +630,11 @@ Depending on your application, you might want to filter the calls from MoChA. Fo
 awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
   NR==FNR && FNR>1 && ($(f["call_rate"])<.97 || $(f["baf_auto"])>.03) {xcl[$(f["sample_id"])]++}
   NR>FNR && FNR==1 {for (i=1; i<=NF; i++) g[$i] = i; print}
-  NR>FNR && FNR>1 {len=$(g["length"]); bdev=$(g["bdev"]); rel_cov=$(g["rel_cov"])}
+  NR>FNR && FNR>1 {gender=$(g["computed_gender"]); len=$(g["length"]); bdev=$(g["bdev"]);
+  rel_cov=$(g["rel_cov"]); lod_baf_phase=$(g["lod_baf_phase"]); lod_baf_conc=$(g["lod_baf_conc"])}
   NR>FNR && FNR>1 && !($(g["sample_id"]) in xcl) && $(g["type"])!~"^CNP" &&
-    ( $(g["chrom"])~"X" && $(g["computed_gender"])=="M" || bdev<0.1 || $(g["n50_hets"])<2e5 ) &&
-    ( $(g["bdev_se"])!="nan" || $(g["lod_baf_phase"])!="nan" && $(g["lod_baf_phase"]) > 10.0 ) && 
+    ( $(g["chrom"])~"X" && gender=="M" || bdev<0.1 || $(g["n50_hets"])<2e5 || lod_baf_conc!="nan" && lod_baf_conc>10.0 ) &&
+    ( $(g["bdev_se"])!="nan" || lod_baf_phase!="nan" && lod_baf_phase>10.0 ) && 
     ( rel_cov<2.1 || bdev<0.05 || len>5e5 && bdev<0.1 && rel_cov<2.5 || len>5e6 && bdev<0.15 )' \
   $pfx.stats.tsv $pfx.calls.tsv > $pfx.calls.filtered.tsv
 awk 'NR==FNR {x[$1"_"$3"_"$4"_"$5]++} NR>FNR && ($0~"^track" || $4"_"$1"_"$2"_"$3 in x)' \
@@ -680,7 +685,7 @@ awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i; print}
 
 Generate list of samples with mosaic autosomal alterations
 ```
-awk -F"\t" -v OFS="\t" 'NR==FNR && $3!="chrX" {x[$1]++} NR>FNR && $1 in x {print $1}' $pfx.mca.calls.tsv $pfx.stats.tsv > $pfx.auto.lines
+awk -F"\t" -v OFS="\t" 'NR==FNR && $3!="X" && $3!="chrX" {x[$1]++} NR>FNR && $1 in x {print $1}' $pfx.mca.calls.tsv $pfx.stats.tsv > $pfx.auto.lines
 for chr in {1..12} {16..20}; do
   awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
     NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])=="T" && $(f["q_arm"])!="T" && $(f["rel_cov"])>1 {
