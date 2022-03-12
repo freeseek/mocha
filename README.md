@@ -680,7 +680,7 @@ awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i; print}
 
 Generate list of samples with mosaic autosomal alterations
 ```
-awk -F"\t" -v OFS="\t" 'NR==FNR && $3!="chrX" {x[$1]++} NR>FNR && $1 in x {print $1}' $pfx.mca.calls.tsv $pfx.stats.tsv > $pfx.auto.lines
+awk -F"\t" -v OFS="\t" 'NR==FNR && $3!~"X" {x[$1]++} NR>FNR && $1 in x {print $1}' $pfx.mca.calls.tsv $pfx.stats.tsv > $pfx.auto.lines
 for chr in {1..12} {16..20}; do
   awk -F"\t" -v OFS="\t" -v chr=$chr 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
     NR>1 && ($(f["chrom"])==chr || $(f["chrom"])=="chr"chr) && $(f["p_arm"])=="T" && $(f["q_arm"])!="T" && $(f["rel_cov"])>1 {
