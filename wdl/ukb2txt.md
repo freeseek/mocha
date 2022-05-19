@@ -22,7 +22,7 @@ While most biobanks based on Affymetrix Axiom DNA microarrays, such as the FINNG
 ###.AxiomGT1.confidences.txt
 ###.AxiomGT1.summary.txt
 ```
-the UK biobank delivers genotypes and intensities (see <a href="https://biobank.ctsu.ox.ac.uk/crystal/label.cgi?id=263">here</a>) in non-standard file formats merged across all batches (see <a href="https://biobank.ctsu.ox.ac.uk/crystal/refer.cgi?id=531">here</a>). Furthermore, while the two Affymetrix arrays used to genotype UK biobank participants contain probesets for two recurrently somatic variants
+the UK biobank delivers genotypes and intensities (see <a href="https://biobank.ctsu.ox.ac.uk/crystal/label.cgi?id=263">here</a>) in non-standard file formats merged across all batches (see <a href="https://biobank.ctsu.ox.ac.uk/crystal/refer.cgi?id=531">here</a>). We advise to avoid using the provided intensity values in the `ukb_l2r_chrN_v2.txt` and `ukb_baf_chrN_v2.txt` files as a significant amount of these are set to missing for unclear reasons. Furthermore, while the two Affymetrix arrays used to genotype UK biobank participants contain probesets for two recurrently somatic variants
 ```
 AX-83208650 Affx-37797994 rs77375493 JAK2 V617F
 AX-86708948 Affx-80252081 rs121913502 IDH2 R140Q

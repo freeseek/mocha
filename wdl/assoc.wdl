@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2022-01-12
+## Version 2022-05-18
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs association analyses with REGENIE and PLINK2
 ##
 ## Cromwell version support
-## - Successfully tested on v73
+## - Successfully tested on v79
 ##
 ## Distributed under terms of the MIT License
 
@@ -42,6 +42,7 @@ workflow assoc {
     Int bsize = 500
     Int max_vif = 2000
     Float max_corr = 0.9999
+    Float cis_plot_min_a1freq = 0.01
     Boolean loocv = true
     String? regenie_step0_extra_args
     String? regenie_step1_extra_args
@@ -74,9 +75,9 @@ workflow assoc {
     String basic_bash_docker = "debian:stable-slim"
     String pandas_docker = "amancevice/pandas:slim"
     String docker_repository = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.14-20220112"
-    String regenie_docker = "regenie:1.14-20220112"
-    String r_mocha_docker = "r_mocha:1.14-20220112"
+    String bcftools_docker = "bcftools:1.15.1-20220518"
+    String regenie_docker = "regenie:1.15.1-20220518"
+    String r_mocha_docker = "r_mocha:1.15.1-20220518"
   }
 
   String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
@@ -448,6 +449,7 @@ workflow assoc {
             input:
               assoc_file = plink_concat.file,
               cyto_file = ref.cyto_file,
+              min_a1freq = cis_plot_min_a1freq,
               filebase = filebase + "." + plink_pheno_names[idx] + ".glm." + (if binary then "logistic.hybrid" else "linear"),
               docker = docker_repository_with_sep + r_mocha_docker
           }
@@ -1028,14 +1030,13 @@ task regenie_step0 {
     Float? memory_override
     Int preemptible = 1
     Int maxRetries = 0
-
-    Float mult = 6.0 # TODO this is likely incorrect ... I probably need the number of phenotypes tested
   }
 
   Float bed_size = size(bed_file, "GiB")
   Float bim_size = size(bim_file, "GiB")
   Float fam_size = size(fam_file, "GiB")
-  Int disk_size = select_first([disk_size_override, ceil(10.0 + bed_size + bim_size + fam_size + mult * n_markers * n_smpls / 1024 / 1024 / 1024)])
+  # TODO the amount of disk size needs to be better computed with the appropriate multiplier here
+  Int disk_size = select_first([disk_size_override, ceil(10.0 + bed_size + bim_size + fam_size + n_phenos * n_markers * n_smpls / 1024 / 1024 / 1024)])
   Float memory = select_first([memory_override, 3.5 + 16.0 * n_smpls * bsize / 1024 / 1024 / 1024])
   Int cpu = select_first([cpu_override, if memory > 6.5 then 2 * ceil(memory / 13) else 1])
   Int n_bins = ceil(1.0 * n_markers / bsize)
@@ -1338,7 +1339,7 @@ task regenie_step2 {
     regenie \
       --step 2 \
       --pgen "~{basename(pgen_file, ".pgen")}" \
-      --phenoFile "~{basename(pheno_file)}" \ \
+      --phenoFile "~{basename(pheno_file)}" \
       ~{if defined(covar_file) then "--covarFile \"" + basename(select_first([covar_file])) + "\"" else ""} \
       --pred "~{if defined(firth_lst) then basename(loco_lst) + ".alt" else basename(loco_lst)}" \
       ~{if binary then "--bt" else ""} \
@@ -1425,6 +1426,7 @@ task assoc_plot {
     File assoc_file
     String? genome
     File? cyto_file
+    Float? min_a1freq
     String filebase
 
     String docker
@@ -1445,6 +1447,7 @@ task assoc_plot {
     assoc_plot.R \
       ~{if defined(genome) then "--genome \"" + select_first([genome]) + "\"" else ""} \
       ~{if defined(cyto_file) then "--cytoband \"" + basename(select_first([cyto_file])) + "\"" else ""} \
+      ~{if defined(min_a1freq) then "--min-a1freq " + select_first([min_a1freq]) else ""} \
       --tbx "~{basename(assoc_file)}" \
       --png "~{filebase}.png"
     rm "~{basename(assoc_file)}"

@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2020-2022 Giulio Genovese
 ##
-## Version 2022-01-14
+## Version 2022-05-18
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs MoChA on a cohort of samples genotyped with either Illumina or Affymetrix DNA microarrays
 ##
 ## Cromwell version support
-## - Successfully tested on v73
+## - Successfully tested on v79
 ##
 ## Distributed under terms of the MIT License
 
@@ -76,13 +76,13 @@ workflow mocha {
     String basic_bash_docker = "debian:stable-slim"
     String pandas_docker = "amancevice/pandas:slim"
     String docker_repository = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.14-20220112"
-    String iaap_cli_docker = "iaap_cli:1.14-20220112"
-    String autoconvert_docker = "autoconvert:1.14-20220112"
-    String apt_docker = "apt:1.14-20220112"
-    String shapeit4_docker = "shapeit4:1.14-20220112"
-    String eagle_docker = "eagle:1.14-20220112"
-    String r_mocha_docker = "r_mocha:1.14-20220112"
+    String bcftools_docker = "bcftools:1.15.1-20220518"
+    String iaap_cli_docker = "iaap_cli:1.15.1-20220518"
+    String autoconvert_docker = "autoconvert:1.15.1-20220518"
+    String apt_docker = "apt:1.15.1-20220518"
+    String shapeit4_docker = "shapeit4:1.15.1-20220518"
+    String eagle_docker = "eagle:1.15.1-20220518"
+    String r_mocha_docker = "r_mocha:1.15.1-20220518"
     Boolean autoconvert = false
     Boolean? table_output
     Boolean? do_not_check_bpm
@@ -94,7 +94,7 @@ workflow mocha {
     Int? gc_window_size
   }
 
-  Boolean mode_is_vcf = mode == "vcf" || mode == "pvcf"
+  Boolean mode_is_vcf = mode == "vcf" || mode == "pvcf" || wgs
 
   String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
 
@@ -116,7 +116,7 @@ workflow mocha {
   }
 
   # read table with batches information (scatter could be avoided if there was a tail() function)
-  call tsv_sorted as batch_sorted_tsv { input: tsv_file = batch_tsv_file, column = "batch_id", docker = basic_bash_docker }
+  call tsv_sorted as batch_sorted_tsv { input: tsv_file = batch_tsv_file, column = "batch_id", check_dups = true, docker = basic_bash_docker }
   Array[Array[String]] batch_tsv = read_tsv(batch_sorted_tsv.file)
   Int n_batches = length(batch_tsv)-1
   scatter (idx in range(n_batches)) { Array[String] batch_tsv_rows = batch_tsv[(idx+1)] }
@@ -158,7 +158,7 @@ workflow mocha {
   if (!mode_is_vcf) {
     # resort table with sample information and extract sample_id column
     call tsv_sorted as sample_sorted_tsv { input: tsv_file = sample_tsv_file, column = "batch_id", docker = basic_bash_docker }
-    call tsv_column as sample_id_lines { input: tsv_file = sample_sorted_tsv.file, column = "sample_id", docker = basic_bash_docker }
+    call tsv_column as sample_id_lines { input: tsv_file = sample_sorted_tsv.file, column = "sample_id", check_dups = true, docker = basic_bash_docker }
     call tsv_column as batch_id_lines { input: tsv_file = sample_sorted_tsv.file, column = "batch_id", docker = basic_bash_docker }
 
     # process Illumina data
@@ -345,12 +345,18 @@ workflow mocha {
     Array[File] unphased_vcf_idxs = select_first([gtc2vcf_idxs, chp2vcf_idxs, txt2vcf.vcf_idx])
     Array[Int] unphased_vcf_n_smpls = select_first([gtc2vcf_n_smpls, chp2vcf_n_smpls, txt2vcf.n_smpls])
     call lst_flatten as flatten_sample_id_lines { input: lst_files = select_first([gtc2vcf.sample_id_lines, chp2vcf.sample_id_lines, txt2vcf.sample_id_lines]), filebase = "sample_id", docker = basic_bash_docker }
-    call tsv_column as computed_gender_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "computed_gender", docker = basic_bash_docker }
-    if (!wgs) { call tsv_column as call_rate_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "call_rate", docker = basic_bash_docker } }
+    call tsv_column as override_computed_gender_lines { input: tsv_file = sample_sorted_tsv.file, column = "computed_gender", fail = false, docker = basic_bash_docker }
+    if (override_computed_gender_lines.failed) {
+      call tsv_column as computed_gender_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "computed_gender", docker = basic_bash_docker }
+    }
+    call tsv_column as override_call_rate_lines { input: tsv_file = sample_sorted_tsv.file, column = "call_rate", fail = false, docker = basic_bash_docker }
+    if (override_call_rate_lines.failed) {
+      call tsv_column as call_rate_lines { input: tsv_file = select_first([gtc_tsv.file, affy_tsv.file, sample_tsv_file]), column = "call_rate", docker = basic_bash_docker }
+    }
     call lst_paste as sample_tsv {
       input:
-        lst_files = select_all([flatten_sample_id_lines.file, computed_gender_lines.file, call_rate_lines.file]),
-        headers = if wgs then ['sample_id', 'computed_gender'] else ['sample_id', 'computed_gender', 'call_rate'],
+        lst_files = select_all([flatten_sample_id_lines.file, select_first([computed_gender_lines.file, override_computed_gender_lines.file]), select_first([call_rate_lines.file, override_call_rate_lines.file])]),
+        headers = ['sample_id', 'computed_gender', 'call_rate'],
         filebase = sample_set_id + ".sample",
         docker = basic_bash_docker
     }
@@ -594,6 +600,7 @@ task tsv_sorted {
   input {
     File tsv_file
     String column
+    Boolean check_dups = false
 
     String docker
     Int cpu = 1
@@ -614,6 +621,10 @@ task tsv_sorted {
       exit 1
     fi
     cat "~{basename(tsv_file)}" | (read -r; printf "%s\n" "$REPLY"; sort -k $col,$col -s -t $'\t' -T .) > "~{filebase}.sorted.tsv"
+    ~{if check_dups then
+      "dups=$(tail -n+2 \"" + filebase + ".sorted.tsv\" | cut -f$col | uniq --repeated)\n" +
+      "if [[ ! -z \"$dups\" ]]; then\n  echo -e \"Duplicate " + column + "(s) found:\\n$dups\" 1>&2\n  exit 1\nfi"
+    else ""}
     rm "~{basename(tsv_file)}"
   >>>
 
@@ -635,6 +646,8 @@ task tsv_column {
   input {
     File tsv_file
     String column
+    Boolean fail = true
+    Boolean check_dups = false
 
     String docker
     Int cpu = 1
@@ -649,16 +662,29 @@ task tsv_column {
     mv "~{tsv_file}" .
     col=$(head -n1 "~{basename(tsv_file)}" | tr '\t' '\n' | awk -F"\t" '$0=="~{column}" {print NR}')
     if [ "$col" == "" ]; then
-      echo "Column \"~{column}\" does not exist" 1>&2
-      exit 1
+      ~{if fail then
+        "echo \"Column \\\"" + column + "\\\" does not exist\" 1>&2\n" +
+        "exit 1"
+      else
+        "touch \"" + column + ".lines\"\n" +
+        "echo \"true\""}
+    else
+      ~{if check_dups then
+        "dups=$(tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | sort | uniq --repeated)\n" +
+        "if [[ ! -z \"$dups\" ]]; then\n  echo -e \"Duplicate " + column + "(s) found:\\n$dups\" 1>&2\n  exit 1\nfi"
+      else ""}
+      ~{if column != "call_rate" then
+        "tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col > \"" + column + ".lines\""
+      else
+        "max_call_rate=$(tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | sort -g -T . | tail -n1)\n" +
+        "tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | if [[ $max_call_rate > 1.0 ]]; then awk '{print $0/100}'; else cat; fi > \"" + column + ".lines\"\n"}
+      echo "false"
     fi
-    ~{if column != "call_rate" then "tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col > \"" + column + ".lines\""
-    else "max_call_rate=$(tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | sort -g -T . | tail -n1)\n" +
-      "tail -n+2 \"" + basename(tsv_file) + "\" | cut -f$col | if [[ $max_call_rate > 1.0 ]]; then awk '{print $0/100}'; else cat; fi > \"" + column + ".lines\"\n"}
     rm "~{basename(tsv_file)}"
   >>>
 
   output {
+    Boolean failed = read_boolean(stdout())
     File file = column + ".lines"
   }
 
@@ -1051,7 +1077,7 @@ task idat2gtc {
       "  \"" + basename(bpm_file, ".gz") + "\" \\\n" +
       "  \"" + basename(egt_file, ".gz") + "\" \\\n"
     else
-      "iaap-cli \\\n" +
+      "CLR_ICU_VERSION_OVERRIDE=\"$(uconv -V | sed 's/.* //g')\" iaap-cli \\\n" +
       "  gencall \\\n" +
       "  \"" + basename(bpm_file, ".gz") + "\" \\\n" +
       "  \"" + basename(egt_file, ".gz") + "\" \\\n" +
@@ -1778,12 +1804,12 @@ task vcf_phase {
       tr '\n' '\0' | xargs -0 mv -t .
     ~{if defined(ref_fasta_fai) then "mv \"" + select_first([ref_fasta_fai]) + "\" ." else ""}
     ~{if eagle then
-      "bio-eagle \\\n" +
+      "eagle \\\n" +
       "  --geneticMapFile \"" + basename(genetic_map_file) + "\" \\\n" +
       "  --outPrefix \"" + filebase + ".pgt\" \\\n" +
       (if cpu > 1 then "  --numThreads " + cpu + " \\\n" else "") +
-      (if defined(ref_vcf_file) then "  --vcfRef" + basename(select_first([ref_vcf_file])) + "\" \\\n" +
-      "  --vcfTarget \"" else "  --vcf") + " \"" + basename(unphased_vcf_file) + "\" \\\n" +
+      (if defined(ref_vcf_file) then "  --vcfRef \"" + basename(select_first([ref_vcf_file])) + "\" \\\n" +
+      "  --vcfTarget" else "  --vcf") + " \"" + basename(unphased_vcf_file) + "\" \\\n" +
       "  --vcfOutFormat b \\\n" +
       "  --chrom " + chr + " \\\n" +
       (if defined(phase_extra_args) then phase_extra_args + " \\\n" else "") +
@@ -1924,7 +1950,7 @@ task vcf_concat {
       --output-type b \
       ~{if ligate then "--compact-PS" else ""} \
       --file-list $vcf_files \
-      ~{if ligate then "--ligate" else ""} \
+      ~{if ligate then "--ligate \\\n" + "  --ligate-force" else ""} \
       ~{if cpu > 1 then "--threads " + (cpu - 1) else ""} | \
     tee "~{filebase}.bcf" | \
     bcftools index --force --output "~{filebase}.bcf.csi"

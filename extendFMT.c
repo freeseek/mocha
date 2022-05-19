@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2022-01-12"
+#define EXTENDFMT_VERSION "2022-05-18"
 
 /******************************************
  * CIRCULAR BUFFER                        *

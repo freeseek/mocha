@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-assoc_plot_version <- '2022-01-12'
+assoc_plot_version <- '2022-05-18'
 
 suppressPackageStartupMessages(library(optparse))
 suppressPackageStartupMessages(library(data.table))
@@ -41,6 +41,7 @@ parser <- add_option(parser, c('--tbx'), type = 'character', help = 'input REGEN
 parser <- add_option(parser, c('--region'), type = 'character', help = 'region to plot', metavar = '<region>')
 parser <- add_option(parser, c('--min-a1freq'), type = 'double', help = 'minimum minor allele frequency', metavar = '<floatr>')
 parser <- add_option(parser, c('--min-phred'), type = 'integer', help = 'minimum phred score [20]', metavar = '<integer>')
+parser <- add_option(parser, c('--loglog-pval'), type = 'integer', default = 10, help = '-log10 p-val threshold for using log-log scale in manhattan plot', metavar = '<integer>')
 parser <- add_option(parser, c('--cyto-ratio'), type = 'integer', default = 25, help = 'plot to cytoband ratio [25]', metavar = '<integer>')
 parser <- add_option(parser, c('--max-height'), type = 'integer', help = 'phred score ceiling', metavar = '<integer>')
 parser <- add_option(parser, c('--spacing'), type = 'integer', default = 20, help = 'spacing between chromosomes [10]', metavar = '<integer>')
@@ -162,12 +163,18 @@ if (!is.null(args$max_height)) {
   max_height <- max(10.0 * max(df$log10p), -10.0 * log10(5e-8))
 }
 
+# see https://github.com/FINNGEN/saige-pipelines/blob/master/scripts/qqplot.R
+max_loglog <- args$loglog_pval * log10(max_height /10.0) / log10(args$loglog_pval)
+df$log10p[df$log10p > args$loglog] = args$loglog_pval * log10(df$log10p[df$log10p > args$loglog_pval]) / log10(args$loglog_pval)
+tick_pos <- round(seq(1, max_loglog, length.out = 10))
+tick_lab <- sapply(tick_pos, function(x) { round(ifelse(x < args$loglog_pval, x, args$loglog_pval^(x/args$loglog_pval))) })
+
 if (length(unique(df$chrom)) == 1) {
   p <- ggplot(df, aes(x = pos/1e6, y = log10p)) +
     geom_hline(yintercept = -log10(5e-8), color = 'gray', lty = 'longdash') +
     geom_point(size = 1/2) +
     scale_x_continuous(paste('Chromosome', unique(df$chrom), '(Mbp position)'), expand = c(.01,.01)) +
-    scale_y_continuous('-log10(p-value)', expand = c(.01,.01)) +
+    scale_y_continuous('-log10(p-value)', breaks = tick_pos, labels = tick_lab, expand = c(.01,.01)) +
     theme_bw(base_size = args$fontsize)
 } else {
   df$chrompos <- cumsum(c(0,args$spacing * 1e6 + chrlen))[as.numeric(df$chrom)] + df$pos
@@ -175,16 +182,24 @@ if (length(unique(df$chrom)) == 1) {
     geom_hline(yintercept = -log10(5e-8), color = 'gray', lty = 'longdash') +
     geom_point(size = 1/2) +
     scale_x_continuous(NULL, breaks = (cumsum(args$spacing * 1e6 + chrlen) - chrlen/2 - args$spacing * 1e6) / 1e6, labels = names(chrlen), expand = c(.01,.01)) +
-    scale_y_continuous('-log10(p-value)', expand = c(.01,.01)) +
+    scale_y_continuous('-log10(p-value)', breaks = tick_pos, labels = tick_lab, expand = c(.01,.01)) +
     scale_color_manual(guide = FALSE, values = c('FALSE' = 'dodgerblue', 'TRUE' = 'gray')) +
     theme_bw(base_size = args$fontsize)
 }
 
+if (args$csq) {
+  df$coding <- FALSE
+  for (annotation in c('missense', 'inframe', 'protein_altering', 'transcript_amplification', 'exon_loss', 'disruptive', 'start_lost', 'stop_lost', 'stop_gained', 'frameshift', 'splice_acceptor', 'splice_donor', 'transcript_ablation')) {
+    df$coding <- df$coding | grepl(annotation, df$consequence)
+  }
+  p <- p + geom_point(data = df[df$coding, ], size = 1/3, color = 'red')
+}
+
 if (!is.null(args$cytoband) && length(unique(df$chrom)) == 1) {
-  cyto_height <- (max_height - args$min_phred) / args$cyto_ratio
+  cyto_height <- (max_loglog - args$min_phred / 10.0) / args$cyto_ratio
   p <- p  +
-    geom_rect(data = df_cyto[df_cyto$chrom == unique(df$chrom) & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = args$min_phred/10 - cyto_height/10, ymax = args$min_phred/10, color = 'black', size = 1/4, show.legend = FALSE) +
-    geom_polygon(data = df_cen[df_cen$chrom == unique(df$chrom),], aes(x = x/1e6, y = args$min_phred/10 + cyto_height/10 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8) +
+    geom_rect(data = df_cyto[df_cyto$chrom == unique(df$chrom) & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = args$min_phred / 10.0 - cyto_height, ymax = args$min_phred / 10.0, color = 'black', size = 1/4, show.legend = FALSE) +
+    geom_polygon(data = df_cen[df_cen$chrom == unique(df$chrom),], aes(x = x/1e6, y = args$min_phred / 10.0 + cyto_height * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8) +
     scale_fill_manual(values = c('gneg' = 'white', 'gpos25' = 'lightgray', 'gpos50' = 'gray50', 'gpos75' = 'darkgray', 'gpos100' = 'black', 'gvar' = 'lightblue', 'stalk' = 'slategrey'))
 } else {
   cyto_height <- 0
@@ -200,11 +215,11 @@ if ( !is.null(args$region) ) {
 }
 
 if (!is.null(args$max_height) && xlim) {
-  p <- p + coord_cartesian(xlim = c(left, right)/1e6, ylim = c(args$min_phred - cyto_height, max_height)/10)
+  p <- p + coord_cartesian(xlim = c(left, right)/1e6, ylim = c(args$min_phred / 10.0 - cyto_height, max_loglog)/10)
 } else if (xlim) {
   p <- p + coord_cartesian(xlim = c(left, right)/1e6)
 } else if (!is.null(args$max_height)) {
-  p <- p + coord_cartesian(ylim = c(args$min_phred - cyto_height, max_height)/10)
+  p <- p + coord_cartesian(ylim = c(args$min_phred / 10.0 - cyto_height, max_loglog)/10)
 }
 
 if (!is.null(args$pdf)) {

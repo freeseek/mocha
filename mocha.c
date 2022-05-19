@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2022-01-12"
+#define MOCHA_VERSION "2022-05-18"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -2528,13 +2528,25 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
             continue;
 
         bcf_fmt_t *gt_fmt = bcf_get_fmt_id(line, model->gt_id);
-        if (!bcf_get_genotype_phase(gt_fmt, phase_arr, nsmpl)) continue;
+        int ret = bcf_get_genotype_phase(gt_fmt, phase_arr, nsmpl);
+        if (!ret) memset(phase_arr, 0, nsmpl * sizeof(int8_t));
 
         // if neither AD nor LRR and BAF formats are present, skip line
         if (model->flags & WGS_DATA) {
             if (!bcf_get_unphased_genotype_alleles(gt_fmt, gt0, gt1, nsmpl)) continue;
             if (!bcf_get_allelic_depth(bcf_get_fmt_id(line, model->ad_id), gt0, gt1, ad0, ad1, nsmpl)) continue;
         } else {
+            // skip lines without intensity information
+            if (!(lrr_fmt = bcf_get_fmt_id(line, model->lrr_id)) || !(baf_fmt = bcf_get_fmt_id(line, model->baf_id)))
+                continue;
+
+            for (int j = 0; j < nsmpl; j++) {
+                if (bcf_float_is_missing(((float *)lrr_fmt->p)[sample[j].idx]))
+                    ((float *)lrr_fmt->p)[sample[j].idx] = NAN;
+                if (bcf_float_is_missing(((float *)baf_fmt->p)[sample[j].idx]))
+                    ((float *)baf_fmt->p)[sample[j].idx] = NAN;
+            }
+
             if ((info = bcf_get_info_id(line, model->allele_a_id)))
                 model->locus_arr[i].allele_a = info->v1.i;
             else
@@ -2548,20 +2560,11 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
             // missing ALLELE_A and ALLELE_B information
             if (model->locus_arr[i].allele_a < 0 || model->locus_arr[i].allele_b < 0) continue;
             // if there are no genotypes, skip line
-            if (bcf_get_ab_genotypes(gt_fmt, gts, nsmpl, model->locus_arr[i].allele_a, model->locus_arr[i].allele_b)
-                < 0)
+            ret = bcf_get_ab_genotypes(gt_fmt, gts, nsmpl, model->locus_arr[i].allele_a, model->locus_arr[i].allele_b);
+            if (ret < 0)
                 error("Error: site %s:%" PRId64 " contains non-AB alleles\n", bcf_hdr_id2name(hdr, line->rid),
                       line->pos + 1);
-
-            if (!(lrr_fmt = bcf_get_fmt_id(line, model->lrr_id)) || !(baf_fmt = bcf_get_fmt_id(line, model->baf_id)))
-                continue;
-
-            for (int j = 0; j < nsmpl; j++) {
-                if (bcf_float_is_missing(((float *)lrr_fmt->p)[sample[j].idx]))
-                    ((float *)lrr_fmt->p)[sample[j].idx] = NAN;
-                if (bcf_float_is_missing(((float *)baf_fmt->p)[sample[j].idx]))
-                    ((float *)baf_fmt->p)[sample[j].idx] = NAN;
-            }
+            if (!ret) memset(gts, GT_NC, nsmpl * sizeof(int8_t));
 
             int is_x_nonpar = rid == model->genome_rules->x_rid && pos > model->genome_rules->x_nonpar_beg
                               && pos < model->genome_rules->x_nonpar_end
@@ -2578,14 +2581,17 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
                 if (is_y_or_mt) continue;
                 int k = 0;
                 for (int j = 0; j < nsmpl; j++) {
+                    if (gts[sample[j].idx] != gt) continue;
                     if (is_x_nonpar && sample[j].computed_gender == GENDER_MALE) continue;
-                    if (gts[sample[j].idx] == gt) imap_arr[k++] = sample[j].idx;
+                    if (isnan(((float *)baf_fmt->p)[j]) || isnan(((float *)lrr_fmt->p)[j])) continue;
+                    imap_arr[k++] = sample[j].idx;
                 }
                 float baf_b = 0.0f, baf_m = 0.0f, lrr_b = 0.0f;
                 if (model->regress_baf_lrr != -1 && model->regress_baf_lrr <= k) {
                     float xss = 0.0f, yss = 0.0f, xyss = 0.0f;
                     get_cov((float *)lrr_fmt->p, (float *)baf_fmt->p, k, imap_arr, &xss, &yss, &xyss);
                     baf_m = xss == 0.0f ? 0.0f : xyss / xss;
+                    if (isnan(baf_m)) baf_m = 0.0f;
                     for (int j = 0; j < k; j++)
                         ((float *)baf_fmt->p)[imap_arr[j]] -= baf_m * ((float *)lrr_fmt->p)[imap_arr[j]];
                 }
@@ -2697,7 +2703,7 @@ static int read_stats(sample_t *samples, const bcf_hdr_t *hdr, const char *fn, i
     if (tsv_register(tsv, "computed_gender", tsv_read_computed_gender, (void *)&sample.computed_gender) < 0)
         error("File %s is missing the computed_gender column\n", fn);
     if (tsv_register(tsv, "call_rate", tsv_read_float, (void *)&sample.stats.call_rate) < 0)
-        error("File %s is missing the call_rate column\n", fn);
+        sample.stats.call_rate = NAN;
     int lrr_median = tsv_register(tsv, flags & WGS_DATA ? "cov_median" : "lrr_median", tsv_read_float,
                                   (void *)&sample.stats.lrr_median);
     int lrr_sd =

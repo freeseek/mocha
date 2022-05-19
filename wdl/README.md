@@ -74,7 +74,7 @@ Allowed columns in the sample table:
 | sample_id       |         | req. | req. | req. | req  | req. | req. | req. |
 | batch_id        |         | req. | req. | req. | req  | req. |      |      |
 | computed_gender |         |      |      |      |      |      | req. | req. |
-| call_rate       |         |      |      |      |      |      | req. | reg. |
+| call_rate       |         |      |      |      |      |      | req. |      |
 | green_idat      | allowed | req. |      |      |      |      |      |      |
 | red_idat        | allowed | req. |      |      |      |      |      |      |
 | gtc             | allowed |      | req. |      |      |      |      |      |
@@ -89,7 +89,7 @@ awk -F"\t" -v OFS="\t" '{x[$1]++; if (x[$1]>1) $1=$1"-"(x[$1]-1); print}' sample
 ```
 to generate a new table with additional suffixes in the sample IDs to make the IDs unique. It is instead allowed to have the same file names in other columns as long as the **batch_id** for these duplicates is different
 
-When using the pipeline in **idat**, **gtc**, **cel**, or **chp** mode, it is extremely important that IDAT, GTC, CEL, or CHP files within the same batch come from the same DNA microarray model. Discrepancies across the input files within the same batch will cause undefined behavior. It is okay to use files from different DNA microarrays across batches but we highly recommend that these being different versions of the same array (e.g\. Global Screening Array v1.0 vs\. the Global Screening Array v2.0)
+When using the pipeline in **idat**, **gtc**, **cel**, or **chp** mode, it is extremely important that IDAT, GTC, CEL, or CHP files within the same batch come from the same DNA microarray model. Discrepancies across the input files within the same batch will cause undefined behavior. It is possible to use files from different DNA microarrays across batches but we only recommend to do so when these are different versions of the same array (e.g\. Global Screening Array v1.0 and Global Screening Array v2.0). Do not combine in the same run batches from completely different arrays (e.g\. Global Screening Array and Multi-Ethnic Global Array)
 
 We further recommend batches of 4,000-5,000 samples as this is small enough to make most tasks able to run on preemptible computing and large enough to make MoChA able to perform effective within-batch adjustments for BAF and LRR. For DNA microarrays such as the Global Screening Array and the Multi-Ethnic Global Array, this batch sizes will generate VCFs smaller than, respectively, 20GB and 60GB
 
@@ -538,7 +538,7 @@ Terra has a 2,300 task limit per project (called \"Hog Limits\") but a single jo
 Imputation pipeline
 ===================
 
-Once you have run the MoChA pipeline you will obtain as an output an array of `pgt_vcf_files` VCF files (one per batch). These files can be used as a basis for imputation and then to extend the mosaic chromosomal calls to imputed variants to build a map of which alleles are over-represented and under-represented. Imputation can be run with <a href="https://jmarchini.org/impute5/">IMPUTE5</a> or with <a href="http://faculty.washington.edu/browning/beagle/beagle.html">Beagle5</a>, and both require as input VCF files without missing or unphased genotypes. Notice that, while Beagle5 is completely open source and released under the GPLv3 license, the source code for IMPUTE5 is not provided and the software is intended only for academics carrying out research and not for use by consumers or commercial business. If you are interested in using this imputation pipeline commercially, you can start using Beagle5 by setting the corresponding boolean flag in the pipeline and then negotiate a license for IMPUTE5 if the cost savings apply to you. We have observed IMPUTE5 to be 2-3x cheaper to run than Beagle5
+Once you have run the MoChA pipeline you will obtain as an output an array of `pgt_vcf_files` VCF files (one per batch). These files can be used as a basis for imputation and then to extend the mosaic chromosomal calls to imputed variants to build a map of which alleles are over-represented and under-represented. Imputation can be run with <a href="https://jmarchini.org/software/#impute-5">IMPUTE5</a> or with <a href="http://faculty.washington.edu/browning/beagle/beagle.html">Beagle5</a>, and both require as input VCF files without missing or unphased genotypes. Notice that, while Beagle5 is completely open source and released under the GPLv3 license, the source code for IMPUTE5 is not provided and the software is intended only for academics carrying out research and not for use by consumers or commercial business. If you are interested in using this imputation pipeline commercially, you can start using Beagle5 by setting the corresponding boolean flag in the pipeline and then negotiate a license for IMPUTE5 if the cost savings apply to you. We have observed IMPUTE5 to be 2-3x cheaper to run than Beagle5
 
 The following are the primary options that you can set in the main input json file for use with <a href="impute.wdl">impute.wdl</a>
 
@@ -598,7 +598,7 @@ Define options to run the WDL:
   "impute.docker_repository": "us.gcr.io/mccarroll-mocha"
 }
 ```
-If you want to impute all chromosomes, you can omit the `impute.target_chrs` option
+If you want to impute all chromosomes, you can omit the `impute.target_chrs` option. As there is no way to determine the amount of memory required by IMPUTE5 to impute a given window, currently we advise to not use imputing windows larger then 10 centimorgans (i.e. `max_win_size_cm≤10`), or else the imputation tasks might fail
 
 The `mocha_tsv_file` input table should look like this:
 
@@ -703,59 +703,61 @@ The association pipeline will run the <a href="https://rgcgithub.github.io/regen
 
 The following are the primary options that you can set in the main input json file for use with <a href="assoc.wdl">assoc.wdl</a>
 
-| key                      | type     | description                                                                                            |
-|--------------------------|----------|--------------------------------------------------------------------------------------------------------|
-| sample_set_id            | String   | cohort name that will be used as prefix for temporary and output files                                 |
-| sex_specific             | String?  | whether the analysis should be restricted only to **male**s or **female**s (do not specify otherwise)  |
-| max_win_size_cm_step2    | Float?   | maximum windows size in cM for running regressions in regenie step 2 [20.0]                            |
-| sample_tsv_file          | File     | TSV file with sample information (must include **sample_id** and **computed_gender** columns)          |
-| keep_samples_file        | File?    | optional file with list of samples to keep                                                             |
-| remove_samples_file      | File?    | optional file with list of samples to remove                                                           |
-| min_mac                  | Int?     | minimum minor allele count for variant analyses [10]                                                   |
-| min_info                 | Float?   | minimum imputation info score (IMPUTE/MACH R^2) when testing variants                                  |
-| min_maf                  | Float?   | minimum minor allele frequency for variant analyses [0.01]                                             |
-| covar_tsv_file           | File?    | TSV file with covariates information (must include **sample_id** column and not include **sex**)       |
-| pheno_tsv_file           | File     | TSV file with phenotypes that need to be tested (must include **sample_id** column)                    |
-| dosage_field             | String?  | dosage field to use in imputed input VCFs [DS]                                                         |
-| space_character          | String?  | indicates how to convert spaces in sample IDs for analyses with regenie and PLINK [_]                  |
-| binary                   | Boolean? | whether the phenotypes tested are binary phenotypes [true]                                             |
-| min_case_count           | Int?     | binary phenotypes with lower case count will be excluded from analysis [20]                            |
-| min_sex_count            | Int?     | phenotypes with lower counts for each of the tested sexes will be excluded from analysis [20]          |
-| bsize                    | Int?     | size of the genotype blocks for regenie [500]                                                          |
-| max_vif                  | Int?     | variance inflation factor for PLINK multicollinearity check [1000]                                     |
-| loocv                    | Boolean? | whether to use leave-one out cross validation [true]                                                   |
-| regenie_step0_extra_args | String?  | extra arguments for regenie when computing the level 0 predictions                                     |
-| regenie_step1_extra_args | String?  | extra arguments for regenie when computing the Leave One Chromosome Out (LOCO) predictions             |
-| regenie_step2_extra_args | String?  | extra arguments for regenie when computing the association tests                                       |
-| plink_extra_args         | String?  | extra arguments for PLINK when running in-cis associations for excess heterozygosity                   |
-| step1                    | Boolean? | whether to compute the prediction through regenie step 1 [true]                                        |
-| pgt_output               | Boolean? | whether to output the pruned PLINK 1.9 files generated during step 1 [false]                           |
-| pca                      | Boolean? | whether to compute approximate principal component loadings from pruned genotype data [false]          |
-| step2                    | Boolean? | whether to compute association tests through regenie step 2 [true]                                     |
-| cis                      | Boolean? | whether to compute in-cis associations for excess heterozygosity using PLINK                           |
-| plot                     | Boolean? | whether to generate a summary Manhattan plot [true]                                                    |
-| pca_ndim                 | Integer? | number of principal components for which to report loadings if requested [20]                          |
-| input_loco_lst           | File?    | regenie `_pred.list` file with list of LOCO predictions files for step 2                               |
-| input_loco_path          | String?  | regenie `.loco.gz` files containing LOCO predictions for each phenotype                                |
-| input_firth_lst          | File?    | regenie `_firth.list` file with list of Firth covariates regressions files for step 2                  |
-| input_firth_path         | String?  | regenie `.firth.gz` files containing Firth covariates regressions for each phenotype                   |
-| ref_name                 | String?  | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]                   |
-| ref_path                 | String?  | path for reference genome resources (needed unless all resources are provided with full path)          |
-| ref_fasta_fai            | String?  | reference sequence index [GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai/human_g1k_v37.fasta.fai] |
-| ref_n_chrs               | Int?     | number of chromosomes [23]                                                                             |
-| genetic_map_file         | String?  | genetic map [genetic_map_hg38_withX.txt.gz/genetic_map_hg19_withX.txt.gz]                              |
-| pca_exclusion_regions    | String?  | regions to exclup from PCA [5:...,6:...,8:...,11:...]                                                  |
-| cyto_file                | String?  | file with location of cytoband regions [cytoBand.txt.gz]                                               |
-| mocha_tsv_file           | File?    | TSV file with batch information for phased VCF files (e.g. output table from mocha.wdl)                |
-| mocha_data_path          | String?  | path for phased VCF files (overrides **path** column in **mocha_tsv_file**)                            |
-| impute_tsv_file          | File?    | TSV file with batch information for imputed VCF files (e.g. output table from impute.wdl)              |
-| impute_data_path         | String?  | path for imputed VCF files (overrides **path** column in **impute_tsv_file**)                          |
-| basic_bash_docker        | String?  | docker to run basic bash scripts [debian:stable-slim]                                                  |
-| pandas_docker            | String?  | docker to run task ref_scatter [amancevice/pandas:slim]                                                |
-| docker_repository        | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
-| bcftools_docker          | String?  | docker to run tasks requiring BCFtools [bcftools:1.14-yyyymmdd]                                        |
-| regenie_docker           | String?  | docker to run tasks requiring regenie and PLINK [regenie:1.14-yyyymmdd]                                |
-| r_mocha_docker           | String?  | docker to run task assoc_plot [r_mocha:1.14-yyyymmdd]                                                  |
+| key                       | type     | description                                                                                            |
+|---------------------------|----------|--------------------------------------------------------------------------------------------------------|
+| sample_set_id             | String   | cohort name that will be used as prefix for temporary and output files                                 |
+| sex_specific              | String?  | whether the analysis should be restricted only to **male**s or **female**s (do not specify otherwise)  |
+| max_win_size_cm_step2     | Float?   | maximum windows size in cM for running regressions in regenie step 2 [20.0]                            |
+| sample_tsv_file           | File     | TSV file with sample information (must include **sample_id** and **computed_gender** columns)          |
+| keep_samples_file         | File?    | optional file with list of samples to keep                                                             |
+| remove_samples_file       | File?    | optional file with list of samples to remove                                                           |
+| min_mac                   | Int?     | minimum minor allele count for variant analyses [10]                                                   |
+| min_info                  | Float?   | minimum imputation info score (IMPUTE/MACH R^2) when testing variants                                  |
+| min_maf                   | Float?   | minimum minor allele frequency for variant analyses [0.01]                                             |
+| covar_tsv_file            | File?    | TSV file with covariates information (must include **sample_id** column and not include **sex**)       |
+| pheno_tsv_file            | File     | TSV file with phenotypes that need to be tested (must include **sample_id** column)                    |
+| dosage_field              | String?  | dosage field to use in imputed input VCFs [DS]                                                         |
+| space_character           | String?  | indicates how to convert spaces in sample IDs for analyses with regenie and PLINK [_]                  |
+| binary                    | Boolean? | whether the phenotypes tested are binary phenotypes [true]                                             |
+| min_case_count            | Int?     | binary phenotypes with lower case count will be excluded from analysis [20]                            |
+| min_sex_count             | Int?     | phenotypes with lower counts for each of the tested sexes will be excluded from analysis [20]          |
+| bsize                     | Int?     | size of the genotype blocks for regenie [500]                                                          |
+| max_vif                   | Float?   | maximum variance inflation factor for PLINK multicollinearity check [2000]                             |
+| max_corr                  | Float?   | maximum absolute value of the correlation between two predictors [0.9999]                              |
+| cis_plot_min_a1freq       | Float?   | minimum minor allele frequey for plotting PLINK cis-associations [0.01]                                |
+| loocv                     | Boolean? | whether to use leave-one out cross validation [true]                                                   |
+| regenie_step0_extra_args  | String?  | extra arguments for regenie when computing the level 0 predictions                                     |
+| regenie_step1_extra_args  | String?  | extra arguments for regenie when computing the Leave One Chromosome Out (LOCO) predictions             |
+| regenie_step2_extra_args  | String?  | extra arguments for regenie when computing the association tests                                       |
+| plink_extra_args          | String?  | extra arguments for PLINK when running in-cis associations for excess heterozygosity                   |
+| step1                     | Boolean? | whether to compute the prediction through regenie step 1 [true]                                        |
+| pgt_output                | Boolean? | whether to output the pruned PLINK 1.9 files generated during step 1 [false]                           |
+| pca                       | Boolean? | whether to compute approximate principal component loadings from pruned genotype data [false]          |
+| step2                     | Boolean? | whether to compute association tests through regenie step 2 [true]                                     |
+| cis                       | Boolean? | whether to compute in-cis associations for excess heterozygosity using PLINK [false]                   |
+| plot                      | Boolean? | whether to generate a summary Manhattan plot [true]                                                    |
+| pca_ndim                  | Integer? | number of principal components for which to report loadings if requested [20]                          |
+| input_loco_lst            | File?    | regenie `_pred.list` file with list of LOCO predictions files for step 2                               |
+| input_loco_path           | String?  | regenie `.loco.gz` files containing LOCO predictions for each phenotype                                |
+| input_firth_lst           | File?    | regenie `_firth.list` file with list of Firth covariates regressions files for step 2                  |
+| input_firth_path          | String?  | regenie `.firth.gz` files containing Firth covariates regressions for each phenotype                   |
+| ref_name                  | String?  | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]                   |
+| ref_path                  | String?  | path for reference genome resources (needed unless all resources are provided with full path)          |
+| ref_fasta_fai             | String?  | reference sequence index [GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai/human_g1k_v37.fasta.fai] |
+| ref_n_chrs                | Int?     | number of chromosomes [23]                                                                             |
+| genetic_map_file          | String?  | genetic map [genetic_map_hg38_withX.txt.gz/genetic_map_hg19_withX.txt.gz]                              |
+| pca_exclusion_regions     | String?  | regions to exclup from PCA [5:...,6:...,8:...,11:...]                                                  |
+| cyto_file                 | String?  | file with location of cytoband regions [cytoBand.txt.gz]                                               |
+| mocha_tsv_file            | File?    | TSV file with batch information for phased VCF files (e.g. output table from mocha.wdl)                |
+| mocha_data_path           | String?  | path for phased VCF files (overrides **path** column in **mocha_tsv_file**)                            |
+| impute_tsv_file           | File?    | TSV file with batch information for imputed VCF files (e.g. output table from impute.wdl)              |
+| impute_data_path          | String?  | path for imputed VCF files (overrides **path** column in **impute_tsv_file**)                          |
+| basic_bash_docker         | String?  | docker to run basic bash scripts [debian:stable-slim]                                                  |
+| pandas_docker             | String?  | docker to run task ref_scatter [amancevice/pandas:slim]                                                |
+| docker_repository         | String?  | location of docker images [us.gcr.io/mccarroll-mocha]                                                  |
+| bcftools_docker           | String?  | docker to run tasks requiring BCFtools [bcftools:1.14-yyyymmdd]                                        |
+| regenie_docker            | String?  | docker to run tasks requiring regenie and PLINK [regenie:1.14-yyyymmdd]                                |
+| r_mocha_docker            | String?  | docker to run task assoc_plot [r_mocha:1.14-yyyymmdd]                                                  |
 
 You can define samples to be removed from analysis and a table with phenotypes associated to each chromosomal alteration type as explained [here](https://github.com/freeseek/mocha/#mosaic-phenotypes)
 
@@ -794,14 +796,13 @@ The following are the primary options that you can set in the main input json fi
 | key               | type           | description                                                                                            |
 |-------------------|----------------|--------------------------------------------------------------------------------------------------------|
 | sample_set_id     | String         | cohort name that will be used as prefix for temporary and output files                                 |
-| vcf               | Boolean?       | whether the input summary statistics files are in VCF format [false]                                   |
 | sample_header     | String?        | what column header to use for the column with samples IDs [sample_id]                                  |
 | region            | String?        | region to extract for polygenic score analysis                                                         |
 | tag               | String?        | VCF format tag to use for polygenic score computation among GP, AP, HDS, DS, GT, and AS                |
 | ext_string        | String?        | extension string for the output polygenic score table [scores]                                         |
 | summary_path      | String?        | path for summary statistics files (unless all files are provided with full path)                       |
 | summary_files     | Array[String]  | summary statistics files                                                                               |
-| summary_idxs      | Array[String]? | summary statistics files indexes (if files provided as VCF)                                            |
+| summary_idxs      | Array[String]? | summary statistics files indexes (if score files provided as VCF)                                      |
 | q_score_thr       | Array[Float]?  | list of p-value thresholds                                                                             |
 | covar_tsv_file    | File?          | covariate file to be used to computed adjusted polygenic scores                                        |
 | ref_name          | String?        | name of reference genome, with resource default files for GRCh37 and GRCh38 [GRCh38]                   |
@@ -831,7 +832,7 @@ for i in {163..191}; do
     NR>1 {chr="chr"$(f["chr_name"]); pos=$(f["chr_position"]); ref=$(f["reference_allele"])
     gsub("\t", "@", $0); printf "%s\t%d\t%d\t%s\t0\t+\n", chr, pos-1, pos+length(ref), $0}' | \
     ./liftOver /dev/stdin hg19ToHg38.over.chain.gz /dev/stdout /dev/stderr) | \
-    awk '{rev["A"]="T"; rev["C"]="G"; rev["G"]="C"; rev["T"]="A"}
+    awk 'BEGIN {rev["A"]="T"; rev["C"]="G"; rev["G"]="C"; rev["T"]="A"}
     NR==10 {for (i=1; i<=NF; i++) f[$i] = i; snp=f["rsID"]; chr=f["chr_name"]; pos=f["chr_position"];
     ref=f["reference_allele"]; alt=f["effect_allele"]} NR<=10
     NR>10 {split($4,a,"@"); a[chr]=$1; a[pos]=$2+1;
@@ -1210,7 +1211,7 @@ The following softwares are used by the various steps of the pipelines:
 | <a href="https://github.com/freeseek/mocha">MoChA</a>             | calls mosaic chromosomal alterations           | MIT         |
 | <a href="https://github.com/odelaneau/shapeit4">SHAPEIT4</a>      | estimates haplotype phase from genotypes       | MIT         |
 | <a href="https://github.com/poruloh/Eagle">Eagle</a>              | estimates haplotype phase from genotypes       | GPLv3       |
-| <a href="https://jmarchini.org/impute5/">IMPUTE5</a>              | imputes genotypes from phased haplotypes       | proprietary |
+| <a href="https://jmarchini.org/software/#impute-5">IMPUTE5</a>    | imputes genotypes from phased haplotypes       | proprietary |
 | <a href="http://faculty.washington.edu/browning/beagle/beagle.html">Beagle5</a> | imputes genotypes from phased haplotypes       |  GPLv3       |
 | <a href="https://github.com/rgcgithub/regenie">regenie</a>        | runs whole genome regression modelling         | MIT         |
 | <a href="https://github.com/chrchang/plink-ng">PLINK</a>          | runs association analyses                      | GPLv3       |
@@ -1262,15 +1263,15 @@ RUN apt-get -qqy update --fix-missing && \
                  tabix \
                  samtools \
                  bcftools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.14-20220112_amd64.deb && \
-    dpkg -i gtc2vcf_1.14-20220112_amd64.deb && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.14-20220112_amd64.deb && \
-    dpkg -i bio-mocha_1.14-20220112_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.14-20220518_amd64.deb && \
+    dpkg -i gtc2vcf_1.14-20220518_amd64.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.14-20220518_amd64.deb && \
+    dpkg -i bio-mocha_1.14-20220518_amd64.deb && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.14-20220112_amd64.deb \
-           bio-mocha_1.14-20220112_amd64.deb \
+    rm -rf gtc2vcf_1.14-20220518_amd64.deb \
+           bio-mocha_1.14-20220518_amd64.deb \
            /var/lib/apt/lists/*
 ```
 
@@ -1288,8 +1289,8 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev \
                  libmono-system-windows-forms4.0-cil && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.14-20220112_amd64.deb && \
-    dpkg -i gtc2vcf_1.14-20220112_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.14-20220518_amd64.deb && \
+    dpkg -i gtc2vcf_1.14-20220518_amd64.deb && \
 #   wget https://support.illumina.com/content/dam/illumina-support/documents/downloads/software/beeline/autoconvert-software-v2-0-1-installer.zip && \
     wget --no-check-certificate https://www.dropbox.com/s/tm02cu6t0ib1us7/autoconvert-software-v2-0-1-installer.zip && \
     unzip autoconvert-software-v2-0-1-installer.zip && \
@@ -1310,7 +1311,7 @@ RUN apt-get -qqy update --fix-missing && \
                  gcc \
                  libc6-dev && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.14-20220112_amd64.deb \
+    rm -rf gtc2vcf_1.14-20220518_amd64.deb \
            autoconvert-software-v2-0-1-installer.zip \
            AutoConvertInstaller.msi \
            genomestudio-software-v2-0-4-5-installer.zip \
@@ -1330,8 +1331,8 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  bcftools \
                  icu-devtools && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.14-20220112_amd64.deb && \
-    dpkg -i gtc2vcf_1.14-20220112_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.14-20220518_amd64.deb && \
+    dpkg -i gtc2vcf_1.14-20220518_amd64.deb && \
     wget ftp://webdata2:webdata2@ussd-ftp.illumina.com/downloads/software/iaap/iaap-cli-linux-x64-1.1.0.tar.gz && \
     mkdir /opt/iaap-cli && \
     tar xzvf iaap-cli-linux-x64-1.1.0.tar.gz -C /opt iaap-cli-linux-x64-1.1.0/iaap-cli --strip-components=1 && \
@@ -1340,7 +1341,7 @@ RUN apt-get -qqy update --fix-missing && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.14-20220112_amd64.deb \
+    rm -rf gtc2vcf_1.14-20220518_amd64.deb \
            iaap-cli-linux-x64-1.1.0.tar.gz \
            /var/lib/apt/lists/*
 ```
@@ -1354,15 +1355,15 @@ RUN apt-get -qqy update --fix-missing && \
                  wget \
                  bcftools \
                  unzip && \
-    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.14-20220112_amd64.deb && \
-    dpkg -i gtc2vcf_1.14-20220112_amd64.deb && \
+    wget http://software.broadinstitute.org/software/gtc2vcf/gtc2vcf_1.14-20220518_amd64.deb && \
+    dpkg -i gtc2vcf_1.14-20220518_amd64.deb && \
     wget --no-check-certificate https://downloads.thermofisher.com/APT/APT_2.11.4/apt_2.11.4_linux_64_bit_x86_binaries.zip && \
     unzip -ojd /usr/local/bin apt_2.11.4_linux_64_bit_x86_binaries.zip apt_2.11.4_linux_64_bit_x86_binaries/bin/apt-probeset-genotype && \
     chmod a+x /usr/local/bin/apt-probeset-genotype && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf gtc2vcf_1.14-20220112_amd64.deb \
+    rm -rf gtc2vcf_1.14-20220518_amd64.deb \
            apt_2.11.4_linux_64_bit_x86_binaries.zip \
            /var/lib/apt/lists/*
 ```
@@ -1379,12 +1380,12 @@ RUN apt-get -qqy update --fix-missing && \
                  r-cran-ggplot2 \
                  r-cran-data.table \
                  r-cran-reshape2 && \
-    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.14-20220112_amd64.deb && \
-    dpkg -i bio-mocha_1.14-20220112_amd64.deb && \
+    wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.14-20220518_amd64.deb && \
+    dpkg -i bio-mocha_1.14-20220518_amd64.deb && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget && \
     apt-get -qqy clean && \
-    rm -rf bio-mocha_1.14-20220112_amd64.deb \
+    rm -rf bio-mocha_1.14-20220518_amd64.deb \
            /var/lib/apt/lists/*
 ```
 
@@ -1519,15 +1520,15 @@ RUN apt-get -qqy update --fix-missing && \
                  bcftools \
                  plink1.9 \
                  plink2 && \
-    wget --no-check-certificate https://github.com/rgcgithub/regenie/releases/download/v2.2.4/regenie_v2.2.4.gz_x86_64_Linux_mkl.zip && \
-    unzip -d /usr/local/bin regenie_v2.2.4.gz_x86_64_Linux_mkl.zip && \
-    chmod a+x /usr/local/bin/regenie_v2.2.4.gz_x86_64_Linux_mkl && \
-    ln -s regenie_v2.2.4.gz_x86_64_Linux_mkl /usr/local/bin/regenie && \
+    wget --no-check-certificate https://github.com/rgcgithub/regenie/releases/download/v3.1.1/regenie_v3.1.1.gz_x86_64_Linux_mkl_static_gfortran.zip && \
+    unzip -d /usr/local/bin regenie_v3.1.1.gz_x86_64_Linux_mkl_static_gfortran.zip && \
+    chmod a+x /usr/local/bin/regenie_v3.1.1.gz_x86_64_Linux_mkl && \
+    ln -s regenie_v3.1.1.gz_x86_64_Linux_mkl /usr/local/bin/regenie && \
     apt-get -qqy purge --auto-remove --option APT::AutoRemove::RecommendsImportant=false \
                  wget \
                  unzip && \
     apt-get -qqy clean && \
-    rm -rf regenie_v2.2.4.gz_x86_64_Linux_mkl.zip \
+    rm -rf regenie_v3.1.1.gz_x86_64_Linux_mkl_static_gfortran.zip \
            /var/lib/apt/lists/*
 ```
 

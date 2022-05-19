@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2022-01-12
+## Version 2022-05-18
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs allelic shift imbalance analysis in a given region
 ##
 ## Cromwell version support
-## - Successfully tested on v73
+## - Successfully tested on v79
 ##
 ## Distributed under terms of the MIT License
 
@@ -43,8 +43,8 @@ workflow shift {
     Boolean plot = true
     String basic_bash_docker = "debian:stable-slim"
     String docker_repository = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.14-20220112"
-    String r_mocha_docker = "r_mocha:1.14-20220112"
+    String bcftools_docker = "bcftools:1.15.1-20220518"
+    String r_mocha_docker = "r_mocha:1.15.1-20220518"
   }
 
   String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""

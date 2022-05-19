@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2022-01-12"
+#define MOCHATOOLS_VERSION "2022-05-18"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
@@ -60,6 +60,8 @@ typedef struct {
     int phase;      // whether phase information should be included in the allelic shift
     char *info_str; // info field for binomial or Fisher's exact test
     int phred;      // whether the test result should be phred scaled
+    int odds_ratio; // whether the odds ratio should be computed
+    int log_odds;   // whether the log odds ratio should be computed
     int nsmpl, allele_a_id, allele_b_id, adjust_id, gt_id, ad_id, baf_id, lrr_id, info_id, as_id;
     int8_t *gt_phase_arr, *as_arr;
     int16_t *gt0_arr, *gt1_arr, *ad0_arr, *ad1_arr;
@@ -71,7 +73,7 @@ typedef struct {
     int *imap_arr;
     faidx_t *fai;
     bcf_hdr_t *in_hdr, *out_hdr;
-    kstring_t summary_str, test_str;
+    kstring_t summary_str, test_str, odds_ratio_str, log_odds_str;
 } args_t;
 
 args_t *args;
@@ -128,15 +130,18 @@ const char *usage(void) {
            "       --gc-window-size <int>    window size in bp used to compute the GC and CpG content [" GC_WIN_DFLT
            "]\n"
            "   -x, --sex <file>              file including information about the gender of the samples\n"
-           "       --summary <tag>           allelic shift FORMAT tag to summarize\n"
-           "       --phase                   whether phase information should be included in the allelic shift\n"
-           "       --test <tag>              performs binomial or Fisher's exact test for INFO tag\n"
-           "       --phred                   reports p-values as phred scaled\n"
            "   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with \"^\" "
            "prefix)\n"
            "   -S, --samples-file [^]<file>  file of samples to include (or exclude with \"^\" prefix)\n"
            "       --force-samples           only warn about unknown subset samples\n"
            "   -G, --drop-genotypes          drop individual genotype information (after running statistical tests)\n"
+           "\n"
+           "       --summary <tag>           allelic shift FORMAT tag to summarize\n"
+           "       --phase                   whether phase information should be included in the allelic shift\n"
+           "       --test <tag>              performs binomial or Fisher's exact test for INFO tag\n"
+           "       --phred                   reports p-values as phred scaled\n"
+           "       --odds-ratio              includes odds ratios for the INFO tag\n"
+           "       --log-odds                includes log odds ratios for the INFO tag\n"
            "\n"
            "Examples:\n"
            "    bcftools +mochatools -- -l\n"
@@ -223,14 +228,16 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
                                        {"fasta-ref", required_argument, NULL, 'f'},
                                        {"gc-window-size", required_argument, NULL, 2},
                                        {"sex", required_argument, NULL, 'x'},
-                                       {"summary", required_argument, NULL, 3},
-                                       {"phase", no_argument, NULL, 4},
-                                       {"test", required_argument, NULL, 5},
-                                       {"phred", no_argument, NULL, 6},
                                        {"samples", required_argument, NULL, 's'},
                                        {"samples-file", required_argument, NULL, 'S'},
-                                       {"force-samples", no_argument, NULL, 7},
+                                       {"force-samples", no_argument, NULL, 3},
                                        {"drop-genotypes", no_argument, NULL, 'G'},
+                                       {"summary", required_argument, NULL, 4},
+                                       {"phase", no_argument, NULL, 5},
+                                       {"test", required_argument, NULL, 6},
+                                       {"phred", no_argument, NULL, 7},
+                                       {"odds-ratio", no_argument, NULL, 8},
+                                       {"log-odds", no_argument, NULL, 9},
                                        {NULL, 0, NULL, 0}};
 
     while ((c = getopt_long(argc, argv, "h?lt:f:x:s:S:G", loptions, NULL)) >= 0) {
@@ -255,18 +262,6 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
         case 'x':
             gender_fname = optarg;
             break;
-        case 3:
-            args->as_str = optarg;
-            break;
-        case 4:
-            args->phase = 1;
-            break;
-        case 5:
-            args->info_str = optarg;
-            break;
-        case 6:
-            args->phred = 1;
-            break;
         case 's':
             sample_names = optarg;
             break;
@@ -274,11 +269,29 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
             sample_names = optarg;
             sample_is_file = 1;
             break;
-        case 7:
+        case 3:
             force_samples = 1;
             break;
         case 'G':
             sites_only = 1;
+            break;
+        case 4:
+            args->as_str = optarg;
+            break;
+        case 5:
+            args->phase = 1;
+            break;
+        case 6:
+            args->info_str = optarg;
+            break;
+        case 7:
+            args->phred = 1;
+            break;
+        case 8:
+            args->odds_ratio = 1;
+            break;
+        case 9:
+            args->log_odds = 1;
             break;
         case 'h':
         case '?':
@@ -477,6 +490,22 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
         ksprintf(&str, "##INFO=<ID=%s,Number=1,Type=Float,Description=\"%s%s test for %s\">", args->test_str.s,
                  args->phred ? "Phred scaled " : "", number == 2 ? "Binomial" : "Fisher's exact", args->info_str);
         bcf_hdr_append(args->out_hdr, str.s);
+        if (args->odds_ratio) {
+            kputs("odds_ratio_", &args->odds_ratio_str);
+            kputs(args->info_str, &args->odds_ratio_str);
+            str.l = 0;
+            ksprintf(&str, "##INFO=<ID=%s,Number=1,Type=Float,Description=\"Odds ratio for %s\">",
+                     args->odds_ratio_str.s, args->info_str);
+            bcf_hdr_append(args->out_hdr, str.s);
+        }
+        if (args->log_odds) {
+            kputs("log_odds_", &args->log_odds_str);
+            kputs(args->info_str, &args->log_odds_str);
+            str.l = 0;
+            ksprintf(&str, "##INFO=<ID=%s,Number=1,Type=Float,Description=\"Log odds ratio for %s\">",
+                     args->log_odds_str.s, args->info_str);
+            bcf_hdr_append(args->out_hdr, str.s);
+        }
     }
 
     if (sites_only) {
@@ -932,17 +961,25 @@ ret:
             error("INFO field %s at %s:%" PRId64 " should contain two or four integers\n", args->info_str,
                   bcf_hdr_id2name(args->in_hdr, rec->rid), rec->pos + 1);
         bcf_get_info_int32(args->out_hdr, rec, args->info_str, &args->info_arr, &args->m_info);
+        float value, odds_ratio;
         if (info->len == 2) {
             double phred_pval = phred_pbinom(args->info_arr[0], args->info_arr[0] + args->info_arr[1]);
-            ret[0] = (float)(args->phred ? phred_pval : exp(-0.1 * M_LN10 * phred_pval));
-            bcf_update_info_float(args->out_hdr, rec, args->test_str.s, &ret, 1);
+            value = (float)(args->phred ? phred_pval : exp(-0.1 * M_LN10 * phred_pval));
+            odds_ratio = (float)args->info_arr[1] / (float)args->info_arr[0];
         } else {
             double left, right, fisher;
             double pval = kt_fisher_exact(args->info_arr[0], args->info_arr[1], args->info_arr[2], args->info_arr[3],
                                           &left, &right, &fisher);
-            ret[0] = (float)(args->phred ? -10.0 * M_LOG10E * log(pval) : pval);
+            value = (float)(args->phred ? -10.0 * M_LOG10E * log(pval) : pval);
+            odds_ratio = ((float)args->info_arr[1] * (float)args->info_arr[2])
+                         / ((float)args->info_arr[0] * (float)args->info_arr[3]);
         }
-        bcf_update_info_float(args->out_hdr, rec, args->test_str.s, &ret, 1);
+        bcf_update_info_float(args->out_hdr, rec, args->test_str.s, &value, 1);
+        if (args->odds_ratio) bcf_update_info_float(args->out_hdr, rec, args->odds_ratio_str.s, &odds_ratio, 1);
+        if (args->log_odds) {
+            odds_ratio = logf(odds_ratio);
+            bcf_update_info_float(args->out_hdr, rec, args->log_odds_str.s, &odds_ratio, 1);
+        }
     }
 
     // remove all samples if sites_only was selected
@@ -966,5 +1003,7 @@ void destroy(void) {
     free(args->imap_arr);
     free(args->summary_str.s);
     free(args->test_str.s);
+    free(args->odds_ratio_str.s);
+    free(args->log_odds_str.s);
     free(args);
 }

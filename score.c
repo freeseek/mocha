@@ -38,7 +38,7 @@
 #include "tsv2vcf.h"
 #include "filter.h"
 
-#define SCORE_VERSION "2022-01-12"
+#define SCORE_VERSION "2022-05-18"
 
 #define FLT_INCLUDE (1 << 0)
 #define FLT_EXCLUDE (1 << 1)
@@ -155,9 +155,10 @@ typedef struct {
     int m_markers;
 } summary_t;
 
+// check also on https://github.com/bulik/ldsc/blob/master/munge_sumstats.py
 static const char *snp_hdr_str[] = {"snp", "snpid", "SNPID", "MarkerName", "Marker",
-                                    "SNP", "rsID",  "Name",  "variant_id"};
-static const char *chr_hdr_str[] = {"CHR", "Chromosome", "Chrom", "Chr", "chr_name", "chromosome"};
+                                    "SNP", "rsID",  "Name",  "variant_id", "ID"};
+static const char *chr_hdr_str[] = {"CHR", "Chromosome", "Chrom", "Chr", "chr_name", "chromosome", "#CHROM"};
 static const char *bp_hdr_str[] = {"bp", "POS", "Position", "Pos", "BP", "chr_position", "base_pair_location"};
 static const char *a1_hdr_str[] = {"effect_allele", "a1", "A1", "Effect_allele", "Allele1", "allele1"};
 static const char *a2_hdr_str[] = {"other_allele",    "a2", "A2", "Non_Effect_allele", "Allele2", "allele2",
@@ -175,7 +176,7 @@ static summary_t *summary_init(const char *fn, bcf_hdr_t *hdr, int snp_id_mode) 
 
     kstring_t str = {0, 0, NULL};
     if (hts_getline(fp, KS_SEP_LINE, &str) <= 0) error("Error reading from file: %s\n", fn);
-    while (str.s[0] == '#') hts_getline(fp, KS_SEP_LINE, &str);
+    while (str.s[0] == '#' && strncmp(str.s, "#CHROM", 6) != 0) hts_getline(fp, KS_SEP_LINE, &str);
     // some formats are tab-delimited and some formats (e.g. PLINK and SBayesR) are not
     // here we make a determination based on the first header row
     char delimiter = strchr(str.s, '\t') ? '\t' : '\0';
@@ -305,9 +306,7 @@ static const char *usage_text(void) {
            "       --use <tag>               FORMAT tag to use to compute allele dosages: GP, AP, HDS, DS, GT, AS\n"
            "       --summaries <dir|file>    summary statistics files from directory or list from file\n"
            "       --snp-id                  use SNP ID to match variants\n"
-           "   -v, --vcf                     summary statistics in VCF format\n"
-           "   -w, --weight <tag>            FORMAT tag to use for effect weights (only in VCF-mode)\n"
-           "   -p, --p-value <tag>           FORMAT tag to use for p-values (only in VCF-mode)\n"
+           "   -v, --vcf                     summary statistics in VCF Summary Statistics format\n"
            "       --q-score-thr LIST        comma separated list of p-value thresholds\n"
            "       --counts                  include SNP counts in the output table\n"
            "   -o, --output <file.tsv>       write output to a file [standard output]\n"
@@ -355,8 +354,6 @@ int run(int argc, char **argv) {
     int targets_is_file = 0;
     int sample_is_file = 0;
     int force_samples = 0;
-    const char *weight_str = "BETA";
-    const char *pval_str = "PVAL";
     const char *q_score_thr_str = NULL;
     const char *pathname = NULL;
     const char *output_fname = "-";
@@ -372,8 +369,6 @@ int run(int argc, char **argv) {
                                        {"summaries", required_argument, NULL, 2},
                                        {"snp-id", no_argument, NULL, 3},
                                        {"vcf", no_argument, NULL, 'v'},
-                                       {"weight", required_argument, NULL, 'w'},
-                                       {"p-value", required_argument, NULL, 'p'},
                                        {"q-score-thr", required_argument, NULL, 4},
                                        {"counts", no_argument, NULL, 5},
                                        {"output", required_argument, NULL, 'o'},
@@ -416,12 +411,6 @@ int run(int argc, char **argv) {
             break;
         case 'v':
             vcf_mode = 1;
-            break;
-        case 'w':
-            weight_str = optarg;
-            break;
-        case 'p':
-            pval_str = optarg;
             break;
         case 4:
             q_score_thr_str = optarg;
@@ -500,6 +489,8 @@ int run(int argc, char **argv) {
     if (filter_str) filter = filter_init(hdr, filter_str);
     int n_q_score_thr = 1;
     double *q_score_thr = q_score_thr_str ? parse_list(q_score_thr_str, &n_q_score_thr) : NULL;
+    if (q_score_thr)
+        for (int i = 0; i < n_q_score_thr; i++) q_score_thr[i] = -log10(q_score_thr[i]);
 
     // subset VCF file
     if (sample_names) {
@@ -519,39 +510,63 @@ int run(int argc, char **argv) {
     }
     int n_smpls = bcf_hdr_nsamples(hdr);
 
-    int n_prs = 0;
+    int n_files, n_prs, *prs2vcf = NULL, m_prs2vcf = 0, *prs2idx = NULL, m_prs2idx = 0;
     char **filenames = NULL;
     if (pathname) {
-        filenames = get_file_list(pathname, &n_prs);
+        filenames = get_file_list(pathname, &n_files);
     } else {
-        n_prs = argc - optind - 1;
+        n_files = argc - optind - 1;
         filenames = argv + optind + 1;
     }
     summary_t **summaries = NULL;
+    char **prs_names = NULL;
+    int m_prs_names = 0;
     if (vcf_mode) {
-        for (int i = 0; i < n_prs; i++) {
+        n_prs = 0;
+        for (int i = 0; i < n_files; i++) {
             if (!bcf_sr_add_reader(sr, filenames[i]))
                 error("Error opening %s: %s\n", filenames[i], bcf_sr_strerror(sr->errnum));
-            hdr = bcf_sr_get_header(sr, i);
-            int weight_id = bcf_hdr_id2int(hdr, BCF_DT_ID, weight_str);
-            if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_INFO, weight_id))
-                error("VCF file %s does not include the %s INFO field\n", filenames[i], weight_str);
+            hdr = bcf_sr_get_header(sr, i + 1);
+            hts_expand(int, n_prs + bcf_hdr_nsamples(hdr), m_prs2vcf, prs2vcf);
+            hts_expand(int, n_prs + bcf_hdr_nsamples(hdr), m_prs2idx, prs2idx);
+            hts_expand(char *, n_prs + bcf_hdr_nsamples(hdr), m_prs_names, prs_names);
+            for (int j = 0; j < bcf_hdr_nsamples(hdr); j++) {
+                prs2vcf[n_prs + j] = i + 1;
+                prs2idx[n_prs + j] = j;
+                prs_names[n_prs + j] = strdup(hdr->samples[j]);
+            }
+            n_prs += bcf_hdr_nsamples(hdr);
+            int es_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "ES");
+            if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, es_id))
+                error("VCF summary statistics file %s does not include the ES FORMAT field\n", filenames[i]);
             if (q_score_thr) {
-                int pval_id = bcf_hdr_id2int(hdr, BCF_DT_ID, pval_str);
-                if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_INFO, pval_id))
-                    error("VCF file %s does not include the %s INFO field\n", filenames[i], pval_str);
+                int lp_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "LP");
+                if (!bcf_hdr_idinfo_exists(hdr, BCF_HL_FMT, lp_id))
+                    error("VCF summary statistics file %s does not include the LP FORMAT field\n", filenames[i]);
             }
         }
     } else {
+        n_prs = n_files;
         summaries = (summary_t **)malloc((n_prs) * sizeof(summary_t *));
+        prs_names = (char **)malloc((n_prs) * sizeof(char *));
         hdr = bcf_sr_get_header(sr, 0);
         for (int i = 0; i < n_prs; i++) {
             summaries[i] = summary_init(filenames[i], hdr, snp_id_mode);
             fprintf(stderr, "Read %d markers from file %s and matching by %s\n", summaries[i]->n_markers, filenames[i],
                     summaries[i]->use_snp ? "marker name" : "chromosome position");
+            char *ptr, *ext_str[] = {"gz", "txt", "tsv", "vcf", "bcf"};
+            int j = 0;
+            while (j < sizeof(ext_str) / sizeof(char *) && (ptr = strrchr(filenames[i], '.')))
+                for (j = 0; j < sizeof(ext_str) / sizeof(char *); j++)
+                    if (strcmp(ptr + 1, ext_str[j]) == 0) {
+                        *ptr = '\0';
+                        break;
+                    }
+            prs_names[i] = strdup(strrchr(filenames[i], '/') ? strrchr(filenames[i], '/') + 1 : filenames[i]);
         }
     }
 
+    hdr = bcf_sr_get_header(sr, 0);
     int gt_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "GT");
     int ds_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "DS");
     int hds_id = bcf_hdr_id2int(hdr, BCF_DT_ID, "HDS");
@@ -608,7 +623,7 @@ int run(int argc, char **argv) {
     FILE *out_fh = strcmp("-", output_fname) ? fopen(output_fname, "w") : stdout;
     if (!out_fh) error("Error: cannot write to %s\n", output_fname);
 
-    int m_int32 = 0, m_float = 0, m_str = 0, m_alleles = 2 * n_smpls;
+    int m_int32 = 0, m_float = 0, n_float, m_alleles = 2 * n_smpls;
     int32_t *int32_arr = NULL;
     float *float_arr = NULL;
     char *str = NULL;
@@ -628,7 +643,7 @@ int run(int argc, char **argv) {
 
         int skip_line = 1;
         if (vcf_mode) {
-            for (int i = 0; i < n_prs; i++) {
+            for (int i = 0; i < n_files; i++) {
                 if (!bcf_sr_has_line(sr, i + 1)) continue;
                 skip_line = 0;
                 break;
@@ -787,24 +802,34 @@ int run(int argc, char **argv) {
             break;
         }
 
+        float beta, minus_log10p = 0.0f;
         for (int i = 0; i < n_prs; i++) {
             char *a1;
-            float beta, p;
             if (vcf_mode) {
-                if (!bcf_sr_has_line(sr, i + 1)) continue;
-                hdr = bcf_sr_get_header(sr, i + 1);
-                line = bcf_sr_get_line(sr, i + 1);
-                bcf_get_info_string(hdr, line, "effect_allele", &str, &m_str);
-                if (bcf_get_info_float(hdr, line, "effect_weight", &float_arr, &m_float) < 0) continue;
-                a1 = str;
-                beta = float_arr[0];
-                p = bcf_get_info_float(hdr, line, "PVAL", &float_arr, &m_float) < 0 ? NAN : float_arr[0];
+                if (!bcf_sr_has_line(sr, prs2vcf[i])) continue;
+                hdr = bcf_sr_get_header(sr, prs2vcf[i]);
+                line = bcf_sr_get_line(sr, prs2vcf[i]);
+                a1 = line->d.allele[1];
+                n_float = bcf_get_format_float(hdr, line, "ES", &float_arr, &m_float);
+                if (n_float < 0) continue;
+                if (n_float != bcf_hdr_nsamples(hdr))
+                    error("VCF file %s has incorrect number of ES fields at position %" PRId64 "\n",
+                          filenames[prs2vcf[i] - 1], line->pos + 1);
+                beta = float_arr[prs2idx[i]];
+                if (q_score_thr) {
+                    n_float = bcf_get_format_float(hdr, line, "LP", &float_arr, &m_float);
+                    if (n_float < 0) continue;
+                    if (n_float != bcf_hdr_nsamples(hdr))
+                        error("VCF file %s has incorrect number of LP fields at position %" PRId64 "\n",
+                              filenames[prs2vcf[i] - 1], line->pos + 1);
+                    minus_log10p = float_arr[prs2idx[i]];
+                }
             } else {
                 if (idxs[i] < 0) continue;
                 marker_t *marker = &summaries[i]->markers[idxs[i]];
                 a1 = marker->a1;
                 beta = marker->beta;
-                p = marker->p;
+                minus_log10p = -log10(marker->p);
             }
             // find effect allele
             int idx_allele;
@@ -812,7 +837,7 @@ int run(int argc, char **argv) {
                 if (strcmp(a1, line->d.allele[idx_allele]) == 0) break;
             if (idx_allele == line->n_allele) continue;
             for (int j = 0; j < n_q_score_thr; j++) {
-                if (q_score_thr && p > q_score_thr[j]) continue;
+                if (q_score_thr && minus_log10p < q_score_thr[j]) continue;
                 float *ptr = scores + (i * n_q_score_thr + j) * n_smpls;
                 float *ptr2 = alleles + idx_allele * n_smpls;
                 int *ptr3 = cnts + (i * n_q_score_thr + j) * n_smpls;
@@ -827,21 +852,13 @@ int run(int argc, char **argv) {
 
     hdr = bcf_sr_get_header(sr, 0);
     fprintf(out_fh, "%s", sample_header);
-    char *ptr, *ext_str[] = {"gz", "txt", "tsv", "vcf", "bcf"};
     for (int i = 0; i < n_prs; i++) {
-        int j = 0;
-        while (j < sizeof(ext_str) / sizeof(char *) && (ptr = strrchr(filenames[i], '.')))
-            for (j = 0; j < sizeof(ext_str) / sizeof(char *); j++)
-                if (strcmp(ptr + 1, ext_str[j]) == 0) {
-                    *ptr = '\0';
-                    break;
-                }
         for (int j = 0; j < n_q_score_thr; j++) {
-            fprintf(out_fh, "\t%s", strrchr(filenames[i], '/') ? strrchr(filenames[i], '/') + 1 : filenames[i]);
-            if (q_score_thr) fprintf(out_fh, "_p%.4g", q_score_thr[j]);
+            fprintf(out_fh, "\t%s", prs_names[i]);
+            if (q_score_thr) fprintf(out_fh, "_p%.4g", exp(-M_LN10 * q_score_thr[j]));
             if (display_cnts) {
-                fprintf(out_fh, "\t%s_CNT", strrchr(filenames[i], '/') ? strrchr(filenames[i], '/') + 1 : filenames[i]);
-                if (q_score_thr) fprintf(out_fh, "_p%.4g", q_score_thr[j]);
+                fprintf(out_fh, "\t%s_CNT", prs_names[i]);
+                if (q_score_thr) fprintf(out_fh, "_p%.4g", exp(-M_LN10 * q_score_thr[j]));
             }
         }
     }
@@ -858,9 +875,11 @@ int run(int argc, char **argv) {
 
     if (filter) filter_destroy(filter);
     if (pathname) {
-        for (int i = 0; i < n_prs; i++) free(filenames[i]);
+        for (int i = 0; i < n_files; i++) free(filenames[i]);
         free(filenames);
     }
+    for (int i = 0; i < n_prs; i++) free(prs_names[i]);
+    free(prs_names);
     if (out_fh != stdout) fclose(out_fh);
     free(scores);
     free(cnts);
@@ -871,6 +890,8 @@ int run(int argc, char **argv) {
     free(int32_arr);
     free(float_arr);
     free(q_score_thr);
+    free(prs2vcf);
+    free(prs2idx);
     if (summaries) {
         for (int i = 0; i < n_prs; i++) summary_destroy(summaries[i]);
         free(summaries);

@@ -404,10 +404,10 @@ genome_rules_t *genome_init_alias(FILE *restrict stream, char *alias, const bcf_
             if (detailed) fprintf(stream, "%s\n", rules->rules);
         }
         if (!detailed) {
-            fprintf(stream, "\nRun as --rules <assembly> (e.g. --rules GRCh37).\n");
+            fprintf(stream, "\nRun as --genome <assembly> (e.g. --genome GRCh37).\n");
             fprintf(stream,
                     "To see the detailed rules definition, append a question mark (e.g. "
-                    "--rules GRCh37?).\n");
+                    "--genome GRCh37?).\n");
             fprintf(stream, "\n");
         }
         exit(1);

@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2022-01-14
+## Version 2022-05-18
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow runs impute5 or beagle5 on a set of VCFs
 ##
 ## Cromwell version support
-## - Successfully tested on v73
+## - Successfully tested on v79
 ##
 ## Distributed under terms of the MIT License
 
@@ -59,9 +59,9 @@ workflow impute {
     String basic_bash_docker = "debian:stable-slim"
     String pandas_docker = "amancevice/pandas:slim"
     String docker_repository = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.14-20220112"
-    String impute5_docker = "impute5:1.14-20220112"
-    String beagle5_docker = "beagle5:1.14-20220112"
+    String bcftools_docker = "bcftools:1.15.1-20220518"
+    String impute5_docker = "impute5:1.15.1-20220518"
+    String beagle5_docker = "beagle5:1.15.1-20220518"
   }
 
   String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
@@ -452,7 +452,8 @@ task vcf_scatter {
       "bcftools view \\\n" +
       "  --no-version \\\n" +
       "  --output-type u \\\n" +
-      "  --samples-file ^\"" + basename(select_first([remove_samples_file])) + "\" | \\\n"
+      "  --samples-file ^\"" + basename(select_first([remove_samples_file])) + "\" \\\n" +
+      "  --force-samples | \\\n"
       else ""}bcftools norm \
       --no-version \
       --output-type u \

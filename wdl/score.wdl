@@ -2,14 +2,14 @@ version development
 
 ## Copyright (c) 2021-2022 Giulio Genovese
 ##
-## Version 2022-01-12
+## Version 2022-05-18
 ##
 ## Contact Giulio Genovese <giulio.genovese@gmail.com>
 ##
 ## This WDL workflow computes poligenic risk scores
 ##
 ## Cromwell version support
-## - Successfully tested on v73
+## - Successfully tested on v79
 ##
 ## Distributed under terms of the MIT License
 
@@ -21,7 +21,6 @@ struct Reference {
 workflow score {
   input {
     String sample_set_id
-    Boolean vcf = false
     String sample_header = "sample_id"
     String? region
     String? tag # GP, AP, HDS, DS, GT, AS
@@ -44,8 +43,8 @@ workflow score {
     String? include_str
     String basic_bash_docker = "debian:stable-slim"
     String docker_repository = "us.gcr.io/mccarroll-mocha"
-    String bcftools_docker = "bcftools:1.14-20220112"
-    String r_mocha_docker = "r_mocha:1.14-20220112"
+    String bcftools_docker = "bcftools:1.15.1-20220518"
+    String r_mocha_docker = "r_mocha:1.15.1-20220518"
   }
 
   String docker_repository_with_sep = docker_repository + if docker_repository != "" && docker_repository == sub(docker_repository, "/$", "") then "/" else ""
@@ -82,8 +81,8 @@ workflow score {
       input:
         vcf_file = impute_data_paths_with_sep[p.left] + impute_tbl[hdr][p.left],
         vcf_idx = impute_data_paths_with_sep[p.left] + impute_tbl[(hdr + "_index")][p.left],
-        q_score_thr = q_score_thr,
         samples_file = samples_file,
+        q_score_thr = q_score_thr,
         summary_files = prefix(summary_path_with_sep, summary_files),
         summary_idxs = if defined(summary_idxs) then prefix(summary_path_with_sep, select_first([summary_idxs])) else None,
         sample_header = sample_header,
@@ -149,9 +148,9 @@ task vcf_score {
     Array[File]+ summary_files
     Array[File]? summary_idxs
     Array[Float]? q_score_thr
+    String? tag
     String? sample_header
     String? region
-    String? tag
     String? exclude_str
     String? include_str
     String filebase
@@ -172,8 +171,9 @@ task vcf_score {
   command <<<
     set -euo pipefail
     summary_files=~{write_lines(summary_files)}
+    summary_idxs=~{if defined(summary_idxs) then write_lines(select_first([summary_idxs])) else ""}
     echo "~{sep="\n" select_all([vcf_file, vcf_idx, samples_file])}" | \
-      cat - $summary_files | tr '\n' '\0' | xargs -0 mv -t .
+      cat - $summary_files ~{if defined(summary_idxs) then "$summary_idxs" else ""}| tr '\n' '\0' | xargs -0 mv -t .
     sed -i 's/^.*\///' $summary_files
     bcftools +score \
       --summaries $summary_files \
@@ -189,7 +189,7 @@ task vcf_score {
       "  --force-samples" else ""} \
       "~{basename(vcf_file)}"
     echo "~{sep="\n" select_all([vcf_file, vcf_idx, samples_file])}" | \
-      cat - $summary_files | sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
+      cat - $summary_files ~{if defined(summary_idxs) then "$summary_idxs" else ""}| sed 's/^.*\///' | tr '\n' '\0' | xargs -0 rm
   >>>
 
   output {

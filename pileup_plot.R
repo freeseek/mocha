@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-pileup_plot_version <- '2022-01-12'
+pileup_plot_version <- '2022-05-18'
 
 suppressPackageStartupMessages(library(optparse))
 suppressPackageStartupMessages(library(ggplot2))
