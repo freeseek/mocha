@@ -25,7 +25,7 @@
 #  THE SOFTWARE.
 ###
 
-mocha_plot_version <- '2022-05-18'
+mocha_plot_version <- '2022-12-21'
 
 suppressPackageStartupMessages(library(optparse))
 suppressPackageStartupMessages(library(data.table))
@@ -35,7 +35,8 @@ if (capabilities()[['cairo']]) options(bitmapType = 'cairo')
 
 parser <- OptionParser('usage: mocha_plot.R [options] --genome <GRCh37|GRCh38>|--cytoband <cytoband.txt.gz> --vcf <file.vcf> --samples <list>')
 parser <- add_option(parser, c('--genome'), type = 'character', help = 'genome assembly (e.g. GRCh38)', metavar = '<assembly>')
-parser <- add_option(parser, c('--cytoband'), type = 'character', help = 'cytoband file', metavar = '<cytoband.txt.gz>')
+parser <- add_option(parser, c('--cytoband'), type = 'character', help = 'cytoband file', metavar = '<cytoBand.txt.gz>')
+parser <- add_option(parser, c('--n-chrs'), type = 'integer', default = 23, help = 'number of chromosomes including X [23]', metavar = '<integer>')
 parser <- add_option(parser, c('--wgs'), action = 'store_true', default = FALSE, help = 'whether the input VCF file contains WGS data')
 parser <- add_option(parser, c('--mocha'), action = 'store_true', default = FALSE, help = 'whether the input VCF file contains Ldev/Bdev data')
 parser <- add_option(parser, c('--no-adjust'), action = 'store_true', default = FALSE, help = 'for array data whether BAF and LRR should not be adjusted')
@@ -56,11 +57,11 @@ args <- parse_args(parser, commandArgs(trailingOnly = TRUE), convert_hyphens_to_
 
 write(paste('mocha_plot.R', mocha_plot_version, 'https://github.com/freeseek/mocha'), stderr())
 
-if (is.null(args$vcf)) {print_help(parser); stop('option --vcf is required')}
-if (is.null(args$samples)) {print_help(parser); stop('option --samples is required')}
-if (is.null(args$genome) && is.null(args$cytoband)) {print_help(parser); stop('either --genome or --cytoband is required')}
+if (is.null(args$genome) && is.null(args$cytoband)) {print_help(parser); stop('either --genome or --cytoband is required\nTo download the cytoband file run:\nwget http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/cytoBand.txt.gz')}
 if (!is.null(args$genome) && !is.null(args$cytoband)) {print_help(parser); stop('cannot use --genome and --cytoband at the same time')}
 if (!is.null(args$genome) && args$genome != 'GRCh37' && args$genome != 'GRCh38') {print_help(parser); stop('--genome accepts only GRCh37 or GRCh38')}
+if (is.null(args$vcf)) {print_help(parser); stop('option --vcf is required')}
+if (is.null(args$samples)) {print_help(parser); stop('option --samples is required')}
 if (is.null(args$pdf) && is.null(args$png)) {print_help(parser); stop('either --pdf or --png is required')}
 if (!is.null(args$pdf) && !is.null(args$png)) {print_help(parser); stop('cannot use --pdf and --png at the same time')}
 regions <- unlist(strsplit(args$regions, ','))
@@ -75,16 +76,18 @@ if (!is.null(args$cytoband)) {
   cen_beg <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], min)
   cen_end <- tapply(df_cyto$chromEnd[idx], df_cyto$chrom[idx], max)
   chrs <- unique(df_cyto$chrom)
-  modified_chrs <- gsub('MT', '26', gsub('Y', '24', gsub('X', '23', chrs)))
+  modified_chrs <- gsub('MT', args$n_chrs + 3, gsub('Y', args$n_chrs + 1, gsub('X', args$n_chrs, chrs)))
   ord <- order(suppressWarnings(as.numeric(modified_chrs)))
   chrs <- chrs[ord]
-
-  df_cen <- rbind(cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart')], c('chrom', 'name', 'x')), y = -1),
-                  cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromEnd')], c('chrom', 'name', 'x')), y = -1/2),
-                  cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart')], c('chrom', 'name', 'x')), y = 0),
-                  cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd')], c('chrom', 'name', 'x')), y = -1),
-                  cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromStart')], c('chrom', 'name', 'x')), y = -1/2),
-                  cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd')], c('chrom', 'name', 'x')), y = 0))
+  plot_centromeres <- sum(df_cyto$gieStain == 'acen') > 0
+  if (plot_centromeres) {
+    df_cen <- rbind(cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart')], c('chrom', 'name', 'x')), y = -1),
+                    cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromEnd')], c('chrom', 'name', 'x')), y = -1/2),
+                    cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'p11', c('chrom', 'name', 'chromStart')], c('chrom', 'name', 'x')), y = 0),
+                    cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd')], c('chrom', 'name', 'x')), y = -1),
+                    cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromStart')], c('chrom', 'name', 'x')), y = -1/2),
+                    cbind(setNames(df_cyto[df_cyto$gieStain == 'acen' & substr(df_cyto$name, 1, 3) == 'q11', c('chrom', 'name', 'chromEnd')], c('chrom', 'name', 'x')), y = 0))
+  }
   df_chrs <- data.frame(chrlen = chrlen[chrs], cen_beg = cen_beg[chrs], cen_end = cen_end[chrs], CHROM = chrs)
 } else if (!is.null(args$genome)) {
   if ( args$genome == 'GRCh37' ) {
@@ -215,7 +218,9 @@ if (!args$wgs) {
 }
 if (!is.null(args$cytoband)) {
   df_cyto$variable <- factor('pBAF', levels = plot_vars)
-  df_cen$variable <- factor('pBAF', levels = plot_vars)
+  if (plot_centromeres) {
+    df_cen$variable <- factor('pBAF', levels = plot_vars)
+  }
 }
 if (args$mocha) {
   df$color <- as.factor(1e3 * df$ldev + df$bdev)
@@ -240,7 +245,7 @@ if ('all' %in% regions) {
     scale_x_continuous('Mbp position') +
     scale_y_continuous('B Allele Frequency (BAF)', breaks = NULL) +
     coord_cartesian(ylim = c(0, 1), expand = FALSE) +
-    scale_color_discrete(guide = FALSE) +
+    scale_color_discrete(guide = 'none') +
     theme(axis.text.y = element_blank(), axis.ticks.y = element_blank()) +
     facet_grid(chrom ~ sample_id) +
     theme_bw(base_size = args$fontsize) +
@@ -311,7 +316,7 @@ if (length(regions)>0) {
     write(paste('Plotting region:', regions[i]), stderr())
     if ('gts' %in% names(df_melt)) {
       p <- ggplot(df_melt[!is.na(df_melt$value),], aes(x = pos/1e6, y = value, color = color, shape = gts)) +
-        scale_shape_manual(guide = FALSE, values = c('AA' = 3, 'AB' = 8, 'BB' = 4, 'NC' = 1))
+        scale_shape_manual(guide = 'none', values = c('AA' = 3, 'AB' = 8, 'BB' = 4, 'NC' = 1))
     } else {
       p <- ggplot(df_melt[!is.na(df_melt$value),], aes(x = pos/1e6, y = value, color = color))
     }
@@ -320,7 +325,7 @@ if (length(regions)>0) {
     }
     p <- p + scale_x_continuous(paste('Chromosome', chroms[i], '(Mbp position)')) +
       scale_y_continuous(NULL) +
-      scale_color_discrete(guide = FALSE) +
+      scale_color_discrete(guide = 'none') +
       theme_bw(base_size = args$fontsize) +
       theme(legend.position = 'bottom', legend.box = 'horizontal', strip.background = element_blank()) +
       facet_grid(variable ~ sample_id, scales = 'free_y') +
@@ -338,8 +343,8 @@ if (length(regions)>0) {
       bottom <- floor(min(0.35, df_melt$value[df_melt$variable == 'pBAF'], na.rm = TRUE) * 20) / 20
       p <- p  +
         geom_rect(data = df_cyto[df_cyto$chrom == chroms[i] & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = bottom -0.05, ymax = bottom, color = 'black', size = 1/4, show.legend = FALSE) +
-        geom_polygon(data = df_cen[df_cen$chrom == chroms[i],], aes(x = x/1e6, y = bottom + 0.05 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8) +
         scale_fill_manual(values = c('gneg' = 'white', 'gpos25' = 'lightgray', 'gpos50' = 'gray50', 'gpos75' = 'darkgray', 'gpos100' = 'black', 'gvar' = 'lightblue', 'stalk' = 'slategrey'))
+      if (plot_centromeres) p <- p + geom_polygon(data = df_cen[df_cen$chrom == chroms[i],], aes(x = x/1e6, y = bottom + 0.05 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8)
     }
     print(p)
   }

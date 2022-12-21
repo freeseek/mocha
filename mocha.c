@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2022-05-18"
+#define MOCHA_VERSION "2022-12-21"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -2079,8 +2079,8 @@ static void sample_stats(sample_t *self, const model_t *model) {
 
     int16_t *ad0 = self->data_arr[AD0];
     int16_t *ad1 = self->data_arr[AD1];
-    float *lrr = (float *)malloc(n * sizeof(float));
-    float *baf = (float *)malloc(n * sizeof(float));
+    float *lrr = (float *)malloc((unsigned)n * sizeof(float));
+    float *baf = (float *)malloc((unsigned)n * sizeof(float));
     if (model->flags & WGS_DATA) {
         ad_to_lrr_baf(ad0, ad1, lrr, baf, n);
     } else {
@@ -2089,7 +2089,7 @@ static void sample_stats(sample_t *self, const model_t *model) {
             baf[i] = int16_to_float(self->data_arr[BAF][i]);
         }
     }
-    int *imap_arr = (int *)malloc(n * sizeof(int));
+    int *imap_arr = (int *)malloc((unsigned)n * sizeof(int));
 
     if (model->rid == model->genome_rules->x_rid) {
         int n_imap = 0;
@@ -2477,7 +2477,6 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
     if (!(model->flags & USE_NO_RULES_CHRS) && model->genome_rules->cen_beg[rid] == 0
         && model->genome_rules->cen_end[rid] == 0 && rid != model->genome_rules->mt_rid)
         return 0;
-
     int8_t *gts = (int8_t *)malloc(nsmpl * sizeof(int8_t));
     int8_t *phase_arr = (int8_t *)malloc(nsmpl * sizeof(int8_t));
     int *imap_arr = (int *)malloc(nsmpl * sizeof(int));
@@ -2687,6 +2686,22 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
     free(last_pos);
 
     return i;
+}
+
+static int tsv_read_float(tsv_t *tsv, bcf1_t *rec, void *usr) {
+    float *single = (float *)usr;
+    char *endptr;
+    *single = (float)strtof(tsv->ss, &endptr);
+    if (endptr != tsv->se) error("Could not parse float %.*s\n", (int)(tsv->se - tsv->ss), tsv->ss);
+    return 0;
+}
+
+static int tsv_read_integer(tsv_t *tsv, bcf1_t *rec, void *usr) {
+    int *integer = (int *)usr;
+    char *endptr;
+    *integer = (int)strtol(tsv->ss, &endptr, 0);
+    if (endptr != tsv->se) error("Could not parse integer %.*s\n", (int)(tsv->se - tsv->ss), tsv->ss);
+    return 0;
 }
 
 static int read_stats(sample_t *samples, const bcf_hdr_t *hdr, const char *fn, int lrr_gc_order, int flags) {
@@ -3005,6 +3020,7 @@ int run(int argc, char *argv[]) {
     // create synced reader object
     bcf_srs_t *sr = bcf_sr_init();
     bcf_sr_set_opt(sr, BCF_SR_REQUIRE_IDX);
+    bcf_sr_set_opt(sr, BCF_SR_PAIR_LOGIC, BCF_SR_PAIR_EXACT);
 
     static struct option loptions[] = {{"genome", required_argument, NULL, 'g'},
                                        {"genome-file", required_argument, NULL, 'G'},

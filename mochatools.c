@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2022-05-18"
+#define MOCHATOOLS_VERSION "2022-12-21"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
@@ -48,6 +48,19 @@
 #define INFO_AD_HET (1 << 7)
 #define INFO_pBAF_STATS (1 << 8)
 #define INFO_COR_BAF_LRR (1 << 9)
+#define INFO_MACH (1 << 10)
+
+// see Marchini, J., Howie, B. Genotype imputation for genome-wide association studies. Nat Rev Genet 11, 499–511
+// (2010). https://doi.org/10.1038/nrg2796
+// ##FORMAT=<ID=DS,Number=A,Type=Float,Description="Genotype dosage">
+#define SCORE_DS 1 // DS = AP1 + AP2
+// ##FORMAT=<ID=HDS,Number=2,Type=Float,Description="Estimated Haploid Alternate Allele Dosage ">
+#define SCORE_HDS 2
+// ##FORMAT=<ID=AP1,Number=A,Type=Float,Description="ALT allele probability of first haplotype">
+// ##FORMAT=<ID=AP2,Number=A,Type=Float,Description="ALT allele probability of second haplotype">
+#define SCORE_AP 3
+// ##FORMAT=<ID=GP,Number=G,Type=Float,Description="Estimated Genotype Probability">
+#define SCORE_GP 4
 
 static inline double sq(double x) { return x * x; }
 
@@ -62,7 +75,9 @@ typedef struct {
     int phred;      // whether the test result should be phred scaled
     int odds_ratio; // whether the odds ratio should be computed
     int log_odds;   // whether the log odds ratio should be computed
-    int nsmpl, allele_a_id, allele_b_id, adjust_id, gt_id, ad_id, baf_id, lrr_id, info_id, as_id;
+    int dosage_tag; // which dosage tag should be used
+    int nsmpl, allele_a_id, allele_b_id, adjust_id, gt_id, ad_id, baf_id, lrr_id, info_id, as_id, ds_id, hds_id, ap1_id,
+        ap2_id, gp_id;
     int8_t *gt_phase_arr, *as_arr;
     int16_t *gt0_arr, *gt1_arr, *ad0_arr, *ad1_arr;
     int32_t *info_arr;
@@ -117,7 +132,6 @@ const char *usage(void) {
            "(version " MOCHATOOLS_VERSION
            " https://github.com/freeseek/mocha)\n"
            "Usage: bcftools +mochatools [General Options] -- [Plugin Options]\n"
-           "\n"
            "Options:\n"
            "   run \"bcftools plugin\" for a list of common options\n"
            "\n"
@@ -130,6 +144,7 @@ const char *usage(void) {
            "       --gc-window-size <int>    window size in bp used to compute the GC and CpG content [" GC_WIN_DFLT
            "]\n"
            "   -x, --sex <file>              file including information about the gender of the samples\n"
+           "       --dosage-tag              select dosage tag to use for dosage computations (DS, HDS, AP, GP)\n"
            "   -s, --samples [^]<list>       comma separated list of samples to include (or exclude with \"^\" "
            "prefix)\n"
            "   -S, --samples-file [^]<file>  file of samples to include (or exclude with \"^\" prefix)\n"
@@ -153,8 +168,6 @@ const char *usage(void) {
 }
 
 static int parse_tags(const char *str) {
-    if (!args->in_hdr) error("%s", usage());
-
     int flags = 0, n_tags;
     if (!strcasecmp(str, "none")) return flags;
     char **tags = hts_readlist(str, 0, &n_tags);
@@ -179,6 +192,8 @@ static int parse_tags(const char *str) {
             flags |= INFO_pBAF_STATS;
         else if (!strcasecmp(tags[i], "Cor_BAF_LRR"))
             flags |= INFO_COR_BAF_LRR;
+        else if (!strcasecmp(tags[i], "MACH"))
+            flags |= INFO_MACH;
         else
             error("Error parsing \"--tags %s\": the tag \"%s\" is not supported\n", str, tags[i]);
         free(tags[i]);
@@ -201,7 +216,8 @@ static void list_tags(void) {
         "INFO/pBAF_Stats   Number:4  Type:Float    ..  Welch's t-test and Mann-Whitney U test for BAF by transmission "
         "type across heterozygous genotypes\n"
         "INFO/Cor_BAF_LRR  Number:3  Type=Float    ..  Pearson correlation for BAF and LRR at AA, AB, and BB "
-        "genotypes\n");
+        "genotypes\n"
+        "INFO/MACH         Number:3  Type=Float    ..  Statistics to infer the MACH r2 imputation measure\n");
 }
 
 int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
@@ -228,16 +244,17 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
                                        {"fasta-ref", required_argument, NULL, 'f'},
                                        {"gc-window-size", required_argument, NULL, 2},
                                        {"sex", required_argument, NULL, 'x'},
+                                       {"dosage-tag", required_argument, NULL, 3},
                                        {"samples", required_argument, NULL, 's'},
                                        {"samples-file", required_argument, NULL, 'S'},
-                                       {"force-samples", no_argument, NULL, 3},
+                                       {"force-samples", no_argument, NULL, 4},
                                        {"drop-genotypes", no_argument, NULL, 'G'},
-                                       {"summary", required_argument, NULL, 4},
-                                       {"phase", no_argument, NULL, 5},
-                                       {"test", required_argument, NULL, 6},
-                                       {"phred", no_argument, NULL, 7},
-                                       {"odds-ratio", no_argument, NULL, 8},
-                                       {"log-odds", no_argument, NULL, 9},
+                                       {"summary", required_argument, NULL, 5},
+                                       {"phase", no_argument, NULL, 6},
+                                       {"test", required_argument, NULL, 7},
+                                       {"phred", no_argument, NULL, 8},
+                                       {"odds-ratio", no_argument, NULL, 9},
+                                       {"log-odds", no_argument, NULL, 10},
                                        {NULL, 0, NULL, 0}};
 
     while ((c = getopt_long(argc, argv, "h?lt:f:x:s:S:G", loptions, NULL)) >= 0) {
@@ -270,27 +287,39 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
             sample_is_file = 1;
             break;
         case 3:
+            if (!strcasecmp(optarg, "DS"))
+                args->dosage_tag = SCORE_DS;
+            else if (!strcasecmp(optarg, "HDS"))
+                args->dosage_tag = SCORE_HDS;
+            else if (!strcasecmp(optarg, "AP"))
+                args->dosage_tag = SCORE_AP;
+            else if (!strcasecmp(optarg, "GP"))
+                args->dosage_tag = SCORE_GP;
+            else
+                error("The argument not recognised, expected --dosage-tag DS, HDS, AP, or GP: %s\n", optarg);
+            break;
+        case 4:
             force_samples = 1;
             break;
         case 'G':
             sites_only = 1;
             break;
-        case 4:
+        case 5:
             args->as_str = optarg;
             break;
-        case 5:
+        case 6:
             args->phase = 1;
             break;
-        case 6:
+        case 7:
             args->info_str = optarg;
             break;
-        case 7:
+        case 8:
             args->phred = 1;
             break;
-        case 8:
+        case 9:
             args->odds_ratio = 1;
             break;
-        case 9:
+        case 10:
             args->log_odds = 1;
             break;
         case 'h':
@@ -300,6 +329,8 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
             break;
         }
     }
+
+    if (!in || !out) error("Expected input VCF\n%s", usage());
     args->flags |= parse_tags(tag_list);
 
     // this ugly workaround is required to make sure we can set samples on both headers even
@@ -458,6 +489,52 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
         bcf_hdr_append(args->out_hdr,
                        "##INFO=<ID=Cor_BAF_LRR,Number=3,Type=Float,Description=\"Pearson "
                        "correlation for BAF and LRR at AA, AB, and BB genotypes\">");
+    }
+
+    args->ds_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "DS");
+    args->hds_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "HDS");
+    args->ap1_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "AP1");
+    args->ap2_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "AP2");
+    args->gp_id = bcf_hdr_id2int(args->in_hdr, BCF_DT_ID, "GP");
+    if (args->flags & INFO_MACH) {
+        if (!args->dosage_tag) {
+            if (bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->hds_id)) args->dosage_tag = SCORE_HDS;
+            if (bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->ap1_id)
+                && bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->ap2_id))
+                args->dosage_tag = SCORE_AP;
+            if (bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->gp_id)) args->dosage_tag = SCORE_GP;
+            if (bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->ds_id)) args->dosage_tag = SCORE_DS;
+            if (!args->dosage_tag)
+                error("VCF file %s does not include any of the DS, HDS, AP1/AP2, or DS FORMAT fields\n", argv[optind]);
+        } else {
+            switch (args->dosage_tag) {
+            case SCORE_DS:
+                if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->ds_id))
+                    error("VCF file %s does not include the DS FORMAT field\n", argv[optind]);
+                break;
+            case SCORE_HDS: // only for Minimac4 VCFs
+                if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->hds_id))
+                    error("VCF file %s does not include the HDS FORMAT field\n", argv[optind]);
+                break;
+            case SCORE_AP:
+                if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->ap1_id)
+                    || !bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->ap2_id))
+                    error("VCF file %s does not include either the AP1 or the AP2 FORMAT fields\n", argv[optind]);
+                break;
+            case SCORE_GP:
+                if (!bcf_hdr_idinfo_exists(args->in_hdr, BCF_HL_FMT, args->gp_id))
+                    error("VCF file %s does not include the GP FORMAT field\n", argv[optind]);
+                break;
+            }
+        }
+        fprintf(stderr, "Using %s to compute genotype dosage count\n",
+                args->dosage_tag == SCORE_GP    ? "genotype probabilities (GP)"
+                : args->dosage_tag == SCORE_AP  ? "ALT haplotype probabilities (AP)"
+                : args->dosage_tag == SCORE_HDS ? "haploid alternate allele dosage (HDS)"
+                                                : "genotype dosages (DS)");
+        bcf_hdr_append(
+            args->out_hdr,
+            "##INFO=<ID=MACH,Number=3,Type=Float,Description=\"Statistics to infer the MACH r2 imputation measure\">");
     }
 
     if (args->as_str) {
@@ -948,6 +1025,69 @@ bcf1_t *process(bcf1_t *rec) {
             rho[i] = xyss / sqrtf(xss * yss);
         }
         bcf_update_info_float(args->out_hdr, rec, "Cor_BAF_LRR", &rho, 3);
+    }
+
+    if ((args->flags & INFO_MACH)) {
+        float p1, p2, sum_ds[3] = {0.0f, 0.0f, 0.0f};
+        bcf_fmt_t *ds_fmt, *hds_fmt, *ap1_fmt, *ap2_fmt, *gp_fmt;
+        switch (args->dosage_tag) {
+        case SCORE_DS:
+            ds_fmt = bcf_get_fmt_id(rec, args->ds_id);
+            if (ds_fmt) {
+                for (int k = 0; k < args->nsmpl; k++) {
+                    p1 = ((float *)ds_fmt->p)[k];
+                    if (bcf_float_is_missing(p1)) continue;
+                    sum_ds[0]++;
+                    sum_ds[1] += p1;
+                    sum_ds[2] += p1 * p1;
+                }
+                bcf_update_info_float(args->out_hdr, rec, "MACH", &sum_ds, 3);
+            }
+            break;
+        case SCORE_HDS: // only for Minimac4 VCFs
+            hds_fmt = bcf_get_fmt_id(rec, args->hds_id);
+            if (hds_fmt) {
+                for (int k = 0; k < args->nsmpl; k++) {
+                    p1 = ((float *)hds_fmt->p)[2 * k];
+                    p2 = ((float *)hds_fmt->p)[2 * k + 1];
+                    if (bcf_float_is_missing(p1) || bcf_float_is_missing(p2)) continue;
+                    sum_ds[0]++;
+                    sum_ds[1] += p1 + p2;
+                    sum_ds[2] += (p1 + p2) * (p1 + p2);
+                }
+                bcf_update_info_float(args->out_hdr, rec, "MACH", &sum_ds, 3);
+            }
+            break;
+        case SCORE_AP:
+            ap1_fmt = bcf_get_fmt_id(rec, args->ap1_id);
+            ap2_fmt = bcf_get_fmt_id(rec, args->ap2_id);
+            if (ap1_fmt && ap2_fmt) {
+                for (int k = 0; k < args->nsmpl; k++) {
+                    p1 = ((float *)ap1_fmt->p)[k];
+                    p2 = ((float *)ap2_fmt->p)[k];
+                    if (bcf_float_is_missing(p1) || bcf_float_is_missing(p2)) continue;
+                    sum_ds[0]++;
+                    sum_ds[1] += p1 + p2;
+                    sum_ds[2] += (p1 + p2) * (p1 + p2);
+                }
+                bcf_update_info_float(args->out_hdr, rec, "MACH", &sum_ds, 3);
+            }
+            break;
+        case SCORE_GP:
+            gp_fmt = bcf_get_fmt_id(rec, args->gp_id);
+            if (gp_fmt) {
+                for (int k = 0; k < args->nsmpl; k++) {
+                    p1 = ((float *)gp_fmt->p)[3 * k + 1];
+                    p2 = ((float *)gp_fmt->p)[3 * k + 2];
+                    if (bcf_float_is_missing(p1) || bcf_float_is_missing(p2)) continue;
+                    sum_ds[0]++;
+                    sum_ds[1] += p1 + 2.0f * p2;
+                    sum_ds[2] += (p1 + 2.0f * p2) * (p1 + 2.0f * p2);
+                }
+                bcf_update_info_float(args->out_hdr, rec, "MACH", &sum_ds, 3);
+            }
+            break;
+        }
     }
 
 ret:

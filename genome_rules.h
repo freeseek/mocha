@@ -302,7 +302,6 @@ static void push_rule(genome_rules_t *self, char *line, const bcf_hdr_t *hdr) {
     // skip region
     while (*ss && !isspace(*ss)) ss++;
     while (*ss && isspace(*ss)) ss++;
-
     if (strncmp(ss, "centromere", 10) == 0) {
         if (self->cen_beg[rid] != 0 || self->cen_end[rid] != 0) error("Second centromere rule %s\n", line);
         self->cen_beg[rid] = beg;
@@ -352,7 +351,7 @@ genome_rules_t *genome_init_file(const char *fname, const bcf_hdr_t *hdr) {
     htsFile *fp = hts_open(fname, "r");
     if (!fp) error("Failed to open %s: %s\n", fname, strerror(errno));
     genome_rules_t *self = genome_init(hdr);
-    while (hts_getline(fp, KS_SEP_LINE, &tmp) > 0) push_rule(self, tmp.s, hdr);
+    while (hts_getline(fp, KS_SEP_LINE, &tmp) >= 0) push_rule(self, tmp.s, hdr);
     free(tmp.s);
     hts_close(fp);
     return self;

@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2022-05-18"
+#define EXTENDFMT_VERSION "2022-12-21"
 
 /******************************************
  * CIRCULAR BUFFER                        *
@@ -461,6 +461,7 @@ int run(int argc, char **argv) {
     }
 
     bcf_srs_t *srs = bcf_sr_init();
+    bcf_sr_set_opt(srs, BCF_SR_PAIR_LOGIC, BCF_SR_PAIR_EXACT);
     if (regions_list) {
         bcf_sr_set_opt(srs, BCF_SR_REGIONS_OVERLAP, regions_overlap);
         if (bcf_sr_set_regions(srs, regions_list, regions_is_file) < 0)

@@ -47,7 +47,7 @@
  ****************************************/
 
 // adapted from Petr Danecek's implementation of tsv_init() in bcftools/tsv2vcf.c
-static inline tsv_t *tsv_init_delimiter(const char *str, char delimiter) {
+tsv_t *tsv_init_delimiter(const char *str, char delimiter) {
     tsv_t *tsv = (tsv_t *)calloc(1, sizeof(tsv_t));
     kstring_t tmp = {0, 0, 0};
     const char *ss = str, *se = ss;
@@ -74,7 +74,7 @@ static inline tsv_t *tsv_init_delimiter(const char *str, char delimiter) {
     return tsv;
 }
 
-static inline int tsv_parse_delimiter(tsv_t *tsv, bcf1_t *rec, char *str, char delimiter) {
+int tsv_parse_delimiter(tsv_t *tsv, bcf1_t *rec, char *str, char delimiter) {
     int status = 0;
     tsv->icol = 0;
     tsv->ss = tsv->se = str;
@@ -97,40 +97,6 @@ static inline int tsv_parse_delimiter(tsv_t *tsv, bcf1_t *rec, char *str, char d
         tsv->icol++;
     }
     return status ? 0 : -1;
-}
-
-int tsv_read_float(tsv_t *tsv, bcf1_t *rec, void *usr) {
-    float *single = (float *)usr;
-    char tmp = *tsv->se;
-    *tsv->se = 0;
-    char *endptr;
-    *single = (float)strtof(tsv->ss, &endptr);
-    *tsv->se = tmp;
-    return 0;
-}
-
-int tsv_read_integer(tsv_t *tsv, bcf1_t *rec, void *usr) {
-    int *integer = (int *)usr;
-    char tmp = *tsv->se;
-    *tsv->se = 0;
-    char *endptr;
-    *integer = (int)strtol(tsv->ss, &endptr, 0);
-    if (*endptr) error("Could not parse integer %s\n", tsv->ss);
-    *tsv->se = tmp;
-    return 0;
-}
-
-int tsv_read_string(tsv_t *tsv, bcf1_t *rec, void *usr) {
-    char **str = (char **)usr;
-    if (tsv->se == tsv->ss) {
-        *str = NULL;
-    } else {
-        char tmp = *tsv->se;
-        *tsv->se = 0;
-        *str = strdup(tsv->ss);
-        *tsv->se = tmp;
-    }
-    return 0;
 }
 
 int tsv_read_sample_id(tsv_t *tsv, bcf1_t *rec, void *usr) {
@@ -269,7 +235,6 @@ static inline int bcf_get_unphased_genotype_alleles(const bcf_fmt_t *fmt, int16_
 // -1 if higher number allele received from the father
 // assumes little endian architecture
 static inline int bcf_get_genotype_phase(const bcf_fmt_t *fmt, int8_t *gt_phase_arr, int nsmpl) {
-    // bcf_fmt_t *fmt = bcf_get_fmt_id(line, id);
     if (!fmt || fmt->n != 2) return 0;
 
 #define BRANCH(type_t, bcf_type_vector_end)                                                                            \

@@ -1,6 +1,6 @@
 ![](mocha_logo.png)
 
-A BCFtools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following papers from <a href="http://doi.org/10.1038/s41586-018-0321-x">2018</a> and <a href="http://doi.org/10.1038/s41586-020-2430-6">2020</a>
+A BCFtools extension to call mosaic chromosomal alterations starting from phased VCF files with either B Allele Frequency (BAF) and Log R Ratio (LRR) or allelic depth (AD). If you use this tool in your publication, please cite the following papers from [2018](https://doi.org/10.1038/s41586-018-0321-x) and [2020](https://doi.org/10.1038/s41586-020-2430-6)
 ```
 Loh P., Genovese G., McCarroll S., Price A. et al. Insights about clonal expansions from 8,342 mosaic
 chromosomal alterations. Nature 559, 350–355 (2018). [PMID: 29995854] [DOI: 10.1038/s41586-018-0321-x]
@@ -8,9 +8,9 @@ chromosomal alterations. Nature 559, 350–355 (2018). [PMID: 29995854] [DOI: 10
 Loh P., Genovese G., McCarroll S., Monogenic and polygenic inheritance become
 instruments for clonal selection (2020). [PMID: 32581363] [DOI: 10.1038/s41586-020-2430-6]
 ```
-and this website. For any feedback or questions, contact the <a href="mailto:giulio.genovese@gmail.com">author</a>
+and this website. For any feedback or questions, contact the [author](mailto:giulio.genovese@gmail.com)
 
-WARNING: MoChA will not yield useful results for VCFs from whole exome sequencing data as MoChA does not model the reference allele bias in these assays. Furthermore, whole exome sequencing does not include enough heterozygous sites to allow for detection of mosaic chromosomal alterations at low cell fractions. Similarly, low coverage whole genome sequencing will not provide a sufficient sampling of molecules to detect mosaic chromosomal alterations at low cell fractions, even in the unlikely ideal scenario of most heterozygous sites correctly genotyped and phased 
+WARNING: MoChA will not yield useful results for VCFs from whole exome sequencing data as MoChA does not model the reference allele bias in these assays. Furthermore, whole exome sequencing does not include enough heterozygous sites to allow for detection of mosaic chromosomal alterations at low cell fractions. Similarly, low coverage whole genome sequencing will not provide a sufficient sampling of molecules to detect mosaic chromosomal alterations at low cell fractions, even in the unlikely ideal scenario of most heterozygous sites correctly genotyped and phased
 
 <!--ts-->
    * [Usage](#usage)
@@ -31,7 +31,7 @@ WARNING: MoChA will not yield useful results for VCFs from whole exome sequencin
 Usage
 =====
 
-NOTICE: Starting from July 2020 a <a href="wdl">WDL</a> pipeline is available to run the entire MoChA pipeline from raw intensity files to final calls
+A set of [WDL](https://github.com/freeseek/mochawdl) pipelines are available to run the entire MoChA pipeline from raw intensity files to final calls and imputed VCFs
 
 ```
 Usage:   bcftools +mocha [OPTIONS] <in.vcf.gz>
@@ -121,27 +121,23 @@ Preparation steps
 mkdir -p $HOME/bin $HOME/GRCh3[78] && cd /tmp
 ```
 
-We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download <a href="http://software.broadinstitute.org/software/mocha">here</a>. However, notice that HTSlib 1.14 should be avoided due to a serious <a href="https://github.com/samtools/htslib/issues/1362">bug</a>
+We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download [here](http://software.broadinstitute.org/software/mocha). However, notice that HTSlib 1.14 should be avoided due to a serious [bug](https://github.com/samtools/htslib/issues/1362)
 
-Download latest version of <a href="https://github.com/samtools/htslib">HTSlib</a> and <a href="https://github.com/samtools/bcftools">BCFtools</a> (if not downloaded already)
+Download latest version of [HTSlib](https://github.com/samtools/htslib) and [BCFtools](https://github.com/samtools/bcftools) (if not downloaded already)
 ```
-git clone --branch=develop --recurse-submodules git://github.com/samtools/htslib.git
-git clone --branch=develop git://github.com/samtools/bcftools.git
-```
-
-Download plugins code
-```
-/bin/rm -f bcftools/plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT,score}.c}
-wget -P bcftools/plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT,score}.c}
+wget https://github.com/samtools/bcftools/releases/download/1.16/bcftools-1.16.tar.bz2
+tar xjvf bcftools-1.16.tar.bz2
 ```
 
-Compile latest version of HTSlib (optionally disable bz2, gcs, and lzma) and BCFtools (make sure you are using gcc version 5 or newer)
+Download and compile plugins code (make sure you are using gcc version 5 or newer)
 ```
-cd htslib && autoheader && (autoconf || autoconf) && ./configure --disable-bz2 --disable-gcs --disable-lzma && make && cd ..
-cd bcftools && make && cd ..
-/bin/cp bcftools/{bcftools,plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,extendFMT,score}.so} $HOME/bin/
+cd bcftools-1.16/
+/bin/rm -f plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
+wget -P plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
+make
+/bin/cp bcftools plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,extendFMT}.so $HOME/bin/
 ```
-It is important to avoid the HTSlib 1.14 release as it contains a <a href="https://github.com/samtools/htslib/issues/1362">bug</a> that interferes with VCF seeking in the MoChA plugin
+It is important to avoid the HTSlib 1.14 release as it contains a [bug](https://github.com/samtools/htslib/issues/1362) that interferes with VCF seeking in the MoChA plugin
 
 Make sure the directory with the plugins is available to BCFtools
 ```
@@ -149,16 +145,7 @@ export PATH="$HOME/bin:$PATH"
 export BCFTOOLS_PLUGINS="$HOME/bin"
 ```
 
-Alternatively, you can download MoChA's binaries using the following code
-```
-wget http://ftp.us.debian.org/debian/pool/main/h/htslib/libhts3_1.13+ds-2_amd64.deb
-wget http://ftp.us.debian.org/debian/pool/main/b/bcftools/bcftools_1.13-1_amd64.deb
-wget http://software.broadinstitute.org/software/mocha/bio-mocha_1.13-dev_amd64.deb
-sudo apt remove bio-mocha
-sudo apt install --reinstall ./{libhts3_1.13+ds-2,bcftools_1.13-1,bio-mocha_1.13-dev}_amd64.deb
-```
-
-Install Beagle5 and IMPUTE5 (optional for array data) from <a href="https://www.dropbox.com/sh/mwnceyhir8yze2j/AADbzP6QuAFPrj0Z9_I1RSmla?dl=0">here</a>
+Install Beagle5 and IMPUTE5 (optional for array data) from [here](https://www.dropbox.com/sh/mwnceyhir8yze2j/AADbzP6QuAFPrj0Z9_I1RSmla?dl=0)
 ```
 wget -O impute5_v1.1.5.zip https://www.dropbox.com/sh/mwnceyhir8yze2j/AAD2VrkZze6ZLrcGX-jok4KRa/impute5_v1.1.5.zip?dl=0
 unzip -ojd $HOME/bin impute5_v1.1.5.zip impute5_v1.1.5/imp{ute5,5Converter}_1.1.5_static
@@ -171,7 +158,7 @@ wget -P $HOME/bin http://faculty.washington.edu/browning/beagle/b{eagle,ref3}.28
 Download resources for GRCh37
 =============================
 
-You can find the required GRCh37 resources <a href="http://software.broadinstitute.org/software/mocha">here</a> or you can generate them as follows
+You can find the required GRCh37 resources [here](http://software.broadinstitute.org/software/mocha) or you can generate them as follows
 
 Human genome reference
 ```
@@ -194,7 +181,7 @@ for chr in {1..22} X Y; do
   bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
   bcftools norm --no-version -Ou -m -any | \
   bcftools norm --no-version -Ou -d none -f $HOME/GRCh37/human_g1k_v37.fasta | \
-  bcftools sort -Ob -T ./bcftools-sort.XXXXXX | \
+  bcftools sort -Ob -T ./bcftools. | \
   tee ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf | \
   bcftools index --force --output ALL.chr${chr}.phase3_integrated.20130502.genotypes.bcf.csi
 done
@@ -258,9 +245,9 @@ cyto="$HOME/GRCh37/cytoBand.txt.gz"
 Download resources for GRCh38
 =============================
 
-You can find the required GRCh38 resources <a href="http://software.broadinstitute.org/software/mocha">here</a> or you can generate them as follows
+You can find the required GRCh38 resources [here](http://software.broadinstitute.org/software/mocha) or you can generate them as follows
 
-Human genome reference (following the suggestion from <a href="http://lh3.github.io/2017/11/13/which-human-reference-genome-to-use">Heng Li</a>)
+Human genome reference (following the suggestion from [Heng Li](http://lh3.github.io/2017/11/13/which-human-reference-genome-to-use))
 ```
 wget -O- ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz | \
   gzip -d > $HOME/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
@@ -275,27 +262,20 @@ wget -P $HOME/GRCh38 https://data.broadinstitute.org/alkesgroup/Eagle/downloads/
 1000 Genomes project phase 3
 ```
 cd $HOME/GRCh38
-wegt http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr{{1..22}.filtered.shapeit2-duohmm-phased,X.filtered.eagle2-phased.v2}.vcf.gz
-for chr in {1..22}; do
-  bcftools view --no-version -Ou -c 2 CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.shapeit2-duohmm-phased.vcf.gz | \
+wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20220422_3202_phased_SNV_INDEL_SV/1kGP_high_coverage_Illumina.chr{{1..22}.filtered.SNV_INDEL_SV_phased_panel,X.filtered.SNV_INDEL_SV_phased_panel.v2}.vcf.gz
+for chr in {1..22} X; do
+  if [ $chr == "X" ]; then sfx=".v2"; else sfx=""; fi
+  bcftools view --no-version -Ou -c 2 1kGP_high_coverage_Illumina.chr$chr.filtered.SNV_INDEL_SV_phased_panel$sfx.vcf.gz | \
   bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
-  bcftools sort -Ob -T ./bcftools-sort.XXXXXX | \
-  tee CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf | \
-  bcftools index --force --output CCDG_14151_B01_GRM_WGS_2020-08-05_chr$chr.filtered.phased.bcf.csi
+  bcftools sort -Ob -T ./bcftools. | \
+  tee 1kGP_high_coverage_Illumina.chr$chr.bcf | \
+  bcftools index --force --output 1kGP_high_coverage_Illumina.chr$chr.bcf.csi
 done
-bcftools view --no-version -h CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.vcf.gz | \
-  sed 's/^#CHROM/##INFO=<ID=ME,Number=1,Type=Float,Description="Mendelian genotype errors">\n#CHROM/' | \
-  bcftools reheader -h /dev/stdin CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.vcf.gz | \
-  bcftools view --no-version -Ou -c 2 | \
-  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
-  bcftools sort -Ob -T ./bcftools-sort.XXXXXX | \
-  tee CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf | \
-  bcftools index --force --output CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.phased.bcf.csi
 ```
 
 List of common germline duplications and deletions
 ```
-wget -P $HOME/GRCh38 http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20210124.SV_Illumina_Integration/1KGP_3202.Illumina_ensemble_callset.freeze_V1.vcf.gz{,.tbi}
+wget -P $HOME/GRCh38 ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20210124.SV_Illumina_Integration/1KGP_3202.Illumina_ensemble_callset.freeze_V1.vcf.gz{,.tbi}
 bcftools query -i 'AC>1 && END-POS+1>10000 && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh38/1KGP_3202.Illumina_ensemble_callset.freeze_V1.vcf.gz > $HOME/GRCh38/cnps.bed
 ```
@@ -320,8 +300,8 @@ awk '{print $1,$2; print $1,$3}' genomicSuperDups.bed | \
 1000 Genomes project phase 3 imputation panel for beagle5 and impute5
 ```
 cd $HOME/GRCh38
-pfx="CCDG_14151_B01_GRM_WGS_2020-08-05_"
-sfx=".filtered.phased"
+pfx="1kGP_high_coverage_Illumina."
+sfx=""
 for chr in chr{{1..22},X}; do imp5Converter --h $pfx$chr$sfx.bcf --o $pfx$chr$sfx --r $chr; done
 wget -O bref3.jar http://faculty.washington.edu/browning/beagle/bref3.28Jun21.220.jar
 for chr in chr{1..22}; do bcftools view --no-version $pfx$chr$sfx.bcf | java -jar bref3.jar > $pfx$chr$sfx.bref3; done
@@ -340,8 +320,8 @@ ref="$HOME/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
 mhc_reg="chr6:27518932-33480487"
 kir_reg="chr19:54071493-54992731"
 map="$HOME/GRCh38/genetic_map_hg38_withX.txt.gz"
-panel_pfx="$HOME/GRCh38/CCDG_14151_B01_GRM_WGS_2020-08-05_chr"
-panel_sfx=".filtered.phased"
+panel_pfx="$HOME/GRCh38/1kGP_high_coverage_Illumina.chr"
+panel_sfx=""
 assembly="GRCh38"
 cnp="$HOME/GRCh38/cnps.bed"
 dup="$HOME/GRCh38/segdups.bed.gz"
@@ -381,7 +361,7 @@ If you want to process <b>genotype array</b> data you need a VCF file with ALLEL
 ```
 Making sure that BAF refers to the allele frequency of the reference allele if ALLELE_B=0 and of the alternate allele if ALLELE_B=1
 
-If you do not already have a VCF file but you have Illumina or Affymetrix genotype array data, you can use the <a href="https://github.com/freeseek/gtc2vcf">gtc2vcf</a> tools to convert the data to VCF and you can use the mochatools plugin to fill the ALLELE_A/ALLELE_B/GC info fields. Alternatively you can use your own scripts
+If you do not already have a VCF file but you have Illumina or Affymetrix genotype array data, you can use the [gtc2vcf](https://github.com/freeseek/gtc2vcf) tools to convert the data to VCF and you can use the mochatools plugin to fill the ALLELE_A/ALLELE_B/GC info fields. Alternatively you can use your own scripts
 
 Create a minimal binary VCF
 ```
@@ -403,9 +383,12 @@ If you want to process <b>whole-genome sequence</b> data you need a VCF file wit
 1	798959	rs11240777	G	A	.	.	GC=0.4075	GT:AD	0|0:31,0
 1	932457	rs1891910	G	A	.	.	GC=0.6425	GT:AD	1|0:18,14
 ```
-Make sure that AD is a "Number=R" format field (this was introduced in version <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">4.2</a> of the VCF) or multi-allelic variants will not <a href="https://github.com/samtools/bcftools/issues/360">split properly</a>
+Make sure that AD is a "Number=R" format field (this was introduced in version [4.2](https://samtools.github.io/hts-specs/VCFv4.2.pdf) of the VCF) or multi-allelic variants will not [split properly](https://github.com/samtools/bcftools/issues/360). If your VCF does not include the GC field, this can be added with the command
+```
+bcftools +mochatools --no-version -Ob $vcf -- -t GC -f $ref
+```
 
-Create a minimal binary VCF (notice that you will need BCFtools version 1.11 or newer with implemented the <a href="https://github.com/samtools/bcftools/issues/360">--keep-sum</a> option)
+Create a minimal binary VCF (notice that you will need BCFtools version 1.11 or newer with implemented the [--keep-sum](https://github.com/samtools/bcftools/issues/360) option)
 ```
 bcftools view --no-version -h $vcf | sed 's/^\(##FORMAT=<ID=AD,Number=\)\./\1R/' | \
   bcftools reheader -h /dev/stdin $vcf | \
@@ -440,7 +423,7 @@ If a file with additional variants to be excluded is available, further merge it
 /bin/mv $dir/$pfx.xcl.bcf $dir/$pfx.xcl.tmp.bcf && \
 /bin/mv $dir/$pfx.xcl.bcf.csi $dir/$pfx.xcl.tmp.bcf.csi && \
 bcftools merge --no-version -Ob -m none $dir/$pfx.xcl.tmp.bcf $xcl | \
-  tee $dir/$pfx.xcl.bcf | \ 
+  tee $dir/$pfx.xcl.bcf | \
   bcftools index --force --output $dir/$pfx.xcl.bcf.csi
 ```
 
@@ -471,9 +454,9 @@ done
 ```
 If you are using GRCh37 rather than GRCh38, use `--region $chr` instead. If you are phasing genotypes from WGS data, include the `--sequencing` option
 
-Eagle's <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-100003.2">memory requirements</a> will depend on the number of samples in the target (Nt) and in the reference panel (Nr=2504), and the number of variants (M) in the largest contig, and will amount to 1.5(Nt+Nr)M bytes. The <a href="https://data.broadinstitute.org/alkesgroup/Eagle/#x1-110003.3">running time</a> will be \~1 minute of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">reference-based phasing</a> with a small target and reference panel (see Supplementary Tables 2,3) and \~5 minutes of CPU time per genome for <a href="https://www.nature.com/articles/ng.3679#Sec18">non-reference-based phasing</a> with a large cohort (see Supplementary Tables 7,8). Also, by default, if the option --pbwtIters is not used, Eagle will perform one phasing iteration if Nt<Nr/2=1252, two if 1252=Nr/2<Nt<2Nr=5008, and three if 5008=2Nr<Nt and in the second and third iterations both target and reference panel haplotypes will be used as references for phasing (see <a href="https://www.nature.com/articles/ng.3679#Sec10"here</a>)
+Eagle's [memory requirements](https://data.broadinstitute.org/alkesgroup/Eagle/#x1-100003.2) will depend on the number of samples in the target (Nt) and in the reference panel (Nr=2504), and the number of variants (M) in the largest contig, and will amount to 1.5(Nt+Nr)M bytes. The [running time](https://data.broadinstitute.org/alkesgroup/Eagle/#x1-110003.3) will be \~1 minute of CPU time per genome for [reference-based phasing](https://www.nature.com/articles/ng.3679#Sec18) with a small target and reference panel (see Supplementary Tables 2,3) and \~5 minutes of CPU time per genome for [non-reference-based phasing](https://www.nature.com/articles/ng.3679#Sec18) with a large cohort (see Supplementary Tables 7,8). Also, by default, if the option --pbwtIters is not used, Eagle will perform one phasing iteration if Nt<Nr/2=1252, two if 1252=Nr/2<Nt<2Nr=5008, and three if 5008=2Nr<Nt and in the second and third iterations both target and reference panel haplotypes will be used as references for phasing (see [here](https://www.nature.com/articles/ng.3679#Sec10))
 
-Notice that you can also use alternative phasing methods that might be more effective, such as using <a href="http://www.haplotype-reference-consortium.org/">HRC</a> (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions. Notice also that phasing can also be performed across overlapping windows rather than entire chromosomes to achieve better parallelization
+Notice that you can also use alternative phasing methods that might be more effective, such as using [HRC](http://www.haplotype-reference-consortium.org/) (use the Sanger Imputation Service, as the Michigan Imputations Server does not work with binary VCFs, does not work with VCFs with multiple chromosomes, does not work with chromosome X, and has no option for phasing without imputation). This might provide better phasing and therefore better ability to detect large events at lower cell fractions. Notice also that phasing can also be performed across overlapping windows rather than entire chromosomes to achieve better parallelization
 
 Concatenate phased output into a single VCF file
 ```
@@ -559,7 +542,7 @@ bcftools +mocha \
   tee $dir/$pfx.as.bcf | \
   bcftools index --force --output $dir/$pfx.as.bcf.csi
 ```
-Notice that MoChA will read input computed gender and call rate with the `--input-stats` option if provided, otherwise these will be estimated from the VCF. MoChA requires a balanced ratio of males and females to correctly infer gender so if this is not the case, we advise to input the gender with the `--input-stats` option. For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms. MoChA should not be run on single chromosome VCFs as median statistics across the autosomes are used to calibrate the likelihoods 
+Notice that MoChA will read input computed gender and call rate with the `--input-stats` option if provided, otherwise these will be estimated from the VCF. MoChA requires a balanced ratio of males and females to correctly infer gender so if this is not the case, we advise to input the gender with the `--input-stats` option. This option requires a file with columns `sample_id` and `computed_gender`, with the latter being encoded as `M` for male, `F` for female, and `U` for unknown (optionally `K` for Klinefelter). For array data these statistics are usually available from the output of the Illumina\'s GenCall or Affymetrix\'s Axiom genotyping algorithms. MoChA should not be run on single chromosome VCFs as median statistics across the autosomes are used to calibrate the likelihoods
 
 The genome statistics file contains information for each sample analyzed in the VCF and it includes the following columns
 ```
@@ -594,11 +577,11 @@ computed_gender - inferred sample gender
      beg_XXXXXX - beginning base pair position for the call (according to XXXXXX genome reference)
      end_XXXXXX - end base pair position for the call (according to XXXXXX genome reference)
          length - base pair length of the call
-          p_arm - whether the call extends to the small arm and whether it reaches the telomere or just the centromere
-          q_arm - whether the call extends to the long arm and whether it reaches the telomere or just the centromere
+          p_arm - whether or not the call extends to the small arm (Y/N) and whether it reaches the telomere (T) or just the centromere (C)
+          q_arm - whether or not the call extends to the long arm (Y/N) and whether it reaches the telomere (T) or just the centromere (C)
         n_sites - number of sites used for the call
          n_hets - number of heterozygous sites used for the call
-       n50_gets - N50 value for consecutive heterozygous sites distances
+       n50_hets - N50 value for consecutive heterozygous sites distances
            bdev - BAF deviation estimate from 0.5
         bdev_se - standard deviation estimate for BAF deviation
         rel_cov - relative coverage estimate from LRR or sequencing coverage
@@ -609,9 +592,9 @@ computed_gender - inferred sample gender
        baf_conc - BAF phase concordance across phased heterozygous sites underlying the call (see Vattathil et al. 2012)
    lod_baf_conc - LOD score for model based on BAF phase concordance (genome-wide corrected)
            type - Type of call based on LRR / relative coverage
-             cf - estimated cell fraction based on BDEV and TYPE, or LDEV and TYPE if either BDEV or BDEV_SE are missing
+             cf - estimated cell fraction based on bdev and type, or rel_cov and type if either bdev or bdev_se are missing
 ```
-Notice that the cell fraction is computed as either `2 bdev` for CN-LOH events or using the formulas `| 1/cn - 1/2 | = bdev` with `cn` the copy number and `cf = | 2 - cn |` for gains and losses. If the type of event cannot be determined, it will be determined as `4 bdev` if `bdev < 0.05` otherwise it will not be estimated. The `rel_cov` statistic is estimated as `2 x 2 ^ (LRR / LRR-hap2dip)` with `LRR-hap2dip = 0.45` by default
+Notice that the cell fraction is computed as either `2 bdev` for CN-LOH events or using the formulas `| 1/cn - 1/2 | = bdev` with `cn` the copy number and `cf = | 2 - cn |` for gains and losses. If the type of event cannot be determined, it will be determined as `4 bdev` if `bdev < 0.05` otherwise it will not be estimated. The `rel_cov` statistic is estimated as `2 x 2 ^ (LRR / LRR-hap2dip)` with `LRR-hap2dip = 0.45` by default. Notice also that the two most common events, mLOY and mLOX, are always called as X chromosome events as mLOY is identified through an imbalance in the PAR1 region that is by default mapped to the X chromosome. Furthermore, LRR measurement on the X chromosome are typically very noisy and therefore inference of event type, whether gain, loss, or CN-LOH, for X chromosome events at low cell fraction should not be relied upon. For events inferred to be mLOY and mLOX events, we advise to estimate the cell fraction using the formula for losses: `cf = 4 bdev / (1 + 2 bdev)`
 
 The output VCF will contain the following extra FORMAT fields
 ```
@@ -634,13 +617,13 @@ awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
   rel_cov=$(g["rel_cov"]); lod_baf_phase=$(g["lod_baf_phase"]); lod_baf_conc=$(g["lod_baf_conc"])}
   NR>FNR && FNR>1 && !($(g["sample_id"]) in xcl) && $(g["type"])!~"^CNP" &&
     ( $(g["chrom"])~"X" && gender=="M" || bdev<0.1 || $(g["n50_hets"])<2e5 || lod_baf_conc!="nan" && lod_baf_conc>10.0 ) &&
-    ( $(g["bdev_se"])!="nan" || lod_baf_phase!="nan" && lod_baf_phase>10.0 ) && 
+    ( $(g["bdev_se"])!="nan" || lod_baf_phase!="nan" && lod_baf_phase>10.0 ) &&
     ( rel_cov<2.1 || bdev<0.05 || len>5e5 && bdev<0.1 && rel_cov<2.5 || len>5e6 && bdev<0.15 )' \
   $pfx.stats.tsv $pfx.calls.tsv > $pfx.calls.filtered.tsv
 awk 'NR==FNR {x[$1"_"$3"_"$4"_"$5]++} NR>FNR && ($0~"^track" || $4"_"$1"_"$2"_"$3 in x)' \
   $pfx.calls.filtered.tsv $pfx.ucsc.bed > $pfx.ucsc.filtered.bed
 ```
-will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls made by the LRR and BAF model if they have less than a `lod_baf_phase` score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the <a href="http://doi.org/10.1038/s41586-018-0321-x">UK biboank</a>. Notice that different filtering thresholds are used for calls smaller than 500kbp and smaller than 5Mbp, reflecting different priors that these could be germline events. Most calls on chromosome X in male samples likely represent mosaic loss-of-Y events, as only the PAR1 and PAR2 regions are analyzed in male samples
+will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls made by the LRR and BAF model if they have less than a `lod_baf_phase` score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the [UK biboank](https://doi.org/10.1038/s41586-018-0321-x). Notice that different filtering thresholds are used for calls smaller than 500kbp and smaller than 5Mbp, reflecting different priors that these could be germline events. Most calls on chromosome X in male samples likely represent mosaic loss-of-Y events, as only the PAR1 regions is analyzed in male samples
 
 Mosaic phenotypes
 =================
@@ -656,7 +639,7 @@ Generate list of samples with mosaic loss of chromosome Y (mLOY)
 awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i} NR>1 && $(f["computed_gender"])=="M" && $(f["chrom"])~"X" &&
   $(f["length"])>2e6 && $(f["rel_cov"])<2.5 {print $(f["sample_id"])}' $pfx.calls.tsv > $pfx.Y_loss.lines
 ```
-Requiring `rel_cov<2.5` should make sure to filter out XXY and XYY samples. This should generate a mLOY set similarly to how it was done in the <a href="http://doi.org/10.1038/s41598-020-59963-8">UK biboank</a>. Notice that this inference strategy is based on BAF imbalances over the PAR1 region which allows detection of loss-of-Y at much lower cell fractions that by using LRR statistics over the Y nonPAR region
+Requiring `rel_cov<2.5` should make sure to filter out XXY and XYY samples. This should generate a mLOY set similarly to how it was done in the [UK biboank](https://doi.org/10.1038/s41598-020-59963-8). Notice that this inference strategy is based on BAF imbalances over the PAR1 region which allows detection of loss-of-Y at much lower cell fractions that by using LRR statistics over the Y nonPAR region
 
 Generate list of samples with mosaic loss of chromosome X (mLOX)
 ```
@@ -731,7 +714,7 @@ awk -F"\t" -v OFS="\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i} NR>1 {print $(f[
   cut -f1,3-) > $pfx.pheno.tsv
 ```
 
-Include other mosaic chromosomal alteration events in the phenotype table  
+Include other mosaic chromosomal alteration events in the phenotype table
 ```
 for type in auto cll {{{1..12},{16..20}}p,{1..22}q}_{cnloh,loss} {1..22}_gain; do
   n=$(cat $pfx.$type.lines | wc -l);
@@ -746,7 +729,7 @@ done
 Allelic shift pipeline
 ======================
 
-Some mosaic chromosomal alterations have been observed to affect preferentially some haplotypes causing biased allelic shifts at several loci (MPL, FH, NBN, JAK2, FRA10B, MRE11, ATM, SH2B3, TINF2, TCL1A, DLK1, TM2D3, CTU2). This type of analysis for DNA microarray data requires information about the mosaic chromosomal alterations to be extended across imputed heterozygous genotypes and a binomial test for biased allelic shift to be performed, as hs been done before (see Table 1 of <a href="https://doi.org/10.1038/s41586-018-0321-x">Loh et al. 2018</a>, Extended Data Table 1 of <a href="https://doi.org/10.1038/s41586-020-2430-6">Loh et al. 2020</a>, and Table 1 of <a href="https://doi.org/10.1038/s41586-020-2426-2">Terao et al. 2020</a>)
+Some mosaic chromosomal alterations have been observed to affect preferentially some haplotypes causing biased allelic shifts at several loci (MPL, FH, NBN, JAK2, FRA10B, MRE11, ATM, SH2B3, TINF2, TCL1A, DLK1, TM2D3, CTU2). This type of analysis for DNA microarray data requires information about the mosaic chromosomal alterations to be extended across imputed heterozygous genotypes and a binomial test for biased allelic shift to be performed, as hs been done before (see Table 1 of [Loh et al. 2018](https://doi.org/10.1038/s41586-018-0321-x), Extended Data Table 1 of [Loh et al. 2020](https://doi.org/10.1038/s41586-020-2430-6), and Table 1 of [Terao et al. 2020](https://doi.org/10.1038/s41586-020-2426-2))
 
 Import allelic shift information from the MoChA output VCF into a VCF file with imputed genotypes (optional for array data)
 ```
@@ -842,7 +825,7 @@ mocha_plot.R \
   --regions 11:81098129-115077367 \
   --cytoband $HOME/GRCh37/cytoBand.txt.gz
 ```
-Notice that by default MoChA will perform internal BAF (for array data) and LRR adjustments that will not be performed by the plotter so the visualized data might actually look noisier than what was actually processed
+Notice that by default MoChA will perform internal BAF (for array data) and LRR adjustments. These adjustments will be computed by the plotter unless you use the option `--no-adjust`
 
 ![](MH0145622.png)
 Mosaic deletion from array data overlapping the ATM gene (GRCh37 coordinates). The deletion signal can be observed across LRR, BAF and phased BAF, although it is the most clear with the latter. Furthermore, evidence of three phase switch errors can be observed in the shifted phased BAF signal
@@ -879,14 +862,14 @@ The internal HMM used by MoChA is completely symmetrical, but it internally uses
 
 MoChA will also attempt to split events that span a whole chromosome by comparing the median LRR values on the small and long arms as these will occasionally represent isochromosome events
 
-There are a few differences between MoChA and the HMM model used in <a href="http://doi.org/10.1038/s41586-018-0321-x">Loh et al. 2018</a>, <a href="http://doi.org/10.1038/s41598-020-59963-8">Thompson et al. 2019</a>, <a href="https://doi.org/10.1038/s41586-020-2430-6">Loh et al. 2020</a>, and <a href="https://doi.org/10.1038/s41586-020-2426-2">Terao et al. 2020</a>. The most important is that, the latter model used a likelihood ratio test statistic with likelihoods deriving from a 3-state forward-backward HMM model. MoChA instead uses a Viterbi HMM model with multiple alternate states and it increases the number of alternate states dynamically when trying to assess multiple calls. While MoChA's HMM transition probabilities are symmetrical with respect to centromeres, the HMM in Loh et al. use non-symmetrical transitions and different likelihoods for other parameters:
+There are a few differences between MoChA and the HMM model used in [Loh et al. 2018](https://doi.org/10.1038/s41586-018-0321-x), [Thompson et al. 2019](https://doi.org/10.1038/s41598-020-59963-8), [Loh et al. 2020](https://doi.org/10.1038/s41586-020-2430-6), and [Terao et al. 2020](https://doi.org/10.1038/s41586-020-2426-2). The most important is that, the latter model used a likelihood ratio test statistic with likelihoods deriving from a 3-state forward-backward HMM model. MoChA instead uses a Viterbi HMM model with multiple alternate states and it increases the number of alternate states dynamically when trying to assess multiple calls. While MoChA's HMM transition probabilities are symmetrical with respect to centromeres, the HMM in Loh et al. use non-symmetrical transitions and different likelihoods for other parameters:
 - transition likelihood to the diploid state was 0.0003 (PL\~35.2) on the autosome and 0.0001 (PL=40.0) on chromosome X
 - transition likelihood to an alternative state was 0.004 (PL\~24.0) on the autosome and 0.08 (PL\~11.0) on chromosome X
-- no penalty for telomeres likelihood (PL=0.0) except for acrocentric chromosomes where the penalty was 0.2 (PL\~7.0) 
+- no penalty for telomeres likelihood (PL=0.0) except for acrocentric chromosomes where the penalty was 0.2 (PL\~7.0)
 - flip error probability was 0.001 (PL=30.0)
-Another difference is that MoChA performs a BAF correction by regressing BAF values against LRR values (similarly to what done in <a href="http://doi.org/10.1101/gr.5686107">Oosting et al\. 2007</a>, <a href="http://doi.org/10.1186/1471-2105-9-409">Staaf et al\. 2008</a>, and <a href="http://doi.org/10.1038/srep36158">Mayrhofer et al\. 2016</a>). A similar correction was separately performed in <a href="https://doi.org/10.1038/s41586-020-2426-2">Terao et al. 2020</a>
+Another difference is that MoChA performs a BAF correction by regressing BAF values against LRR values (similarly to what done in [Oosting et al\. 2007](https://doi.org/10.1101/gr.5686107), [Staaf et al\. 2008](https://doi.org/10.1186/1471-2105-9-409), and [Mayrhofer et al\. 2016](https://doi.org/10.1038/srep36158)). A similar correction was separately performed in [Terao et al. 2020](https://doi.org/10.1038/s41586-020-2426-2)
 
 Acknowledgements
 ================
 
-This work is supported by NIH grant <a href="http://grantome.com/grant/NIH/R01-HG006855">R01 HG006855</a>, NIH grant <a href="http://grantome.com/grant/NIH/R01-MH104964">R01 MH104964</a>, US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244), and the Stanley Center for Psychiatric Research. This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> for writing HTSlib and BCFtools, Po-Ru Loh <poruloh@broadinstitute.org> for writing the Eagle phasing software, Olivier Delaneau <olivier.delaneau@gmail.com> for writing the SHAPEIT4 phasing software, and Simone Rubinacci <rubinacci.simone@gmail.com> for writing the IMPUTE5 imputation software
+This work is supported by NIH grant [R01 HG006855](http://grantome.com/grant/NIH/R01-HG006855), NIH grant [R01 MH104964](http://grantome.com/grant/NIH/R01-MH104964), NIH grant [R01MH123451](http://grantome.com/grant/NIH/R01-MH123451), US Department of Defense Breast Cancer Research Breakthrough Award W81XWH-16-1-0316 (project BC151244), and the Stanley Center for Psychiatric Research. This work would have not been possible without the efforts of Heng Li <lh3@sanger.ac.uk>, Petr Danecek <pd3@sanger.ac.uk>, John Marshall <jm18@sanger.ac.uk>, James Bonfield <jkb@sanger.ac.uk>, and Shane McCarthy <sm15@sanger.ac.uk> for writing HTSlib and BCFtools, Po-Ru Loh <poruloh@broadinstitute.org> for writing the Eagle phasing software, Olivier Delaneau <olivier.delaneau@gmail.com> for writing the SHAPEIT4 phasing software, and Simone Rubinacci <rubinacci.simone@gmail.com> for writing the IMPUTE5 imputation software

@@ -37,7 +37,7 @@
 #include <htslib/kseq.h>
 #include "bcftools.h"
 
-#define TRIO_PHASE_VERSION "2022-05-18"
+#define TRIO_PHASE_VERSION "2022-12-21"
 
 #define ABSOLUTE (1 << 24)
 #define TRANSMITTED (1 << 16)
@@ -128,7 +128,6 @@ const char *usage(void) {
            "About: Phase genotypes in trios. (version " TRIO_PHASE_VERSION
            " https://github.com/freeseek/mocha)\n"
            "Usage: bcftools +trio-phase [General Options] -- [Plugin Options]\n"
-           "\n"
            "Options:\n"
            "   run \"bcftools plugin\" for a list of common options\n"
            "\n"
@@ -176,11 +175,6 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     args->prev_rid = -1;
     args->in_hdr = in;
     args->out_hdr = out;
-    args->inds = (ind_t *)calloc(bcf_hdr_nsamples(in), sizeof(ind_t));
-    for (int i = 0; i < bcf_hdr_nsamples(in); i++) {
-        args->inds[i].ibd_father = bcf_int32_missing;
-        args->inds[i].ibd_mother = bcf_int32_missing;
-    }
     args->niters = 3;
     char *ped_fname = NULL;
 
@@ -209,6 +203,9 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
             break;
         }
     }
+
+    if (!in || !out) error("Expected input VCF\n%s", usage());
+
     if (!ped_fname) error("Expected the -p option\n");
     parse_ped(args, ped_fname);
     if (args->ibd) {
@@ -219,6 +216,12 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
                        "##FORMAT=<ID=IBD_M,Number=1,Type=Integer,Description=\"IBD state with "
                        "the mother\">");
     }
+
+    args->inds = (ind_t *)calloc(bcf_hdr_nsamples(in), sizeof(ind_t));
+    for (int i = 0; i < bcf_hdr_nsamples(in); i++) {
+        args->inds[i].ibd_father = bcf_int32_missing;
+        args->inds[i].ibd_mother = bcf_int32_missing;
+    }
     return 0;
 }
 
@@ -226,7 +229,7 @@ bcf1_t *process(bcf1_t *rec) {
     // extract genotypes from record and checks whether they follow a diploid model
     int nsmpl = bcf_hdr_nsamples(args->in_hdr);
     int ngt = bcf_get_genotypes(args->in_hdr, rec, &args->arr, &args->m_arr);
-    if (ngt < 0) return rec;
+    if (ngt <= 0) return rec;
     int ploidy = ngt / nsmpl;
     if (ploidy != 2) return rec;
 

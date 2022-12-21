@@ -25,13 +25,14 @@
 #  THE SOFTWARE.
 ###
 
-summary_plot_version <- '2022-05-18'
+summary_plot_version <- '2022-12-21'
 
 library(optparse)
 library(ggplot2)
 options(bitmapType = 'cairo')
 
 parser <- OptionParser('usage: summary_plot.R [options] --stats <file.tsv> --calls <file.tsv> --pdf <file.pdf>')
+parser <- add_option(parser, c('--n-chrs'), type = 'integer', default = 23, help = 'number of chromosomes including X [23]', metavar = '<integer>')
 parser <- add_option(parser, c('--stats'), type = 'character', help = 'input MoChA stats file', metavar = '<file.tsv>')
 parser <- add_option(parser, c('--calls'), type = 'character', help = 'input MoChA calls file', metavar = '<file.tsv>')
 parser <- add_option(parser, c('--call-rate-thr'), type = 'double', default = 0.97, help = 'minimum call rate threshold [0.97]', metavar = '<float>')
@@ -51,7 +52,7 @@ if (is.null(args$pdf)) {print_help(parser); stop('option --pdf is required')}
 df_stats <- read.table(args$stats, sep = '\t', header = TRUE)
 df_calls <- read.table(args$calls, sep = '\t', header = TRUE)
 df_calls$chrom <- as.factor(gsub('^chr', '', gsub('^chrM', 'MT', df_calls$chrom)))
-ord <- order(as.numeric(gsub('MT', '26', gsub('Y', '24', gsub('X', '23', levels(df_calls$chrom))))))
+ord <- order(as.numeric(gsub('MT', args$n_chrs + 3, gsub('Y', args$n_chrs + 1, gsub('X', args$n_chrs, levels(df_calls$chrom))))))
 df_calls$chrom <- factor(df_calls$chrom, levels(df_calls$chrom)[ord])
 
 if ('lrr_median' %in% colnames(df_stats)) {
@@ -167,7 +168,7 @@ if (sum(idx_mloy) > 0) {
   df_merge$bdev[is.na(df_merge$bdev)] <- 0
   p <- ggplot(df_merge, aes(x = bdev, y = y_nonpar_adj_lrr_median, color = mloy)) +
     geom_point(shape = 20, size = .5, alpha = 1/2) +
-    scale_x_continuous('PAR1/PAR2 BAF deviation') +
+    scale_x_continuous('PAR1 BAF deviation') +
     scale_y_continuous('Y nonPAR median LRR (autosome corrected)') +
     scale_color_manual(paste(sum(df_merge$mloy), 'mLOY'), values = c('FALSE' = 'gray', 'TRUE' = 'red'), labels = c('FALSE' = 'no', 'TRUE' = 'yes')) +
     theme_bw(base_size = args$fontsize) +
