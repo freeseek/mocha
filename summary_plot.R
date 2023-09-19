@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2022 Giulio Genovese
+#  Copyright (C) 2017-2023 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,7 +25,9 @@
 #  THE SOFTWARE.
 ###
 
-summary_plot_version <- '2022-12-21'
+options(error = function() {traceback(3); q()})
+
+summary_plot_version <- '2023-09-19'
 
 library(optparse)
 library(ggplot2)
@@ -84,9 +86,9 @@ idx <- !( df_calls$sample_id %in% df_stats$sample_id[df_stats$call_rate < args$c
 
 if (sum(idx) > 0) {
   p <- ggplot(df_calls[idx,], aes(x = bdev, y = rel_cov, color = type)) +
-    geom_hline(yintercept = c(1.0, 2.0, 3.0), color = 'gray', size = .5, linetype = 'dashed') +
-    geom_segment(aes(x = 0.0, y = 2.0, xend = 1.0/6.0, yend = 3.0), color = 'gray', size = .5, linetype = 'dashed') +
-    geom_segment(aes(x = 0.0, y = 2.0, xend = 1.0/6.0, yend = 1.5), color = 'gray', size = .5, linetype = 'dashed') +
+    geom_hline(yintercept = c(1.0, 2.0, 3.0), color = 'gray', linewidth = .5, linetype = 'dashed') +
+    geom_segment(aes(x = 0.0, y = 2.0, xend = 1.0/6.0, yend = 3.0), color = 'gray', linewidth = .5, linetype = 'dashed') +
+    geom_segment(aes(x = 0.0, y = 2.0, xend = 1.0/6.0, yend = 1.5), color = 'gray', linewidth = .5, linetype = 'dashed') +
     geom_point(shape = 20, size = .5, alpha = 1/2) +
     scale_color_manual('', values = c('CN-LOH' = 'orange', 'Loss' = 'blue', 'Gain' = 'red', 'Undetermined' = 'gray50')) +
     theme_bw(base_size = args$fontsize) +
@@ -109,8 +111,8 @@ if (sum(idx & df_calls$type == 'CN-LOH') > 0) {
 }
 
 p <- ggplot(df_stats, aes(x = 1 - call_rate, y = baf_auto, color = computed_gender)) +
-  geom_vline(xintercept = 1 - args$call_rate_thr, color = 'black', size = .5, alpha = 1/2) +
-  geom_hline(yintercept = args$baf_auto_thr, color = 'black', size = .5, alpha = 1/2) +
+  geom_vline(xintercept = 1 - args$call_rate_thr, color = 'black', linewidth = .5, alpha = 1/2) +
+  geom_hline(yintercept = args$baf_auto_thr, color = 'black', linewidth = .5, alpha = 1/2) +
   geom_point(data = df_stats[df_stats$call_rate < args$call_rate_thr | df_stats$baf_auto > args$baf_auto_thr,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
   geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_log10('1 - call rate') +
@@ -134,7 +136,7 @@ if ('baf_sd' %in% colnames(df_stats)) { col_x <- 'baf_sd'; lbl_x <- 'Standard de
 } else if ('baf_corr' %in% colnames(df_stats)) { col_x <- 'baf_corr'; lbl_x <- 'Beta-binomial correlation BAF' }
 if ('lrr_sd' %in% colnames(df_stats)) { col_y <- 'lrr_sd'; lbl_y <- 'Standard deviation LRR'
 } else if ('cov_sd' %in% colnames(df_stats)) { col_y <- 'cov_sd'; lbl_y <- 'Standard deviation coverage' }
-p <- ggplot(df_stats, aes_string(x = col_x, y = col_y, color = 'computed_gender')) +
+p <- ggplot(df_stats, aes(x = !! sym(col_x), y = !! sym(col_y), color = computed_gender)) +
   geom_point(data = df_stats[df_stats$call_rate < args$call_rate_thr | df_stats$baf_auto > args$baf_auto_thr,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
   geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_continuous(lbl_x) +
@@ -176,9 +178,11 @@ if (sum(idx_mloy) > 0) {
   print(p)
 }
 
-if (sum(idx_mlox | idx_mloy) > 0) {
-  p <- ggplot(df_calls[idx_mlox | idx_mloy,], aes(x = bdev)) +
-    geom_histogram(binwidth = .001, color = 'black', fill = 'transparent') +
+write.table(df_calls[idx_mlox | idx_mloy,], "/tmp/test.tsv", sep="\t", quote=FALSE, row.names=FALSE)
+
+if (sum((idx_mlox | idx_mloy) & df_calls$bdev < 0.05) > 0) {
+  p <- ggplot(df_calls[(idx_mlox | idx_mloy) & df_calls$bdev < 0.05,], aes(x = bdev)) +
+    geom_histogram(binwidth = .001, color = 'black', fill = 'transparent', na.rm = TRUE) +
     scale_x_continuous('mLOX/mLOY BAF deviation', limits = c(0.0, 0.05), expand = c(0, 0)) +
     theme_bw(base_size = args$fontsize) +
     facet_grid(computed_gender ~ ., scales = 'free_y')

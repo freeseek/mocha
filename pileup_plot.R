@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2022 Giulio Genovese
+#  Copyright (C) 2017-2023 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,7 +25,9 @@
 #  THE SOFTWARE.
 ###
 
-pileup_plot_version <- '2022-12-21'
+options(error = function() {traceback(3); q()})
+
+pileup_plot_version <- '2023-09-19'
 
 suppressPackageStartupMessages(library(optparse))
 suppressPackageStartupMessages(library(ggplot2))
@@ -94,8 +96,8 @@ for (chr in c(1:(args$n_chrs - 1), 'X')) {
   if ( sum(idx) == 0 ) next
   df_calls$index[idx] <- rank(df_calls[idx, beg_pos] - df_calls[idx, 'length']/chrlen[chr] + 1e9 * (3 * (df_calls$type[idx]=='Loss') + 2 * (df_calls$type[idx]=='CN-LOH') + (df_calls$type[idx]=='Gain')) , ties.method = 'first') - .5
 
-  p <- ggplot(data = df_calls[idx,], aes_string(x = paste0(beg_pos, '/1e6'), y = 'index', color = 'type')) +
-    geom_segment(aes_string(x = paste0(beg_pos, '/1e6'), xend = paste0(end_pos, '/1e6'), y = 'index', yend = 'index')) +
+  p <- ggplot(data = df_calls[idx,], aes(x = !! sym(beg_pos) / 1e6, y = index, color = type)) +
+    geom_segment(aes(x = !! sym(beg_pos) / 1e6, xend = !! sym(end_pos) / 1e6, y = index, yend = index)) +
     theme_bw() +
     scale_x_continuous(paste('Chromosome', chr, '(Mbp position)')) +
     scale_y_continuous(NULL, breaks = NULL) +
@@ -144,16 +146,16 @@ for (chr in c(1:(args$n_chrs - 1), 'X')) {
     }
 
     p <- p  +
-      geom_rect(data = df_cyto[df_cyto$chrom == chr & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = sum(idx), ymax = sum(idx) * 21 / 20, color = 'black', size = 1/4, show.legend = FALSE) +
+      geom_rect(data = df_cyto[df_cyto$chrom == chr & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = sum(idx), ymax = sum(idx) * 21 / 20, color = 'black', linewidth = 1/4, show.legend = FALSE) +
       scale_fill_manual(values = c('gneg' = 'white', 'gpos25' = 'lightgray', 'gpos50' = 'gray50', 'gpos75' = 'darkgray', 'gpos100' = 'black', 'gvar' = 'lightblue', 'stalk' = 'slategrey')) +
       coord_cartesian(xlim = c(0, chrlen[chr] / 1e6), ylim = c(0, sum(idx) * 25 / 20), expand = FALSE)
-    if (plot_centromeres) p <- p + geom_polygon(data = df_cen[df_cen$chrom == chr,], aes(x = x/1e6, y = sum(idx) - sum(idx)/20 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8)
+    if (plot_centromeres) p <- p + geom_polygon(data = df_cen[df_cen$chrom == chr,], aes(x = x/1e6, y = sum(idx) - sum(idx)/20 * y, shape = NULL, group = name), color = 'black', fill = 'red', linewidth = 1/8)
   } else {
     p <- p  +
-      geom_rect(data = df_cyto[df_cyto$chrom == chr & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = -sum(idx)/20, ymax = 0, color = 'black', size = 1/4, show.legend = FALSE) +
+      geom_rect(data = df_cyto[df_cyto$chrom == chr & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = -sum(idx)/20, ymax = 0, color = 'black', linewidth = 1/4, show.legend = FALSE) +
       scale_fill_manual(values = c('gneg' = 'white', 'gpos25' = 'lightgray', 'gpos50' = 'gray50', 'gpos75' = 'darkgray', 'gpos100' = 'black', 'gvar' = 'lightblue', 'stalk' = 'slategrey')) +
       coord_cartesian(xlim = c(0, chrlen[chr] / 1e6), ylim = c(-sum(idx)/20, sum(idx)), expand = FALSE)
-    if (plot_centromeres) p <- p + geom_polygon(data = df_cen[df_cen$chrom == chr,], aes(x = x/1e6, y = sum(idx)/20 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8)
+    if (plot_centromeres) p <- p + geom_polygon(data = df_cen[df_cen$chrom == chr,], aes(x = x/1e6, y = sum(idx)/20 * y, shape = NULL, group = name), color = 'black', fill = 'red', linewidth = 1/8)
   }
 
   print(p)

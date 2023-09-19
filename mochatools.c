@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2017-2022 Giulio Genovese
+   Copyright (C) 2017-2023 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2022-12-21"
+#define MOCHATOOLS_VERSION "2023-09-19"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
@@ -330,6 +330,9 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
         }
     }
 
+    fprintf(stderr,
+            "MOCHATOOLS_VERSION " MOCHATOOLS_VERSION " https://github.com/freeseek/mocha BCFtools %s HTSlib %s\n",
+            bcftools_version(), hts_version());
     if (!in || !out) error("Expected input VCF\n%s", usage());
     args->flags |= parse_tags(tag_list);
 
@@ -338,12 +341,15 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     if (sample_names) {
         int nsmpl;
         char **smpl = hts_readlist(sample_names[0] == '^' ? sample_names + 1 : sample_names, sample_is_file, &nsmpl);
+        if (!smpl) error("Failed to parse %s", sample_names);
         kstring_t tmp = {0, 0, NULL};
-        if (sample_names[0] == '^')
-            ksprintf(&tmp, "^%s", smpl[0]);
-        else
-            ksprintf(&tmp, "%s", smpl[0]);
-        for (int i = 1; i < nsmpl; i++) ksprintf(&tmp, ",%s", smpl[i]);
+        if (nsmpl) {
+            if (sample_names[0] == '^')
+                ksprintf(&tmp, "^%s", smpl[0]);
+            else
+                ksprintf(&tmp, "%s", smpl[0]);
+            for (int i = 1; i < nsmpl; i++) ksprintf(&tmp, ",%s", smpl[i]);
+        }
         int ret = bcf_hdr_set_samples(args->in_hdr, tmp.s, 0);
         if (ret < 0)
             error("Error parsing the sample list\n");
@@ -835,6 +841,8 @@ bcf1_t *process(bcf1_t *rec) {
         }
     }
 
+    // if no samples present in the
+
     int ac_sex[] = {0, 0, 0, 0};
     int missing_sex[] = {0, 0, 0, 0};
     int pac_het[] = {0, 0};
@@ -843,13 +851,15 @@ bcf1_t *process(bcf1_t *rec) {
     int psummary[] = {0, 0};
     float ret[4];
 
+    // if samples are not present, skip to the end
+    if (args->nsmpl == 0) goto ret;
+
     // extract format information from VCF format records
     bcf_fmt_t *gt_fmt = bcf_get_fmt_id(rec, args->gt_id);
     int gt_phase = bcf_get_genotype_phase(gt_fmt, args->gt_phase_arr, args->nsmpl);
 
-    // if samples or genotypes are not present, skip to the end
-    if (args->nsmpl == 0 || !bcf_get_unphased_genotype_alleles(gt_fmt, args->gt0_arr, args->gt1_arr, args->nsmpl))
-        goto ret;
+    // if genotypes are not present, skip to the end
+    if (!bcf_get_unphased_genotype_alleles(gt_fmt, args->gt0_arr, args->gt1_arr, args->nsmpl)) goto ret;
 
     bcf_fmt_t *as_fmt = bcf_get_fmt_id(rec, args->as_id);
     int as_sign = (args->as_str && as_fmt) ? bcf_get_format_sign(as_fmt, args->as_arr, args->nsmpl) : 0;

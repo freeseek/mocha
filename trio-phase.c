@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2017-2022 Giulio Genovese
+   Copyright (C) 2017-2023 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -37,7 +37,7 @@
 #include <htslib/kseq.h>
 #include "bcftools.h"
 
-#define TRIO_PHASE_VERSION "2022-12-21"
+#define TRIO_PHASE_VERSION "2023-09-19"
 
 #define ABSOLUTE (1 << 24)
 #define TRANSMITTED (1 << 16)
@@ -207,7 +207,6 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     if (!in || !out) error("Expected input VCF\n%s", usage());
 
     if (!ped_fname) error("Expected the -p option\n");
-    parse_ped(args, ped_fname);
     if (args->ibd) {
         bcf_hdr_append(args->out_hdr,
                        "##FORMAT=<ID=IBD_F,Number=1,Type=Integer,Description=\"IBD state with "
@@ -218,6 +217,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     }
 
     args->inds = (ind_t *)calloc(bcf_hdr_nsamples(in), sizeof(ind_t));
+    parse_ped(args, ped_fname);
     for (int i = 0; i < bcf_hdr_nsamples(in); i++) {
         args->inds[i].ibd_father = bcf_int32_missing;
         args->inds[i].ibd_mother = bcf_int32_missing;

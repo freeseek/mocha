@@ -2,7 +2,7 @@
 ###
 #  The MIT License
 #
-#  Copyright (C) 2017-2022 Giulio Genovese
+#  Copyright (C) 2017-2023 Giulio Genovese
 #
 #  Author: Giulio Genovese <giulio.genovese@gmail.com>
 #
@@ -25,7 +25,9 @@
 #  THE SOFTWARE.
 ###
 
-mocha_plot_version <- '2022-12-21'
+options(error = function() {traceback(3); q()})
+
+mocha_plot_version <- '2023-09-19'
 
 suppressPackageStartupMessages(library(optparse))
 suppressPackageStartupMessages(library(data.table))
@@ -126,7 +128,7 @@ if (args$mocha) {
   names <- c(names, 'ldev', 'bdev')
 }
 fmt <- paste0(fmt, '\\n]"')
-cmd <- paste('bcftools query --format', fmt, args$vcf, '--samples', args$samples)
+cmd <- paste0('bcftools query --format ', fmt, ' ', args$vcf, ' --samples "', args$samples, '"')
 
 contigs <- unlist(lapply(regions[regions!='all'], function(x) unlist(strsplit(x, ':'))[1]))
 chroms <- gsub('^chr', '', gsub('^chrM', 'MT', contigs))
@@ -239,7 +241,7 @@ if ('all' %in% regions) {
   write(paste0('Plotting region: all (', sum(!is.na(df$BAF) & df$chrom %in% chrs), ' heterozygous sites)'), stderr())
   p <- ggplot(df[!is.na(df$BAF) & df$chrom %in% chrs,], aes(x = pos/1e6, y = BAF, color = color))
   if (!is.null(args$cytoband) | !is.null(args$genome)) {
-    p <- p + geom_vline(data = df_chrs, aes(xintercept = chrlen/1e6), color = 'black', size = 1, alpha = 1/2)
+    p <- p + geom_vline(data = df_chrs, aes(xintercept = chrlen/1e6), color = 'black', linewidth = 1, alpha = 1/2)
   }
   p <- p + geom_rect(data = df_chrs, mapping = aes(x = NULL, y = NULL, xmin = cen_beg/1e6, xmax = cen_end/1e6), color = 'transparent', fill = 'gray', ymin = 0, ymax = 1, alpha = 1/2) +
     scale_x_continuous('Mbp position') +
@@ -335,16 +337,16 @@ if (length(regions)>0) {
     } else {
       p <- p + geom_point(size = 1/4)
     }
-    p <- p + geom_hline(data = df_horiz, aes(yintercept = value), linetype = 'dashed', color = 'black', size = 1/4)
+    p <- p + geom_hline(data = df_horiz, aes(yintercept = value), linetype = 'dashed', color = 'black', linewidth = 1/4)
     if ('smooth' %in% names(df_melt)) {
-      p <- p + geom_line(data = df_melt[!is.na(df_melt$smooth),], aes(y = smooth, shape = NULL), color = 'blue', size = 1/4)
+      p <- p + geom_line(data = df_melt[!is.na(df_melt$smooth),], aes(y = smooth, shape = NULL), color = 'blue', linewidth = 1/4)
     }
     if (!is.null(args$cytoband)) {
       bottom <- floor(min(0.35, df_melt$value[df_melt$variable == 'pBAF'], na.rm = TRUE) * 20) / 20
       p <- p  +
-        geom_rect(data = df_cyto[df_cyto$chrom == chroms[i] & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = bottom -0.05, ymax = bottom, color = 'black', size = 1/4, show.legend = FALSE) +
+        geom_rect(data = df_cyto[df_cyto$chrom == chroms[i] & df_cyto$gieStain != 'acen',], aes(x = NULL, y = NULL, xmin = chromStart/1e6, xmax = chromEnd/1e6, fill = gieStain, shape = NULL), ymin = bottom -0.05, ymax = bottom, color = 'black', linewidth = 1/4, show.legend = FALSE) +
         scale_fill_manual(values = c('gneg' = 'white', 'gpos25' = 'lightgray', 'gpos50' = 'gray50', 'gpos75' = 'darkgray', 'gpos100' = 'black', 'gvar' = 'lightblue', 'stalk' = 'slategrey'))
-      if (plot_centromeres) p <- p + geom_polygon(data = df_cen[df_cen$chrom == chroms[i],], aes(x = x/1e6, y = bottom + 0.05 * y, shape = NULL, group = name), color = 'black', fill = 'red', size = 1/8)
+      if (plot_centromeres) p <- p + geom_polygon(data = df_cen[df_cen$chrom == chroms[i],], aes(x = x/1e6, y = bottom + 0.05 * y, shape = NULL, group = name), color = 'black', fill = 'red', linewidth = 1/8)
     }
     print(p)
   }

@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2015-2022 Giulio Genovese
+   Copyright (C) 2015-2023 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2022-12-21"
+#define MOCHA_VERSION "2023-09-19"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -3306,6 +3306,8 @@ int run(int argc, char *argv[]) {
         }
     }
 
+    fprintf(log_file, "MOCHA " MOCHA_VERSION " https://github.com/freeseek/mocha BCFtools %s HTSlib %s\n",
+            bcftools_version(), hts_version());
     if (!rules) {
         fprintf(log_file, "Genome reference assembly was not specified with --genome or --genome-file\n");
         error("%s", usage_text());

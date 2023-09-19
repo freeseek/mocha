@@ -17,12 +17,12 @@ WARNING: MoChA will not yield useful results for VCFs from whole exome sequencin
    * [Installation](#installation)
    * [Download resources for GRCh37](#download-resources-for-grch37)
    * [Download resources for GRCh38](#download-resources-for-grch38)
-   * [Data preparation](#data-preparation)
-   * [Phasing pipeline](#phasing-pipeline)
-   * [Chromosomal alterations pipeline](#chromosomal-alterations-pipeline)
+   * [Prepare data](#prepare-data)
+   * [Phase genotypes](#phase-genotypes)
+   * [Call chromosomal alterations](#call-chromosomal-alterations)
    * [Filter callset](#filter-callset)
-   * [Mosaic phenotypes](#mosaic-phenotypes)
-   * [Allelic shift pipeline](#allelic-shift-pipeline)
+   * [Generate mosaic phenotypes](#generate-mosaic-phenotypes)
+   * [Compute allelic shift](#compute-allelic-shift)
    * [Plot results](#plot-results)
    * [HMM parameters](#hmm-parameters)
    * [Acknowledgements](#acknowledgements)
@@ -106,7 +106,7 @@ Examples:
 Installation
 ============
 
-Install basic tools (Debian/Ubuntu specific if you have admin privileges)
+Install basic tools (Debian/Ubuntu specific if you have admin privileges, see here for FreeBSD)
 ```
 sudo apt install wget unzip git g++ zlib1g-dev samtools bedtools bcftools bio-eagle shapeit4
 ```
@@ -118,20 +118,20 @@ sudo apt install libbz2-dev libssl-dev liblzma-dev libgsl0-dev
 
 Preparation steps
 ```
-mkdir -p $HOME/bin $HOME/GRCh3[78] && cd /tmp
+mkdir -p $HOME/bin $HOME/GRCh3{7,8} && cd /tmp
 ```
 
 We recommend compiling the source code but, wherever this is not possible, Linux x86_64 pre-compiled binaries are available for download [here](http://software.broadinstitute.org/software/mocha). However, notice that HTSlib 1.14 should be avoided due to a serious [bug](https://github.com/samtools/htslib/issues/1362)
 
 Download latest version of [HTSlib](https://github.com/samtools/htslib) and [BCFtools](https://github.com/samtools/bcftools) (if not downloaded already)
 ```
-wget https://github.com/samtools/bcftools/releases/download/1.16/bcftools-1.16.tar.bz2
-tar xjvf bcftools-1.16.tar.bz2
+wget https://github.com/samtools/bcftools/releases/download/1.18/bcftools-1.18.tar.bz2
+tar xjvf bcftools-1.18.tar.bz2
 ```
 
 Download and compile plugins code (make sure you are using gcc version 5 or newer)
 ```
-cd bcftools-1.16/
+cd bcftools-1.18/
 /bin/rm -f plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
 wget -P plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
 make
@@ -178,7 +178,7 @@ cd $HOME/GRCh37
 wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr{{1..22}.phase3_shapeit2_mvncall_integrated_v5b,X.phase3_shapeit2_mvncall_integrated_v1c,Y.phase3_integrated_v2b}.20130502.genotypes.vcf.gz{,.tbi}
 for chr in {1..22} X Y; do
   bcftools view --no-version -Ou -c 2 ALL.chr${chr}.phase3*integrated_v[125][bc].20130502.genotypes.vcf.gz | \
-  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
+  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,^INFO/AC,^INFO/AN,INFO/END,^FMT/GT | \
   bcftools norm --no-version -Ou -m -any | \
   bcftools norm --no-version -Ou -d none -f $HOME/GRCh37/human_g1k_v37.fasta | \
   bcftools sort -Ob -T ./bcftools. | \
@@ -266,7 +266,7 @@ wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_c
 for chr in {1..22} X; do
   if [ $chr == "X" ]; then sfx=".v2"; else sfx=""; fi
   bcftools view --no-version -Ou -c 2 1kGP_high_coverage_Illumina.chr$chr.filtered.SNV_INDEL_SV_phased_panel$sfx.vcf.gz | \
-  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,INFO,INFO/END,^FMT/GT | \
+  bcftools annotate --no-version -Ou -x ID,QUAL,FILTER,^INFO/AC,^INFO/AN,^INFO/END,^FMT/GT | \
   bcftools sort -Ob -T ./bcftools. | \
   tee 1kGP_high_coverage_Illumina.chr$chr.bcf | \
   bcftools index --force --output 1kGP_high_coverage_Illumina.chr$chr.bcf.csi
@@ -328,8 +328,8 @@ dup="$HOME/GRCh38/segdups.bed.gz"
 cyto="$HOME/GRCh38/cytoBand.txt.gz"
 ```
 
-Data preparation
-================
+Prepare data
+============
 
 Preparation steps
 ```
@@ -427,8 +427,8 @@ bcftools merge --no-version -Ob -m none $dir/$pfx.xcl.tmp.bcf $xcl | \
   bcftools index --force --output $dir/$pfx.xcl.bcf.csi
 ```
 
-Phasing pipeline
-================
+Phase genotypes
+===============
 
 Extract genotypes and split by autosomes and chromosome X
 ```
@@ -510,8 +510,8 @@ Remove unphased VCF and single chromosome files (optional)
 /bin/rm $dir/{genetic_map.chr{{1..22},X}.txt,$pfx.{unphased.bcf{,.csi},chr{{1..22},X}.{bcf{,.csi},{pgt,imp}.bcf,log}}}
 ```
 
-Chromosomal alterations pipeline
-================================
+Call chromosomal alterations
+============================
 
 Preparation steps
 ```
@@ -623,10 +623,10 @@ awk -F "\t" 'NR==FNR && FNR==1 {for (i=1; i<=NF; i++) f[$i] = i}
 awk 'NR==FNR {x[$1"_"$3"_"$4"_"$5]++} NR>FNR && ($0~"^track" || $4"_"$1"_"$2"_"$3 in x)' \
   $pfx.calls.filtered.tsv $pfx.ucsc.bed > $pfx.ucsc.filtered.bed
 ```
-will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls made by the LRR and BAF model if they have less than a `lod_baf_phase` score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the [UK biboank](https://doi.org/10.1038/s41586-018-0321-x). Notice that different filtering thresholds are used for calls smaller than 500kbp and smaller than 5Mbp, reflecting different priors that these could be germline events. Most calls on chromosome X in male samples likely represent mosaic loss-of-Y events, as only the PAR1 regions is analyzed in male samples
+will generate a new table after removing samples with `call_rate` lower than 0.97 `baf_auto` greater than 0.03, removing calls made by the LRR and BAF model if they have less than a `lod_baf_phase` score of 10 for the model based on BAF and genotype phase, removing calls flagged as germline copy number polymorphisms (CNPs), and removing calls that are likely germline duplications similarly to how it was done in the [UK biobank](https://doi.org/10.1038/s41586-018-0321-x). Notice that different filtering thresholds are used for calls smaller than 500kbp and smaller than 5Mbp, reflecting different priors that these could be germline events. Most calls on chromosome X in male samples likely represent mosaic loss-of-Y events, as only the PAR1 regions is analyzed in male samples
 
-Mosaic phenotypes
-=================
+Generate mosaic phenotypes
+==========================
 
 For additional downstream analyses, we can generate phenotypes to analyze. Generate a list of samples to exclude from association analyses
 ```
@@ -639,7 +639,7 @@ Generate list of samples with mosaic loss of chromosome Y (mLOY)
 awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i} NR>1 && $(f["computed_gender"])=="M" && $(f["chrom"])~"X" &&
   $(f["length"])>2e6 && $(f["rel_cov"])<2.5 {print $(f["sample_id"])}' $pfx.calls.tsv > $pfx.Y_loss.lines
 ```
-Requiring `rel_cov<2.5` should make sure to filter out XXY and XYY samples. This should generate a mLOY set similarly to how it was done in the [UK biboank](https://doi.org/10.1038/s41598-020-59963-8). Notice that this inference strategy is based on BAF imbalances over the PAR1 region which allows detection of loss-of-Y at much lower cell fractions that by using LRR statistics over the Y nonPAR region
+Requiring `rel_cov<2.5` should make sure to filter out XXY and XYY samples. This should generate a mLOY set similarly to how it was done in the [UK biobank](https://doi.org/10.1038/s41598-020-59963-8). Notice that this inference strategy is based on BAF imbalances over the PAR1 region which allows detection of loss-of-Y at much lower cell fractions that by using LRR statistics over the Y nonPAR region
 
 Generate list of samples with mosaic loss of chromosome X (mLOX)
 ```
@@ -726,10 +726,10 @@ for type in auto cll {{{1..12},{16..20}}p,{1..22}q}_{cnloh,loss} {1..22}_gain; d
 done
 ```
 
-Allelic shift pipeline
-======================
+Compute allelic shift
+=====================
 
-Some mosaic chromosomal alterations have been observed to affect preferentially some haplotypes causing biased allelic shifts at several loci (MPL, FH, NBN, JAK2, FRA10B, MRE11, ATM, SH2B3, TINF2, TCL1A, DLK1, TM2D3, CTU2). This type of analysis for DNA microarray data requires information about the mosaic chromosomal alterations to be extended across imputed heterozygous genotypes and a binomial test for biased allelic shift to be performed, as hs been done before (see Table 1 of [Loh et al. 2018](https://doi.org/10.1038/s41586-018-0321-x), Extended Data Table 1 of [Loh et al. 2020](https://doi.org/10.1038/s41586-020-2430-6), and Table 1 of [Terao et al. 2020](https://doi.org/10.1038/s41586-020-2426-2))
+Some mosaic chromosomal alterations have been observed to affect preferentially some haplotypes causing biased allelic shifts at several loci (MPL, FH, NBN, JAK2, FRA10B, MRE11, ATM, SH2B3, TINF2, TCL1A, DLK1, TM2D3, CTU2). This type of analysis for DNA microarray data requires information about the mosaic chromosomal alterations to be extended across imputed heterozygous genotypes and a binomial test for biased allelic shift to be performed, as has been done before (see Table 1 of [Loh et al. 2018](https://doi.org/10.1038/s41586-018-0321-x), Extended Data Table 1 of [Loh et al. 2020](https://doi.org/10.1038/s41586-020-2430-6), and Table 1 of [Terao et al. 2020](https://doi.org/10.1038/s41586-020-2426-2))
 
 Import allelic shift information from the MoChA output VCF into a VCF file with imputed genotypes (optional for array data)
 ```
