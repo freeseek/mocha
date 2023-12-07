@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2023-09-19"
+#define EXTENDFMT_VERSION "2023-12-06"
 
 /******************************************
  * CIRCULAR BUFFER                        *
@@ -82,7 +82,8 @@ static auxbuf_t *auxbuf_init(int win, int nsmpl, int type, int fmt_id, int gt_id
 }
 
 static void auxbuf_destroy(auxbuf_t *buf) {
-    for (int i = 0; i < buf->rbuf.m; i++) {
+    int i;
+    for (i = 0; i < buf->rbuf.m; i++) {
         if (buf->data[i].line) bcf_destroy(buf->data[i].line);
         if (buf->data[i].vals) free(buf->data[i].vals);
         if (buf->data[i].dist) free(buf->data[i].dist);
@@ -102,7 +103,7 @@ static inline int bcf_int32_is_missing(int32_t value) { return value == bcf_int3
 // push a new record into the buffer
 static void auxbuf_push(auxbuf_t *buf, bcf1_t *line) {
     rbuf_expand0(&buf->rbuf, data_t, buf->rbuf.n + 1, buf->data);
-    int curr = rbuf_append(&buf->rbuf);
+    int k, curr = rbuf_append(&buf->rbuf);
 
     // if a record is already present in the buffer, destroy it
     if (buf->data[curr].line) bcf_destroy(buf->data[curr].line);
@@ -125,7 +126,7 @@ static void auxbuf_push(auxbuf_t *buf, bcf1_t *line) {
     {                                                                                                                  \
         ht_type_t *vals = (ht_type_t *)buf->data[curr].vals;                                                           \
         bt_type_t *p = (bt_type_t *)fmt->p;                                                                            \
-        for (int k = 0; k < buf->nsmpl; k++) {                                                                         \
+        for (k = 0; k < buf->nsmpl; k++) {                                                                             \
             if (is_missing(p[k])) {                                                                                    \
                 set_missing(vals[k]);                                                                                  \
             } else {                                                                                                   \
@@ -162,7 +163,7 @@ static void auxbuf_push(auxbuf_t *buf, bcf1_t *line) {
 // propagate information backwards
 #define BRANCH(ht_type_t, is_missing)                                                                                  \
     {                                                                                                                  \
-        for (int k = 0; k < buf->nsmpl; k++) {                                                                         \
+        for (k = 0; k < buf->nsmpl; k++) {                                                                             \
             ht_type_t *curr_vals = (ht_type_t *)buf->data[curr].vals;                                                  \
             if (curr_vals[k] && !is_missing(curr_vals[k])) {                                                           \
                 int i = curr;                                                                                          \
@@ -207,10 +208,11 @@ static data_t *auxbuf_flush(auxbuf_t *buf, int flush_all) {
 
     // fix the phase before returning the VCF record
     if (phase) {
+        int k;
 #define BRANCH(type_t, is_missing)                                                                                     \
     {                                                                                                                  \
         type_t *vals = (type_t *)buf->data[i].vals;                                                                    \
-        for (int k = 0; k < buf->nsmpl; k++) {                                                                         \
+        for (k = 0; k < buf->nsmpl; k++) {                                                                             \
             if (is_missing(vals[k])) continue;                                                                         \
             if (buf->phase_arr[k] == bcf_int8_missing || buf->phase_arr[k] == bcf_int8_vector_end)                     \
                 vals[k] = (type_t)0;                                                                                   \
@@ -278,7 +280,8 @@ static uint32_t bcf_hdr_get_type(bcf_hrec_t *hrec) {
     if (!strcmp(hrec->key, "INFO") && !strcmp(hrec->key, "FILTER") && !strcmp(hrec->key, "FORMAT"))
         error("Header record %s=%s is not INFO/FILTER/FORMAT\n", hrec->key, hrec->value);
 
-    for (int i = 0; i < hrec->nkeys; i++) {
+    int i;
+    for (i = 0; i < hrec->nkeys; i++) {
         if (!strcmp(hrec->keys[i], "Type")) {
             if (!strcmp(hrec->vals[i], "Integer")) {
                 return BCF_HT_INT;

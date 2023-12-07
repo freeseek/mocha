@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2023-09-19"
+#define MOCHATOOLS_VERSION "2023-12-06"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
@@ -168,10 +168,10 @@ const char *usage(void) {
 }
 
 static int parse_tags(const char *str) {
-    int flags = 0, n_tags;
+    int i, flags = 0, n_tags;
     if (!strcasecmp(str, "none")) return flags;
     char **tags = hts_readlist(str, 0, &n_tags);
-    for (int i = 0; i < n_tags; i++) {
+    for (i = 0; i < n_tags; i++) {
         if (!strcasecmp(tags[i], "GC"))
             flags |= INFO_GC;
         else if (!strcasecmp(tags[i], "CpG"))
@@ -229,6 +229,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     args->out_hdr = out;
     args->info_str = NULL;
     args->as_str = NULL;
+    int i;
     int sample_is_file = 0;
     int force_samples = 0;
     int sites_only = 0;
@@ -348,7 +349,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
                 ksprintf(&tmp, "^%s", smpl[0]);
             else
                 ksprintf(&tmp, "%s", smpl[0]);
-            for (int i = 1; i < nsmpl; i++) ksprintf(&tmp, ",%s", smpl[i]);
+            for (i = 1; i < nsmpl; i++) ksprintf(&tmp, ",%s", smpl[i]);
         }
         int ret = bcf_hdr_set_samples(args->in_hdr, tmp.s, 0);
         if (ret < 0)
@@ -368,7 +369,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
         if (bcf_hdr_nsamples(args->in_hdr) == 0) fprintf(stderr, "Warn: subsetting has removed all samples\n");
         if (bcf_hdr_set_samples(args->out_hdr, tmp.s, 0) < 0) error("Error parsing the sample list\n");
         free(tmp.s);
-        for (int i = 0; i < nsmpl; i++) free(smpl[i]);
+        for (i = 0; i < nsmpl; i++) free(smpl[i]);
         free(smpl);
     }
 
@@ -642,6 +643,7 @@ static double log_kf_betai_aux(double a, double b, double x) {
 
 // returns -10 * (log(2) + pbinom(min(k, n - k), n, 1/2, log.p = TRUE)) / log(10)
 static double phred_pbinom(int k, int n) {
+    int i, j;
     static double *dbinom = NULL, *pbinom = NULL;
     static size_t n_size = 0, m_dbinom = 0, m_pbinom = 0;
 
@@ -664,12 +666,12 @@ static double phred_pbinom(int k, int n) {
         hts_expand(double, len, m_dbinom, dbinom);
         hts_expand(double, len, m_pbinom, pbinom);
         dbinom[0] = 1.0;
-        for (int i = n_size ? (int)n_size : 1; i < n + 1; i++) {
+        for (i = n_size ? (int)n_size : 1; i < n + 1; i++) {
             int prev_idx = i - 1 ? 1 + ((i - 1) >> 1) * (i >> 1) : 0;
             int curr_idx = 1 + (i >> 1) * ((i + 1) >> 1);
             dbinom[curr_idx] = dbinom[prev_idx] * 0.5;
             pbinom[curr_idx] = dbinom[curr_idx];
-            for (int j = 1; j < ((i + 1) >> 1); j++) {
+            for (j = 1; j < ((i + 1) >> 1); j++) {
                 curr_idx++;
                 dbinom[curr_idx] = (double)i / (double)j * dbinom[prev_idx] * 0.5;
                 pbinom[curr_idx] = pbinom[curr_idx - 1] + dbinom[curr_idx];
@@ -687,8 +689,8 @@ static int sample_mean_var(const float *x, int n, double *xm, double *xss) {
     if (n < 2) return -1;
     *xm = 0;
     *xss = 0;
-    int j = 0;
-    for (int i = 0; i < n; i++) {
+    int i, j = 0;
+    for (i = 0; i < n; i++) {
         if (!isnan(x[i])) {
             *xm += (double)x[i];
             *xss += sq((double)x[i]);
@@ -776,11 +778,12 @@ static inline int bcf_int32_is_missing(int32_t value) { return value == bcf_int3
 // assumes little endian architecture
 static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *as_arr, int nsmpl) {
     if (!fmt || fmt->n != 1) return 0;
+    int i;
 
 #define BRANCH(type_t, is_vector_end, is_missing)                                                                      \
     {                                                                                                                  \
         type_t *p = (type_t *)fmt->p;                                                                                  \
-        for (int i = 0; i < nsmpl; i++) {                                                                              \
+        for (i = 0; i < nsmpl; i++) {                                                                                  \
             if (is_vector_end(p[i]) || is_missing(p[i]))                                                               \
                 as_arr[i] = bcf_int8_missing;                                                                          \
             else if (p[i] == (type_t)0)                                                                                \
@@ -813,6 +816,7 @@ static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *as_arr, int nsmpl) {
 }
 
 bcf1_t *process(bcf1_t *rec) {
+    int i, j, k;
     // compute GC and CpG content for each site
     if (args->flags & (INFO_GC | INFO_CPG)) {
         int fa_len;
@@ -822,7 +826,7 @@ bcf1_t *process(bcf1_t *rec) {
                                    rec->pos + (int)strlen(ref) - 1 + args->gc_win, &fa_len);
         if (!fa)
             error("fai_fetch_seq failed at %s:%" PRId64 "\n", bcf_hdr_id2name(args->in_hdr, rec->rid), rec->pos + 1);
-        for (int i = 0; i < fa_len; i++) {
+        for (i = 0; i < fa_len; i++) {
             if (fa[i] > 96) fa[i] = (char)(fa[i] - 32);
             if (fa[i] == 'A' || fa[i] == 'T') at_cnt++;
             if (fa[i] == 'C' || fa[i] == 'G') cg_cnt++;
@@ -896,9 +900,9 @@ bcf1_t *process(bcf1_t *rec) {
         }
         float median[2] = {NAN, NAN};
         int alleles_idx[2] = {-1, -1};
-        for (int i = 0; i < 2; i++) {
+        for (i = 0; i < 2; i++) {
             int n = 0;
-            for (int j = 0; j < args->nsmpl; j++)
+            for (j = 0; j < args->nsmpl; j++)
                 if (args->gt0_arr[j] == alleles[i] && args->gt1_arr[j] == alleles[i]) args->imap_arr[n++] = j;
             median[i] = get_median((float *)baf_fmt->p, n, args->imap_arr);
             if (median[i] < .5)
@@ -934,7 +938,7 @@ bcf1_t *process(bcf1_t *rec) {
         if (args->m_adjust < 9)
             error("Not enough adjusting coefficients at %s:%" PRId64 "\n", bcf_hdr_id2name(args->in_hdr, rec->rid),
                   rec->pos + 1);
-        for (int i = 0; i < args->nsmpl; i++) {
+        for (i = 0; i < args->nsmpl; i++) {
             int n_a = (args->gt0_arr[i] == allele_a) + (args->gt1_arr[i] == allele_a);
             int n_b = (args->gt0_arr[i] == allele_b) + (args->gt1_arr[i] == allele_b);
             if (n_a + n_b != 2) continue;
@@ -944,7 +948,7 @@ bcf1_t *process(bcf1_t *rec) {
         }
     }
 
-    for (int i = 0; i < args->nsmpl; i++) {
+    for (i = 0; i < args->nsmpl; i++) {
         float curr_baf = NAN;
 
         int is_missing = args->gt0_arr[i] == bcf_int16_missing || args->gt1_arr[i] == bcf_int16_missing;
@@ -1022,9 +1026,9 @@ bcf1_t *process(bcf1_t *rec) {
 
     if ((args->flags & INFO_COR_BAF_LRR) && baf && lrr) {
         float rho[3];
-        for (int i = 0; i < 3; i++) {
+        for (i = 0; i < 3; i++) {
             int n = 0;
-            for (int j = 0; j < args->nsmpl; j++) {
+            for (j = 0; j < args->nsmpl; j++) {
                 int n_a = (args->gt0_arr[j] == allele_a) + (args->gt1_arr[j] == allele_a);
                 int n_b = (args->gt0_arr[j] == allele_b) + (args->gt1_arr[j] == allele_b);
                 if (n_a == 2 - i && n_b == i) args->imap_arr[n++] = j;
@@ -1044,7 +1048,7 @@ bcf1_t *process(bcf1_t *rec) {
         case SCORE_DS:
             ds_fmt = bcf_get_fmt_id(rec, args->ds_id);
             if (ds_fmt) {
-                for (int k = 0; k < args->nsmpl; k++) {
+                for (k = 0; k < args->nsmpl; k++) {
                     p1 = ((float *)ds_fmt->p)[k];
                     if (bcf_float_is_missing(p1)) continue;
                     sum_ds[0]++;
@@ -1057,7 +1061,7 @@ bcf1_t *process(bcf1_t *rec) {
         case SCORE_HDS: // only for Minimac4 VCFs
             hds_fmt = bcf_get_fmt_id(rec, args->hds_id);
             if (hds_fmt) {
-                for (int k = 0; k < args->nsmpl; k++) {
+                for (k = 0; k < args->nsmpl; k++) {
                     p1 = ((float *)hds_fmt->p)[2 * k];
                     p2 = ((float *)hds_fmt->p)[2 * k + 1];
                     if (bcf_float_is_missing(p1) || bcf_float_is_missing(p2)) continue;
@@ -1072,7 +1076,7 @@ bcf1_t *process(bcf1_t *rec) {
             ap1_fmt = bcf_get_fmt_id(rec, args->ap1_id);
             ap2_fmt = bcf_get_fmt_id(rec, args->ap2_id);
             if (ap1_fmt && ap2_fmt) {
-                for (int k = 0; k < args->nsmpl; k++) {
+                for (k = 0; k < args->nsmpl; k++) {
                     p1 = ((float *)ap1_fmt->p)[k];
                     p2 = ((float *)ap2_fmt->p)[k];
                     if (bcf_float_is_missing(p1) || bcf_float_is_missing(p2)) continue;
@@ -1086,7 +1090,7 @@ bcf1_t *process(bcf1_t *rec) {
         case SCORE_GP:
             gp_fmt = bcf_get_fmt_id(rec, args->gp_id);
             if (gp_fmt) {
-                for (int k = 0; k < args->nsmpl; k++) {
+                for (k = 0; k < args->nsmpl; k++) {
                     p1 = ((float *)gp_fmt->p)[3 * k + 1];
                     p2 = ((float *)gp_fmt->p)[3 * k + 2];
                     if (bcf_float_is_missing(p1) || bcf_float_is_missing(p2)) continue;

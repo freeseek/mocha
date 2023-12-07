@@ -275,9 +275,11 @@ done
 
 List of common germline duplications and deletions
 ```
-wget -P $HOME/GRCh38 ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20210124.SV_Illumina_Integration/1KGP_3202.Illumina_ensemble_callset.freeze_V1.vcf.gz{,.tbi}
-bcftools query -i 'AC>1 && END-POS+1>10000 && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
-  -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh38/1KGP_3202.Illumina_ensemble_callset.freeze_V1.vcf.gz > $HOME/GRCh38/cnps.bed
+for chr in {1..22} X; do
+  if [ $chr == "X" ]; then sfx=".v2"; else sfx=""; fi
+  bcftools query -i 'AC>1 && END-POS+1>10000 && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
+  -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh38/1kGP_high_coverage_Illumina.chr$chr.filtered.SNV_INDEL_SV_phased_panel$sfx.vcf.gz
+done > $HOME/GRCh38/cnps.bed
 ```
 
 Minimal divergence intervals from segmental duplications (make sure your bedtools version is 2.27 or newer)

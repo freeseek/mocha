@@ -34,7 +34,7 @@
 #include <htslib/vcf.h>
 #include <htslib/synced_bcf_reader.h>
 #include <htslib/ksort.h>
-#include "regidx.h"
+#include "regidx.h" // cannot use htslib/regdix.h see https://github.com/samtools/htslib/pull/761
 #include "kmin.h"
 #include "mocha.h"
 #include "genome_rules.h"
@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2023-09-19"
+#define MOCHA_VERSION "2023-12-06"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -267,20 +267,20 @@ static inline float int16_to_float(int16_t in) { return in == bcf_int16_missing 
 // https://software.intel.com/sites/products/documentation/doclib/mkl_sa/11/mkl_lapack_examples/sgels_ex.c.htm
 // this function needs to use doubles internally when dealing with WGS data
 static int polyfit(const float *lrr, const float *gc, int n, const int *imap, int order, float *coeffs) {
-    int m = order + 1;
+    int i, j, k, m = order + 1;
     if (n < m || order > MAX_ORDER) return -1;
     double B[MAX_ORDER + 1] = {0.0};
     double P[((MAX_ORDER + 1) * 2) + 1] = {0.0};
     double A[(MAX_ORDER + 1) * 2 * (MAX_ORDER + 1)] = {0.0};
 
     // identify the column vector
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         float x = imap ? gc[imap[i]] : gc[i];
         float y = lrr[i];
         if (isnan(x) || isnan(y)) continue;
         float powx = 1.0f;
 
-        for (int j = 0; j < m; j++) {
+        for (j = 0; j < m; j++) {
             B[j] += (double)(y * powx);
             powx *= x;
         }
@@ -290,20 +290,20 @@ static int polyfit(const float *lrr, const float *gc, int n, const int *imap, in
     P[0] = (float)n;
 
     // compute the sum of the powers of X
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         float x = imap ? gc[imap[i]] : gc[i];
         if (isnan(x)) continue;
         float powx = x;
 
-        for (int j = 1; j < ((2 * m) + 1); j++) {
+        for (j = 1; j < ((2 * m) + 1); j++) {
             P[j] += (double)powx;
             powx *= x;
         }
     }
 
     // initialize the reduction matrix
-    for (int i = 0; i < m; i++) {
-        for (int j = 0; j < m; j++) {
+    for (i = 0; i < m; i++) {
+        for (j = 0; j < m; j++) {
             A[(i * (2 * m)) + j] = P[i + j];
         }
 
@@ -312,17 +312,17 @@ static int polyfit(const float *lrr, const float *gc, int n, const int *imap, in
 
     // move the identity matrix portion of the redux matrix to the
     // left side (find the inverse of the left side of the redux matrix)
-    for (int i = 0; i < m; i++) {
+    for (i = 0; i < m; i++) {
         double x = A[(i * (2 * m)) + i];
         if (x != 0) {
-            for (int k = 0; k < (2 * m); k++) {
+            for (k = 0; k < (2 * m); k++) {
                 A[(i * (2 * m)) + k] /= x;
             }
 
-            for (int j = 0; j < m; j++) {
+            for (j = 0; j < m; j++) {
                 if (i != j) {
                     double y = A[(j * (2 * m)) + i];
-                    for (int k = 0; k < (2 * m); k++) {
+                    for (k = 0; k < (2 * m); k++) {
                         A[(j * (2 * m)) + k] -= y * A[(i * (2 * m)) + k];
                     }
                 }
@@ -334,10 +334,10 @@ static int polyfit(const float *lrr, const float *gc, int n, const int *imap, in
     }
 
     // calculate coefficients
-    for (int i = 0; i < m; i++) {
-        for (int j = 0; j < m; j++) {
+    for (i = 0; i < m; i++) {
+        for (j = 0; j < m; j++) {
             double x = 0.0;
-            for (int k = 0; k < m; k++) {
+            for (k = 0; k < m; k++) {
                 x += (A[(i * (2 * m)) + (k + m)] * B[k]);
             }
             coeffs[i] = (float)x;
@@ -356,7 +356,8 @@ static void ad_to_lrr_baf(const int16_t *ad0, const int16_t *ad1, float *lrr, fl
         return;
     }
 
-    for (int i = 0; i < n; i++) {
+    int i, j;
+    for (i = 0; i < n; i++) {
         if (ad0[i] == bcf_int16_missing && ad1[i] == bcf_int16_missing) {
             lrr[i] = NAN;
             baf[i] = NAN;
@@ -369,7 +370,7 @@ static void ad_to_lrr_baf(const int16_t *ad0, const int16_t *ad1, float *lrr, fl
         } else {
             if (cov > n_logf) {
                 hts_expand(float, cov, m_logf, logf_arr);
-                for (int j = n_logf; j < cov; j++) logf_arr[j] = logf(j + 1);
+                for (j = n_logf; j < cov; j++) logf_arr[j] = logf(j + 1);
                 n_logf = cov;
             }
             lrr[i] = logf_arr[cov - 1];
@@ -379,10 +380,11 @@ static void ad_to_lrr_baf(const int16_t *ad0, const int16_t *ad1, float *lrr, fl
 }
 
 static void adjust_lrr(float *lrr, const float *gc, int n, const int *imap, const float *coeffs, int order) {
-    for (int i = 0; i < n; i++) {
+    int i, j;
+    for (i = 0; i < n; i++) {
         float x = imap ? gc[imap[i]] : gc[i];
         float powx = 1.0f;
-        for (int j = 0; j <= order; j++) {
+        for (j = 0; j <= order; j++) {
             lrr[i] -= coeffs[j] * powx;
             powx *= x;
         }
@@ -393,8 +395,8 @@ static void adjust_lrr(float *lrr, const float *gc, int n, const int *imap, cons
 // this function needs to use doubles internally when dealing with WGS data
 static float get_tss(const float *v, int n) {
     double mean = 0.0;
-    int j = 0;
-    for (int i = 0; i < n; i++) {
+    int i, j = 0;
+    for (i = 0; i < n; i++) {
         if (!isnan(v[i])) {
             mean += (double)v[i];
             j++;
@@ -404,7 +406,7 @@ static float get_tss(const float *v, int n) {
     mean /= (double)j;
 
     double tss = 0.0;
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         if (!isnan(v[i])) tss += sq((double)v[i] - mean);
     }
     return (float)tss;
@@ -433,8 +435,9 @@ static int8_t *retrace_viterbi(int T, int N, const float *log_prb, const int8_t 
 // rescale Viterbi log probabilities to avoid underflow issues
 static inline void rescale_log_prb(float *log_prb, int n) {
     float max = -INFINITY;
-    for (int i = 0; i < n; i++) max = max > log_prb[i] ? max : log_prb[i];
-    for (int i = 0; i < n; i++) log_prb[i] -= max;
+    int i;
+    for (i = 0; i < n; i++) max = max > log_prb[i] ? max : log_prb[i];
+    for (i = 0; i < n; i++) log_prb[i] -= max;
 }
 
 // compute the Viterbi path from BAF
@@ -551,10 +554,11 @@ static int8_t *log_viterbi_run(const float *emis_log_lkl, int T, int m, float xy
 // TODO find a better name for this function
 static void rescale_emis_log_lkl(float *log_prb, int n, float err_log_prb) {
     float min_thr = -INFINITY;
-    for (int i = 0; i < n; i++)
+    int i;
+    for (i = 0; i < n; i++)
         if (min_thr < log_prb[i]) min_thr = log_prb[i];
     min_thr += err_log_prb;
-    for (int i = 0; i < n; i++)
+    for (i = 0; i < n; i++)
         if (log_prb[i] < min_thr) log_prb[i] = min_thr;
 }
 
@@ -580,18 +584,19 @@ static float *lrr_baf_emis_log_lkl(const float *lrr, const float *baf, int T, co
                                    float lrr_bias, float lrr_hap2dip, float lrr_sd, float baf_sd,
                                    const float *bdev_lrr_baf_arr, int m) {
     float *ldev = (float *)malloc(m * sizeof(float));
-    for (int i = 0; i < m; i++) ldev[i] = -logf(1.0f - 2.0f * bdev_lrr_baf_arr[i]) / (float)M_LN2 * lrr_hap2dip;
+    int i, t;
+    for (i = 0; i < m; i++) ldev[i] = -logf(1.0f - 2.0f * bdev_lrr_baf_arr[i]) / (float)M_LN2 * lrr_hap2dip;
     int N = 1 + 2 * m;
     float *emis_log_lkl = (float *)malloc(N * T * sizeof(float));
-    for (int t = 0; t < T; t++) {
+    for (t = 0; t < T; t++) {
         float x = imap ? lrr[imap[t]] : lrr[t];
         float y = imap ? baf[imap[t]] : baf[t];
         emis_log_lkl[t * N] = lrr_baf_log_lkl(x, y, 0.0f, 0.0f, lrr_sd, baf_sd, lrr_bias);
-        for (int i = 0; i < m; i++) {
+        for (i = 0; i < m; i++) {
             emis_log_lkl[t * N + 1 + i] = lrr_baf_log_lkl(x, y, ldev[i], bdev_lrr_baf_arr[i], lrr_sd, baf_sd, lrr_bias);
         }
         // add states to distinguish LRR waves from true mosaic gains/losses
-        for (int i = 0; i < m; i++) {
+        for (i = 0; i < m; i++) {
             if (bdev_lrr_baf_arr[i] < -1.0f / 6.0f || bdev_lrr_baf_arr[i] >= 1.0f / 6.0f)
                 emis_log_lkl[t * N + 1 + m + i] = emis_log_lkl[t * N] + err_log_prb;
             else
@@ -607,13 +612,13 @@ static float *lrr_baf_emis_log_lkl(const float *lrr, const float *baf, int T, co
 // precomupute emission probabilities
 static float *baf_phase_emis_log_lkl(const float *baf, const int8_t *gt_phase, int T, const int *imap,
                                      float err_log_prb, float baf_sd, const float *bdev, int m) {
-    int N = 1 + 2 * m;
+    int i, t, N = 1 + 2 * m;
     float *emis_log_lkl = (float *)malloc(N * T * sizeof(float));
-    for (int t = 0; t < T; t++) {
+    for (t = 0; t < T; t++) {
         float x = imap ? baf[imap[t]] : baf[t];
         int8_t p = imap ? gt_phase[imap[t]] : gt_phase[t];
         emis_log_lkl[t * N] = baf_phase_log_lkl(x, (int8_t)1, 0.0f, baf_sd);
-        for (int i = 0; i < m; i++) {
+        for (i = 0; i < m; i++) {
             emis_log_lkl[t * N + 1 + i] = baf_phase_log_lkl(x, p, bdev[i], baf_sd);
             if (p == 0)
                 emis_log_lkl[t * N + 1 + m + i] = emis_log_lkl[t * N + 1 + i];
@@ -630,7 +635,8 @@ static int cnp_edge_is_not_cn2_lrr_baf(const float *lrr, const float *baf, int n
                                        float ldev, float bdev) {
     // test left edge
     float sum_log_lkl = 0.0f;
-    for (int i = a - 1; i >= 0; i--) {
+    int i;
+    for (i = a - 1; i >= 0; i--) {
         float log_lkl = lrr_baf_log_lkl(lrr[i], baf[i], ldev, bdev, lrr_sd, baf_sd, lrr_bias)
                         - lrr_baf_log_lkl(lrr[i], baf[i], 0.0f, 0.0f, lrr_sd, baf_sd, lrr_bias);
         if (!isnan(err_log_prb)) {
@@ -646,7 +652,7 @@ static int cnp_edge_is_not_cn2_lrr_baf(const float *lrr, const float *baf, int n
 
     // test right edge
     sum_log_lkl = 0.0f;
-    for (int i = b + 1; i < n; i++) {
+    for (i = b + 1; i < n; i++) {
         float log_lkl = lrr_baf_log_lkl(lrr[i], baf[i], ldev, bdev, lrr_sd, baf_sd, lrr_bias)
                         - lrr_baf_log_lkl(lrr[i], baf[i], 0, 0, lrr_sd, baf_sd, lrr_bias);
         if (!isnan(err_log_prb)) {
@@ -681,7 +687,8 @@ static double minus_lrr_baf_lod(double bdev_lrr_baf, void *ap) {
     if (data->n == 0 || bdev_lrr_baf < -0.5 || bdev_lrr_baf > 0.25) return INFINITY; // kmin_brent does not handle NAN
     float ldev = -logf(1.0f - 2.0f * (float)bdev_lrr_baf) / (float)M_LN2 * data->lrr_hap2dip;
     float ret = 0.0f;
-    for (int i = 0; i < data->n; i++) {
+    int i;
+    for (i = 0; i < data->n; i++) {
         float lrr = data->imap ? data->lrr_arr[data->imap[i]] : data->lrr_arr[i];
         float baf = data->imap ? data->baf_arr[data->imap[i]] : data->baf_arr[i];
         float log_lkl = lrr_baf_log_lkl(lrr, baf, ldev, (float)bdev_lrr_baf, data->lrr_sd, data->baf_sd, data->lrr_bias)
@@ -713,7 +720,8 @@ static double minus_baf_phase_lod(double bdev, void *ap) {
     if (data->n == 0 || bdev < 0.0 || bdev > 0.5) return INFINITY; // kmin_brent does not handle NAN
 
     float ret = 0.0f;
-    for (int i = 0; i < data->n; i++) {
+    int i;
+    for (i = 0; i < data->n; i++) {
         float baf = data->imap ? data->baf_arr[data->imap[i]] : data->baf_arr[i];
         int8_t p = data->imap ? data->gt_phase[data->imap[i]] : data->gt_phase[i];
         if (data->as) p *= (int8_t)SIGN(data->as[i]); // notice as has no imap
@@ -739,7 +747,8 @@ static float compare_models(const float *baf, const int8_t *gt_phase, int n, con
     int8_t *path = log_viterbi_run(emis_log_lkl, n, m, xy_log_prb, xy_log_prb, tel_log_prb, flip_log_prb, 0, 0);
     free(emis_log_lkl);
     int n_flips = 0;
-    for (int i = 1; i < n; i++)
+    int i;
+    for (i = 1; i < n; i++)
         if (path[i - 1] && path[i] && path[i - 1] != path[i]) n_flips++;
     minus_baf_phase_lod_t data = {baf, gt_phase, n, imap, path, err_log_prb, baf_sd};
     double x, fx = kmin_brent(minus_baf_phase_lod, 0.1, 0.2, (void *)&data, KMIN_EPS, &x);
@@ -759,7 +768,8 @@ static double minus_baf_log_lkl(double bdev, void *ap) {
     if (data->n == 0 || bdev < 0.0 || bdev > 0.5) return INFINITY; // kmin_brent does not handle NAN
 
     double ret = 0.0;
-    for (int i = 0; i < data->n; i++) {
+    int i;
+    for (i = 0; i < data->n; i++) {
         float baf = data->imap ? data->baf_arr[data->imap[i]] : data->baf_arr[i];
         if (isnan(baf)) continue;
         float log_lkl = log_mean_expf(norm_log_lkl(baf - 0.5f, (float)bdev, data->baf_sd, 1.0f),
@@ -771,8 +781,8 @@ static double minus_baf_log_lkl(double bdev, void *ap) {
 
 static float get_sample_mean(const float *v, int n, const int *imap) {
     float mean = 0.0;
-    int j = 0;
-    for (int i = 0; i < n; i++) {
+    int i, j = 0;
+    for (i = 0; i < n; i++) {
         float tmp = imap ? v[imap[i]] : v[i];
         if (!isnan(tmp)) {
             mean += tmp;
@@ -785,8 +795,8 @@ static float get_sample_mean(const float *v, int n, const int *imap) {
 
 static float get_baf_bdev(const float *baf_arr, int n, const int *imap, float baf_sd) {
     double bdev = 0.0;
-    int j = 0;
-    for (int i = 0; i < n; i++) {
+    int i, j = 0;
+    for (i = 0; i < n; i++) {
         float baf = imap ? baf_arr[imap[i]] : baf_arr[i];
         if (isnan(baf)) continue;
         bdev += fabs((double)baf - 0.5);
@@ -804,7 +814,8 @@ static float get_baf_bdev(const float *baf_arr, int n, const int *imap, float ba
 static void get_max_sum(const int16_t *ad0, const int16_t *ad1, int n, const int *imap, int *n1, int *n2) {
     *n1 = 0;
     *n2 = 0;
-    for (int i = 0; i < n; i++) {
+    int i;
+    for (i = 0; i < n; i++) {
         int a = imap ? ad0[imap[i]] : ad0[i];
         int b = imap ? ad1[imap[i]] : ad1[i];
         if (a != bcf_int16_missing && b != bcf_int16_missing) {
@@ -832,7 +843,8 @@ static double minus_ad_log_lkl(double bdev, void *ap) {
     beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, data->ad_rho, n1, n2);
 
     double ret = 0.0;
-    for (int i = 0; i < data->n; i++) {
+    int i;
+    for (i = 0; i < data->n; i++) {
         int16_t ad0 = data->imap ? data->ad0_arr[data->imap[i]] : data->ad0_arr[i];
         int16_t ad1 = data->imap ? data->ad1_arr[data->imap[i]] : data->ad1_arr[i];
         float log_lkl =
@@ -868,17 +880,17 @@ static inline float ad_phase_log_lkl(int16_t ad0, int16_t ad1, int8_t phase, con
 static float *lrr_ad_emis_log_lkl(const float *lrr, const int16_t *ad0, const int16_t *ad1, int T, const int *imap,
                                   float err_log_prb, float lrr_bias, float lrr_hap2dip, float lrr_sd, float ad_rho,
                                   const float *bdev_lrr_baf_arr, int m) {
-    int N = 1 + 2 * m;
+    int i, t, N = 1 + 2 * m;
     int n1, n2;
     get_max_sum(ad0, ad1, T, NULL, &n1, &n2);
     float *emis_log_lkl = (float *)malloc(N * T * sizeof(float));
-    for (int i = 0; i < 1 + m; i++) {
+    for (i = 0; i < 1 + m; i++) {
         float ldev = i == 0 ? 0.0f : -logf(1.0f - 2.0f * bdev_lrr_baf_arr[i - 1]) / (float)M_LN2 * lrr_hap2dip;
         float bdev = i == 0 ? 0.0f : fabsf(bdev_lrr_baf_arr[i - 1]);
         beta_binom_t *beta_binom = i == 0 ? beta_binom_null : beta_binom_alt;
         beta_binom_update(beta_binom, 0.5f + bdev, ad_rho, n1, n2);
 
-        for (int t = 0; t < T; t++) {
+        for (t = 0; t < T; t++) {
             float x = imap ? lrr[imap[t]] : lrr[t];
             int16_t a = imap ? ad0[imap[t]] : ad0[t];
             int16_t b = imap ? ad1[imap[t]] : ad1[t];
@@ -886,13 +898,13 @@ static float *lrr_ad_emis_log_lkl(const float *lrr, const int16_t *ad0, const in
         }
     }
     // generate states that should attract LRR waves with no BAF signal
-    for (int i = 0; i < m; i++) {
+    for (i = 0; i < m; i++) {
         // do not make extreme states compete with LRR waves
         if (bdev_lrr_baf_arr[i] < -1.0f / 6.0f || bdev_lrr_baf_arr[i] >= 1.0f / 6.0f) {
-            for (int t = 0; t < T; t++) emis_log_lkl[t * N + 1 + m + i] = emis_log_lkl[t * N] + err_log_prb;
+            for (t = 0; t < T; t++) emis_log_lkl[t * N + 1 + m + i] = emis_log_lkl[t * N] + err_log_prb;
         } else {
             float ldev = -logf(1.0f - 2.0f * bdev_lrr_baf_arr[i]) / (float)M_LN2 * lrr_hap2dip;
-            for (int t = 0; t < T; t++) {
+            for (t = 0; t < T; t++) {
                 float x = imap ? lrr[imap[t]] : lrr[t];
                 int16_t a = imap ? ad0[imap[t]] : ad0[t];
                 int16_t b = imap ? ad1[imap[t]] : ad1[t];
@@ -900,15 +912,15 @@ static float *lrr_ad_emis_log_lkl(const float *lrr, const int16_t *ad0, const in
             }
         }
     }
-    for (int t = 0; t < T; t++) rescale_emis_log_lkl(&emis_log_lkl[t * N], N, err_log_prb);
+    for (t = 0; t < T; t++) rescale_emis_log_lkl(&emis_log_lkl[t * N], N, err_log_prb);
     return emis_log_lkl;
 }
 
 static float *ad_phase_emis_log_lkl(const int16_t *ad0, const int16_t *ad1, const int8_t *gt_phase, int T,
                                     const int *imap, float err_log_prb, float ad_rho, const float *bdev_arr, int m) {
-    int N = 1 + 2 * m;
+    int i, t, N = 1 + 2 * m;
     float *emis_log_lkl = (float *)malloc(N * T * sizeof(float));
-    for (int i = 0; i < 1 + m; i++) {
+    for (i = 0; i < 1 + m; i++) {
         float bdev = i == 0 ? 0.0f : bdev_arr[i - 1];
         // TODO this function should come out of the loop
         int n1, n2;
@@ -916,7 +928,7 @@ static float *ad_phase_emis_log_lkl(const int16_t *ad0, const int16_t *ad1, cons
         beta_binom_t *beta_binom = i == 0 ? beta_binom_null : beta_binom_alt;
         beta_binom_update(beta_binom, 0.5f + bdev, ad_rho, n1, n2);
 
-        for (int t = 0; t < T; t++) {
+        for (t = 0; t < T; t++) {
             int16_t a = imap ? ad0[imap[t]] : ad0[t];
             int16_t b = imap ? ad1[imap[t]] : ad1[t];
             int8_t p = imap ? gt_phase[imap[t]] : gt_phase[t];
@@ -924,7 +936,7 @@ static float *ad_phase_emis_log_lkl(const int16_t *ad0, const int16_t *ad1, cons
             if (i > 0) emis_log_lkl[t * N + m + i] = ad_phase_log_lkl(b, a, p, beta_binom);
         }
     }
-    for (int t = 0; t < T; t++) rescale_emis_log_lkl(&emis_log_lkl[t * N], N, err_log_prb);
+    for (t = 0; t < T; t++) rescale_emis_log_lkl(&emis_log_lkl[t * N], N, err_log_prb);
     return emis_log_lkl;
 }
 
@@ -938,7 +950,8 @@ static int cnp_edge_is_not_cn2_lrr_ad(const float *lrr, int16_t *ad0, int16_t *a
 
     // test left edge
     float sum_log_lkl = 0.0f;
-    for (int i = a - 1; i >= 0; i--) {
+    int i;
+    for (i = a - 1; i >= 0; i--) {
         float log_lkl = lrr_ad_log_lkl(lrr[i], ad0[i], ad1[i], ldev, lrr_sd, lrr_bias, beta_binom_alt)
                         - lrr_ad_log_lkl(lrr[i], ad0[i], ad1[i], 0.0f, lrr_sd, lrr_bias, beta_binom_null);
         if (!isnan(err_log_prb)) {
@@ -954,7 +967,7 @@ static int cnp_edge_is_not_cn2_lrr_ad(const float *lrr, int16_t *ad0, int16_t *a
 
     // test right edge
     sum_log_lkl = 0.0f;
-    for (int i = b + 1; i < n; i++) {
+    for (i = b + 1; i < n; i++) {
         float log_lkl = lrr_ad_log_lkl(lrr[i], ad0[i], ad1[i], ldev, lrr_sd, lrr_bias, beta_binom_alt)
                         - lrr_ad_log_lkl(lrr[i], ad0[i], ad1[i], 0.0f, lrr_sd, lrr_bias, beta_binom_null);
         if (!isnan(err_log_prb)) {
@@ -995,7 +1008,8 @@ static double minus_lrr_ad_lod(double bdev_lrr_baf, void *ap) {
     beta_binom_update(beta_binom_null, 0.5f, data->ad_rho, n1, n2);
     beta_binom_update(beta_binom_alt, 0.5f + (float)bdev_lrr_baf, data->ad_rho, n1, n2);
     float ret = 0.0f;
-    for (int i = 0; i < data->n; i++) {
+    int i;
+    for (i = 0; i < data->n; i++) {
         float lrr = data->imap ? data->lrr_arr[data->imap[i]] : data->lrr_arr[i];
         int16_t ad0 = data->imap ? data->ad0_arr[data->imap[i]] : data->ad0_arr[i];
         int16_t ad1 = data->imap ? data->ad1_arr[data->imap[i]] : data->ad1_arr[i];
@@ -1033,7 +1047,8 @@ static double minus_ad_phase_lod(double bdev, void *ap) {
     beta_binom_update(beta_binom_null, 0.5f, data->ad_rho, n1, n2);
     beta_binom_update(beta_binom_alt, 0.5f + (float)bdev, data->ad_rho, n1, n2);
     float ret = 0.0f;
-    for (int i = 0; i < data->n; i++) {
+    int i;
+    for (i = 0; i < data->n; i++) {
         int16_t ad0 = data->imap ? data->ad0_arr[data->imap[i]] : data->ad0_arr[i];
         int16_t ad1 = data->imap ? data->ad1_arr[data->imap[i]] : data->ad1_arr[i];
         int8_t p = data->imap ? data->gt_phase[data->imap[i]] : data->gt_phase[i];
@@ -1059,8 +1074,8 @@ static float compare_wgs_models(const int16_t *ad0, const int16_t *ad1, const in
     int8_t *path = log_viterbi_run(emis_log_lkl, n, m, xy_log_prb, xy_log_prb, tel_log_prb, flip_log_prb, 0,
                                    0); // TODO can I not pass these values instead of 0 0?
     free(emis_log_lkl);
-    int n_flips = 0;
-    for (int i = 1; i < n; i++)
+    int i, n_flips = 0;
+    for (i = 1; i < n; i++)
         if (path[i - 1] && path[i] && path[i - 1] != path[i]) n_flips++;
     minus_ad_phase_lod_t data = {ad0, ad1, gt_phase, n, imap, path, err_log_prb, ad_rho};
     double x, fx = kmin_brent(minus_ad_phase_lod, 0.1, 0.2, (void *)&data, KMIN_EPS, &x);
@@ -1083,7 +1098,8 @@ static double minus_lod_lkl_beta_binomial(double ad_rho, void *ap) {
     int n1, n2;
     get_max_sum(data->ad0_arr, data->ad1_arr, data->n, data->imap, &n1, &n2);
     beta_binom_update(beta_binom_null, 0.5f, ad_rho, n1, n2);
-    for (int i = 0; i < data->n; i++) {
+    int i;
+    for (i = 0; i < data->n; i++) {
         int16_t ad0 = data->imap ? data->ad0_arr[data->imap[i]] : data->ad0_arr[i];
         int16_t ad1 = data->imap ? data->ad1_arr[data->imap[i]] : data->ad1_arr[i];
         ret += beta_binom_log_lkl(beta_binom_null, ad0, ad1);
@@ -1133,7 +1149,8 @@ static void get_baf_conc(const float *baf, const int8_t *gt_phase, int n, int *c
 static float get_baf_auto_corr(const float *baf, const int8_t *gt_phase, int n) {
     double var = 0.0, auto_corr = 0.0;
     float prev = NAN, next = NAN;
-    for (int i = 0; i < n; i++) {
+    int i;
+    for (i = 0; i < n; i++) {
         next = (baf[i] - 0.5f) * (float)gt_phase[i];
         if (!isnan(next)) {
             var += sq((double)next);
@@ -1150,8 +1167,8 @@ static float get_baf_auto_corr(const float *baf, const int8_t *gt_phase, int n) 
 static float get_sample_sd(const float *v, int n, const int *imap) {
     float mean = get_sample_mean(v, n, imap);
     float s2 = 0.0;
-    int j = 0;
-    for (int i = 0; i < n; i++) {
+    int i, j = 0;
+    for (i = 0; i < n; i++) {
         float tmp = imap ? v[imap[i]] : v[i];
         if (!isnan(tmp)) {
             s2 += sq(tmp - mean);
@@ -1165,8 +1182,8 @@ static float get_sample_sd(const float *v, int n, const int *imap) {
 // compute standard error of mean a float array (with iterator)
 // sqrt ( ( \sum x^2 - (\sum x)^2 / N ) / ( N - 1 ) / N )
 static float get_se_mean(const float *v, int n, const int *imap) {
-    int j = 0;
-    for (int i = 0; i < n; i++) {
+    int i, j = 0;
+    for (i = 0; i < n; i++) {
         float tmp = imap ? v[imap[i]] : v[i];
         if (!isnan(tmp)) j++;
     }
@@ -1229,7 +1246,7 @@ static int get_n50_hets(const int *v, const float *baf, int n, int beg_pos, int 
  * SAMPLE METHODS                *
  *********************************/
 
-static void mocha_print_ucsc(FILE *restrict stream, const mocha_t *mocha, int n, const bcf_hdr_t *hdr) {
+static void mocha_print_ucsc(FILE *stream, const mocha_t *mocha, int n, const bcf_hdr_t *hdr) {
     if (stream == NULL) return;
     const char *name[4];
     name[MOCHA_UNDET] = "mCA_undetermined";
@@ -1242,9 +1259,10 @@ static void mocha_print_ucsc(FILE *restrict stream, const mocha_t *mocha, int n,
     desc[MOCHA_GAIN] = "Gains";
     desc[MOCHA_CNLOH] = "CN-LOHs";
     kstring_t tmp = {0, 0, NULL};
-    for (int i = 0; i < 4; i++) {
+    int i, j;
+    for (i = 0; i < 4; i++) {
         fprintf(stream, "track name=%s description=\"%s\" visibility=4 priority=1 itemRgb=\"On\"\n", name[i], desc[i]);
-        for (int j = 0; j < n; j++) {
+        for (j = 0; j < n; j++) {
             uint8_t red = 127, green = 127, blue = 127;
             switch (i) {
             case MOCHA_LOSS:
@@ -1267,7 +1285,8 @@ static void mocha_print_ucsc(FILE *restrict stream, const mocha_t *mocha, int n,
                 const char *sample_name = bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha[j].sample_idx);
                 tmp.l = 0;
                 kputs(sample_name, &tmp);
-                for (char *p = tmp.s; (p = strchr(p, ' ')); ++p) *p = '_';
+                char *p;
+                for (p = tmp.s; (p = strchr(p, ' ')); ++p) *p = '_';
                 const char *seq_name = bcf_hdr_id2name(hdr, mocha[j].rid);
                 if (strncmp(seq_name, "chr", 3) == 0)
                     fprintf(stream, "%s\t%d\t%d\t%s\t%d\t.\t%d\t%d\t%d,%d,%d\n", seq_name, mocha[j].beg_pos,
@@ -1284,8 +1303,8 @@ static void mocha_print_ucsc(FILE *restrict stream, const mocha_t *mocha, int n,
     if (stream != stdout && stream != stderr) fclose(stream);
 }
 
-static void mocha_print_calls(FILE *restrict stream, const mocha_t *mocha, int n, const bcf_hdr_t *hdr, int flags,
-                              char *genome, float lrr_hap2dip) {
+static void mocha_print_calls(FILE *stream, const mocha_t *mocha, int n, const bcf_hdr_t *hdr, int flags, char *genome,
+                              float lrr_hap2dip) {
     if (stream == NULL) return;
     char gender[4];
     gender[GENDER_UNKNOWN] = 'U';
@@ -1327,7 +1346,8 @@ static void mocha_print_calls(FILE *restrict stream, const mocha_t *mocha, int n
     fputs("\ttype", stream);
     fputs("\tcf", stream);
     fputc('\n', stream);
-    for (int i = 0; i < n; i++) {
+    int i;
+    for (i = 0; i < n; i++) {
         fputs(bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, mocha->sample_idx), stream);
         fprintf(stream, "\t%c", gender[mocha->computed_gender]);
         fprintf(stream, "\t%s", bcf_hdr_id2name(hdr, mocha->rid));
@@ -1516,7 +1536,8 @@ static void get_mocha_stats(const int *pos, const float *lrr, const float *baf, 
 
     mocha->ldev_se = get_se_mean(lrr + a, b + 1 - a, NULL);
     mocha->n_hets = 0;
-    for (int i = a; i <= b; i++)
+    int i;
+    for (i = a; i <= b; i++)
         if (!isnan(baf[i])) mocha->n_hets++;
     int conc, disc;
     get_baf_conc(baf + a, gt_phase + a, b + 1 - a, &conc, &disc);
@@ -1579,6 +1600,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
         return;
     }
 
+    int i, j, hmm_model;
     mocha_t mocha;
     mocha.sample_idx = self->idx;
     mocha.computed_gender = self->computed_gender;
@@ -1603,7 +1625,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
     if (model->flags & WGS_DATA) {
         ad_to_lrr_baf(ad0, ad1, lrr, baf, n);
     } else {
-        for (int i = 0; i < n; i++) {
+        for (i = 0; i < n; i++) {
             lrr[i] = int16_to_float(self->data_arr[LRR][i]);
             baf[i] = int16_to_float(self->data_arr[BAF][i]);
         }
@@ -1616,7 +1638,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 
     int8_t *as = (int8_t *)calloc(n, sizeof(int8_t));
     int *pos = (int *)malloc(n * sizeof(int));
-    for (int i = 0; i < n; i++) pos[i] = model->locus_arr[self->vcf_imap_arr[i]].pos;
+    for (i = 0; i < n; i++) pos[i] = model->locus_arr[self->vcf_imap_arr[i]].pos;
     int *imap_arr = (int *)malloc(n * sizeof(int));
     int *hets_imap_arr = (int *)malloc(n * sizeof(int));
     float *pbaf_arr = (float *)malloc(n * sizeof(float));
@@ -1626,7 +1648,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 
     if (model->rid == model->genome_rules->x_rid) {
         if (self->computed_gender == GENDER_MALE) {
-            for (int i = 0; i < n; i++) {
+            for (i = 0; i < n; i++) {
                 if (pos[i] > model->genome_rules->x_nonpar_beg && pos[i] < model->genome_rules->x_xtr_beg)
                     lrr[i] = baf[i] = NAN;
                 else if (pos[i] > model->genome_rules->x_xtr_end && pos[i] < model->genome_rules->x_nonpar_end)
@@ -1638,7 +1660,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                     lrr[i] = baf[i] = NAN;
             }
         } else if (self->computed_gender == GENDER_KLINEFELTER) { // only analyze diploid region for XXY individuals
-            for (int i = 0; i < n; i++) {
+            for (i = 0; i < n; i++) {
                 if (pos[i] <= model->genome_rules->x_nonpar_beg)
                     lrr[i] = baf[i] = NAN;
                 else if (pos[i] >= model->genome_rules->x_xtr_beg && pos[i] <= model->genome_rules->x_xtr_end)
@@ -1750,7 +1772,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                     mocha_table->n++;
                     hts_expand(mocha_t, mocha_table->n, mocha_table->m, mocha_table->a);
                     mocha_table->a[mocha_table->n - 1] = mocha;
-                    for (int j = a; j <= b; j++) {
+                    for (j = a; j <= b; j++) {
                         // TODO add other stuff here, like setting ldev
                         // and bdev
                         lrr[j] = NAN; // do not use the data again
@@ -1763,12 +1785,12 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 
     float *hs_arr = NULL;
     int n_hs = 0, m_hs = 0;
-    for (int hmm_model = 0; hmm_model < 2; hmm_model++) {
+    for (hmm_model = 0; hmm_model < 2; hmm_model++) {
         // select data to use from the contig, depending on which HMM model is being
         // used
         int last_p = 0, first_q = 0;
         int n_imap = 0;
-        for (int i = 0; i < n; i++)
+        for (i = 0; i < n; i++)
             if ((hmm_model == LRR_BAF && !isnan(lrr[i])) || (hmm_model == BAF_PHASE && !isnan(baf[i]))) {
                 if (pos[i] < cen_beg) last_p++;
                 if (pos[i] < cen_end) first_q++;
@@ -1783,14 +1805,14 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
         if (hmm_model == LRR_BAF) {
             n_hs = model->bdev_lrr_baf_n;
             hts_expand(float, n_hs, m_hs, hs_arr);
-            for (int i = 0; i < model->bdev_lrr_baf_n; i++) {
+            for (i = 0; i < model->bdev_lrr_baf_n; i++) {
                 hs_arr[i] = model->bdev_lrr_baf[i];
                 if (model->bdev_lrr_baf[i] < 0.0f) middle++;
             }
         } else if (hmm_model == BAF_PHASE) {
             n_hs = model->bdev_baf_phase_n;
             hts_expand(float, n_hs, m_hs, hs_arr);
-            for (int i = 0; i < model->bdev_baf_phase_n; i++) hs_arr[i] = model->bdev_baf_phase[i];
+            for (i = 0; i < model->bdev_baf_phase_n; i++) hs_arr[i] = model->bdev_baf_phase[i];
         }
         int8_t *path;
         float ret;
@@ -1820,7 +1842,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
             free(emis_log_lkl);
 
             if (hmm_model == LRR_BAF)
-                for (int i = 0; i < n_imap; i++)
+                for (i = 0; i < n_imap; i++)
                     if (path[i] > n_hs) path[i] = 0;
             ret = get_path_segs(path, hs_arr, n_imap, hmm_model, middle, &beg, &m_beg, &end, &m_end, &nseg);
 
@@ -1837,7 +1859,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
         } while (ret);
 
         // loop through all the segments called by the Viterbi algorithm
-        for (int i = 0; i < nseg; i++) {
+        for (i = 0; i < nseg; i++) {
             // compute edges of the call
             int a = imap_arr[beg[i]];
             if (beg[i] == 0)
@@ -1902,7 +1924,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                 // here you need to check whether the call would have been
                 // better with the phased HMM model
                 int n_hets_imap = 0;
-                for (int j = beg[i]; j <= end[i]; j++)
+                for (j = beg[i]; j <= end[i]; j++)
                     if (!isnan(baf[imap_arr[j]])) {
                         n_hets_imap++;
                         hets_imap_arr[n_hets_imap - 1] = imap_arr[j];
@@ -1932,11 +1954,11 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                     mocha.bdev = NAN;
                 }
                 mocha.bdev_se = NAN;
-                for (int j = 0; j < n_hets_imap; j++) as[hets_imap_arr[j]] = (int8_t)SIGN(baf[hets_imap_arr[j]] - 0.5f);
+                for (j = 0; j < n_hets_imap; j++) as[hets_imap_arr[j]] = (int8_t)SIGN(baf[hets_imap_arr[j]] - 0.5f);
             } else {
                 // penalizes the LOD by the number of phase flips
                 mocha.n_flips = 0;
-                for (int j = beg[i]; j < end[i]; j++)
+                for (j = beg[i]; j < end[i]; j++)
                     if (path[j] != path[j + 1]) mocha.n_flips++;
 
                 if (model->flags & WGS_DATA) {
@@ -1970,10 +1992,10 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
                 }
                 mocha.lod_baf_phase += (float)mocha.n_flips * model->flip_log_prb * (float)M_LOG10E;
 
-                for (int j = 0; j < mocha.n_hets; j++)
+                for (j = 0; j < mocha.n_hets; j++)
                     pbaf_arr[j] = (baf[imap_arr[beg[i] + j]] - 0.5f) * (float)SIGN(path[beg[i] + j]);
                 mocha.bdev_se = get_se_mean(pbaf_arr, mocha.n_hets, NULL);
-                for (int j = beg[i]; j <= end[i]; j++) as[imap_arr[j]] = (int8_t)SIGN(path[j]) * gt_phase[imap_arr[j]];
+                for (j = beg[i]; j <= end[i]; j++) as[imap_arr[j]] = (int8_t)SIGN(path[j]) * gt_phase[imap_arr[j]];
             }
 
             mocha.type =
@@ -1987,7 +2009,7 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 
             // update information that will be stored in the output VCF and make
             // remaining sites missing
-            for (int j = a; j <= b; j++) {
+            for (j = a; j <= b; j++) {
                 if (ldev[j] == 0) ldev[j] = float_to_int16(mocha.ldev);
                 if (bdev[j] == 0) bdev[j] = float_to_int16(mocha.bdev);
                 lrr[j] = NAN; // do not use the data again
@@ -2018,13 +2040,13 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
 // computes the medoid contig for LRR regression
 // TODO weight the coefficients appropriately
 static int get_medoid(const float *coeffs, int n, int order) {
-    int medoid_idx = -1;
+    int i, j, k, medoid_idx = -1;
     float prev = INFINITY;
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         float next = 0.0f;
-        for (int j = 0; j < n; j++) {
+        for (j = 0; j < n; j++) {
             if (i != j) {
-                for (int k = 0; k <= order; k++) {
+                for (k = 0; k <= order; k++) {
                     next += fabsf(coeffs[i * (order + 1) + k] - coeffs[j * (order + 1) + k]);
                 }
             }
@@ -2041,8 +2063,8 @@ static int get_medoid(const float *coeffs, int n, int order) {
 static float get_lrr_cutoff(const float *v, int n) {
     if (n <= 1) return NAN;
     float *w = (float *)malloc(n * sizeof(float));
-    int j = 0;
-    for (int i = 0; i < n; i++) {
+    int i, j = 0;
+    for (i = 0; i < n; i++) {
         if (!isnan(v[i])) w[j++] = v[i];
     }
     if (j <= 1) {
@@ -2071,10 +2093,10 @@ static float get_lrr_cutoff(const float *v, int n) {
 
 // this function computes several contig stats and then clears the contig data from the sample
 static void sample_stats(sample_t *self, const model_t *model) {
-    int n = self->n;
+    int i, n = self->n;
     if (n == 0) return;
     self->n_sites += n;
-    for (int i = 0; i < n; i++)
+    for (i = 0; i < n; i++)
         if (self->phase_arr[i] == bcf_int8_missing) self->n_missing_gts++;
 
     int16_t *ad0 = self->data_arr[AD0];
@@ -2084,7 +2106,7 @@ static void sample_stats(sample_t *self, const model_t *model) {
     if (model->flags & WGS_DATA) {
         ad_to_lrr_baf(ad0, ad1, lrr, baf, n);
     } else {
-        for (int i = 0; i < n; i++) {
+        for (i = 0; i < n; i++) {
             lrr[i] = int16_to_float(self->data_arr[LRR][i]);
             baf[i] = int16_to_float(self->data_arr[BAF][i]);
         }
@@ -2093,7 +2115,7 @@ static void sample_stats(sample_t *self, const model_t *model) {
 
     if (model->rid == model->genome_rules->x_rid) {
         int n_imap = 0;
-        for (int i = 0; i < n; i++) {
+        for (i = 0; i < n; i++) {
             if (!isnan(baf[i])) self->n_hets++;
             int pos = model->locus_arr[self->vcf_imap_arr[i]].pos;
             if (pos > model->genome_rules->x_nonpar_beg && pos < model->genome_rules->x_nonpar_end
@@ -2124,7 +2146,7 @@ static void sample_stats(sample_t *self, const model_t *model) {
         }
     } else if (model->rid == model->genome_rules->y_rid) {
         int n_imap = 0;
-        for (int i = 0; i < n; i++) {
+        for (i = 0; i < n; i++) {
             if (!isnan(baf[i])) self->n_hets++;
             int pos = model->locus_arr[self->vcf_imap_arr[i]].pos;
             if (pos > model->genome_rules->y_nonpar_beg && pos < model->genome_rules->y_nonpar_end
@@ -2150,7 +2172,7 @@ static void sample_stats(sample_t *self, const model_t *model) {
         } else {
             self->stats_arr[self->n_stats - 1].dispersion = get_sample_sd(baf, n, NULL);
         }
-        for (int i = 0; i < n; i++)
+        for (i = 0; i < n; i++)
             if (!isnan(baf[i])) self->n_hets++;
         self->stats_arr[self->n_stats - 1].lrr_median = get_median(lrr, n, NULL);
         self->stats_arr[self->n_stats - 1].lrr_sd = get_sample_sd(lrr, n, NULL);
@@ -2186,37 +2208,37 @@ static void sample_stats(sample_t *self, const model_t *model) {
 // this function computes the median of contig stats
 static void sample_summary(sample_t *self, int n, model_t *model, int compute_gender) {
     float *tmp_arr = (float *)malloc(n * sizeof(float));
-    int m_tmp = n;
+    int i, j, k, m_tmp = n;
 
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         hts_expand(float, self[i].n_stats *(model->lrr_gc_order < 0 ? 1 : model->lrr_gc_order + 1), m_tmp, tmp_arr);
 
-        for (int j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_median;
+        for (j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_median;
         self[i].stats.lrr_median = get_median(tmp_arr, self[i].n_stats, NULL);
-        for (int j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_sd;
+        for (j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_sd;
         self[i].stats.lrr_sd = get_median(tmp_arr, self[i].n_stats, NULL);
-        for (int j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_auto;
+        for (j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_auto;
         self[i].stats.lrr_auto = get_median(tmp_arr, self[i].n_stats, NULL);
 
-        for (int j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].dispersion;
+        for (j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].dispersion;
         self[i].stats.dispersion = get_median(tmp_arr, self[i].n_stats, NULL);
-        for (int j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].baf_conc;
+        for (j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].baf_conc;
         self[i].stats.baf_conc = get_median(tmp_arr, self[i].n_stats, NULL);
-        for (int j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].baf_auto;
+        for (j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].baf_auto;
         self[i].stats.baf_auto = get_median(tmp_arr, self[i].n_stats, NULL);
 
         self[i].adjlrr_sd = self[i].stats.lrr_sd;
         if (model->lrr_gc_order == 0) {
-            for (int j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].coeffs[0];
+            for (j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].coeffs[0];
             self[i].stats.coeffs[0] = get_median(tmp_arr, self[i].n_stats, NULL);
         } else if (model->lrr_gc_order > 0 && self[i].n_stats > 0) {
-            for (int j = 0; j < self[i].n_stats; j++)
-                for (int k = 0; k <= model->lrr_gc_order; k++)
+            for (j = 0; j < self[i].n_stats; j++)
+                for (k = 0; k <= model->lrr_gc_order; k++)
                     tmp_arr[j * (model->lrr_gc_order + 1) + k] = self[i].stats_arr[j].coeffs[k];
             int medoid_idx = get_medoid(tmp_arr, self[i].n_stats, model->lrr_gc_order);
-            for (int k = 0; k <= model->lrr_gc_order; k++)
+            for (k = 0; k <= model->lrr_gc_order; k++)
                 self[i].stats.coeffs[k] = tmp_arr[medoid_idx * (model->lrr_gc_order + 1) + k];
-            for (int j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_gc_rel_ess;
+            for (j = 0; j < self[i].n_stats; j++) tmp_arr[j] = self[i].stats_arr[j].lrr_gc_rel_ess;
             self[i].stats.lrr_gc_rel_ess = get_median(tmp_arr, self[i].n_stats, NULL);
             self[i].adjlrr_sd *= sqrtf(1.0f - self[i].stats.lrr_gc_rel_ess); // not perfect, but good enough(?)
         }
@@ -2231,7 +2253,7 @@ static void sample_summary(sample_t *self, int n, model_t *model, int compute_ge
         // determine LRR cutoff between haploid and diploid
         if (isnan(model->lrr_cutoff)) {
             int j = 0;
-            for (int i = 0; i < n; i++)
+            for (i = 0; i < n; i++)
                 if (!isnan(self[i].x_nonpar_lrr_median))
                     tmp_arr[j++] = isnan(self[i].stats.lrr_median)
                                        ? self[i].x_nonpar_lrr_median
@@ -2240,7 +2262,7 @@ static void sample_summary(sample_t *self, int n, model_t *model, int compute_ge
         }
 
         // determine gender of samples
-        for (int i = 0; i < n; i++) {
+        for (i = 0; i < n; i++) {
             float tmp = isnan(self[i].stats.lrr_median) ? self[i].x_nonpar_lrr_median
                                                         : self[i].x_nonpar_lrr_median - self[i].stats.lrr_median;
             if (tmp < model->lrr_cutoff)
@@ -2253,9 +2275,10 @@ static void sample_summary(sample_t *self, int n, model_t *model, int compute_ge
     free(tmp_arr);
 }
 
-static void mocha_print_stats(FILE *restrict stream, const sample_t *self, int n, int lrr_gc_order,
-                              const bcf_hdr_t *hdr, int flags) {
+static void mocha_print_stats(FILE *stream, const sample_t *self, int n, int lrr_gc_order, const bcf_hdr_t *hdr,
+                              int flags) {
     if (stream == NULL) return;
+    int i, j;
     char gender[4];
     gender[GENDER_UNKNOWN] = 'U';
     gender[GENDER_MALE] = 'M';
@@ -2281,9 +2304,9 @@ static void mocha_print_stats(FILE *restrict stream, const sample_t *self, int n
     fputs(flags & WGS_DATA ? "\ty_nonpar_cov_median" : "\ty_nonpar_lrr_median", stream);
     fputs(flags & WGS_DATA ? "\tmt_cov_median" : "\tmt_lrr_median", stream);
     fputs("\tlrr_gc_rel_ess", stream);
-    for (int j = 0; j <= lrr_gc_order; j++) fprintf(stream, "\tlrr_gc_%d", j);
+    for (j = 0; j <= lrr_gc_order; j++) fprintf(stream, "\tlrr_gc_%d", j);
     fputc('\n', stream);
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         fputs(bcf_hdr_int2id(hdr, BCF_DT_SAMPLE, self[i].idx), stream);
         fprintf(stream, "\t%c", gender[self[i].computed_gender]);
         fprintf(stream, "\t%.4f",
@@ -2307,7 +2330,7 @@ static void mocha_print_stats(FILE *restrict stream, const sample_t *self, int n
         fprintf(stream, "\t%.4f", flags & WGS_DATA ? expf(self[i].y_nonpar_lrr_median) : self[i].y_nonpar_lrr_median);
         fprintf(stream, "\t%.4f", flags & WGS_DATA ? expf(self[i].mt_lrr_median) : self[i].mt_lrr_median);
         fprintf(stream, "\t%.4f", self[i].stats.lrr_gc_rel_ess);
-        for (int j = 0; j <= lrr_gc_order; j++) fprintf(stream, "\t%.4f", self[i].stats.coeffs[j]);
+        for (j = 0; j <= lrr_gc_order; j++) fprintf(stream, "\t%.4f", self[i].stats.coeffs[j]);
         fputc('\n', stream);
     }
     if (stream != stdout && stream != stderr) fclose(stream);
@@ -2337,12 +2360,12 @@ static int put_contig(bcf_srs_t *sr, const sample_t *sample, const model_t *mode
     float *ldev = (float *)calloc(nsmpl, sizeof(float));
     int *as = (int *)calloc(nsmpl, sizeof(int));
 
-    int i;
+    int i, j;
     for (i = 0; bcf_sr_next_line_reader0(sr); i++) {
         bcf1_t *line = bcf_sr_get_line(sr, 0);
         if (rid != line->rid) break;
 
-        for (int j = 0; j < nsmpl; j++) {
+        for (j = 0; j < nsmpl; j++) {
             while (synced_iter[j] < sample[j].n - 1 && sample[j].vcf_imap_arr[synced_iter[j]] < i) synced_iter[j]++;
             if (sample[j].vcf_imap_arr[synced_iter[j]] == i) {
                 if (sample[j].data_arr[LDEV])
@@ -2419,11 +2442,12 @@ static bcf_hdr_t *print_hdr(htsFile *out_fh, bcf_hdr_t *hdr, int argc, char *arg
 // assumes little endian architecture
 static int bcf_get_ab_genotypes(bcf_fmt_t *fmt, int8_t *gts, int nsmpl, int allele_a, int allele_b) {
     if (!fmt || fmt->n != 2) return 0;
+    int i;
 
 #define BRANCH(type_t, bcf_type_vector_end)                                                                            \
     {                                                                                                                  \
         type_t *p = (type_t *)fmt->p;                                                                                  \
-        for (int i = 0; i < nsmpl; i++, p += 2) {                                                                      \
+        for (i = 0; i < nsmpl; i++, p += 2) {                                                                          \
             if (p[0] == bcf_type_vector_end || bcf_gt_is_missing(p[0]) || p[1] == bcf_type_vector_end                  \
                 || bcf_gt_is_missing(p[1])) {                                                                          \
                 gts[i] = GT_NC;                                                                                        \
@@ -2468,11 +2492,11 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
 
     bcf_fmt_t *baf_fmt = NULL, *lrr_fmt = NULL;
     bcf_info_t *info;
-    int nsmpl = bcf_hdr_nsamples(hdr);
+    int i, j, gt, nsmpl = bcf_hdr_nsamples(hdr);
 
     model->n = 0;
     model->n_flipped = 0;
-    for (int j = 0; j < nsmpl; j++) sample[j].n = 0;
+    for (j = 0; j < nsmpl; j++) sample[j].n = 0;
 
     if (!(model->flags & USE_NO_RULES_CHRS) && model->genome_rules->cen_beg[rid] == 0
         && model->genome_rules->cen_end[rid] == 0 && rid != model->genome_rules->mt_rid)
@@ -2487,7 +2511,6 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
     int *last_het_pos = (int *)calloc(nsmpl, sizeof(int));
     int *last_pos = (int *)calloc(nsmpl, sizeof(int));
 
-    int i;
     for (i = 0; bcf_sr_next_line_reader0(sr); i++) {
         bcf1_t *line = bcf_sr_get_line(sr, 0);
         if (model->filter) {
@@ -2539,7 +2562,7 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
             if (!(lrr_fmt = bcf_get_fmt_id(line, model->lrr_id)) || !(baf_fmt = bcf_get_fmt_id(line, model->baf_id)))
                 continue;
 
-            for (int j = 0; j < nsmpl; j++) {
+            for (j = 0; j < nsmpl; j++) {
                 if (bcf_float_is_missing(((float *)lrr_fmt->p)[sample[j].idx]))
                     ((float *)lrr_fmt->p)[sample[j].idx] = NAN;
                 if (bcf_float_is_missing(((float *)baf_fmt->p)[sample[j].idx]))
@@ -2576,10 +2599,10 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
             // BMC Bioinformatics 9, 409 (2008) & (ii) Mayrhofer, M., Viklund, B. &
             // Isaksson, A. Rawcopy: Improved copy number analysis with Affymetrix
             // arrays. Sci Rep 6, 36158 (2016)
-            for (int gt = GT_AA; gt <= GT_BB; gt++) {
+            for (gt = GT_AA; gt <= GT_BB; gt++) {
                 if (is_y_or_mt) continue;
                 int k = 0;
-                for (int j = 0; j < nsmpl; j++) {
+                for (j = 0; j < nsmpl; j++) {
                     if (gts[sample[j].idx] != gt) continue;
                     if (is_x_nonpar && sample[j].computed_gender == GENDER_MALE) continue;
                     if (isnan(((float *)baf_fmt->p)[j]) || isnan(((float *)lrr_fmt->p)[j])) continue;
@@ -2591,20 +2614,20 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
                     get_cov((float *)lrr_fmt->p, (float *)baf_fmt->p, k, imap_arr, &xss, &yss, &xyss);
                     baf_m = xss == 0.0f ? 0.0f : xyss / xss;
                     if (isnan(baf_m)) baf_m = 0.0f;
-                    for (int j = 0; j < k; j++)
+                    for (j = 0; j < k; j++)
                         ((float *)baf_fmt->p)[imap_arr[j]] -= baf_m * ((float *)lrr_fmt->p)[imap_arr[j]];
                 }
                 if (model->adj_baf_lrr != -1 && model->adj_baf_lrr <= k) {
                     baf_b = get_median((float *)baf_fmt->p, k, imap_arr) - (float)(gt - 1) * 0.5f;
                     if (isnan(baf_b)) baf_b = 0.0f;
-                    for (int j = 0; j < k; j++) ((float *)baf_fmt->p)[imap_arr[j]] -= baf_b;
+                    for (j = 0; j < k; j++) ((float *)baf_fmt->p)[imap_arr[j]] -= baf_b;
                     lrr_b = get_median((float *)lrr_fmt->p, k, imap_arr);
                     if (isnan(lrr_b)) lrr_b = 0.0f;
-                    for (int j = 0; j < k; j++) ((float *)lrr_fmt->p)[imap_arr[j]] -= lrr_b;
+                    for (j = 0; j < k; j++) ((float *)lrr_fmt->p)[imap_arr[j]] -= lrr_b;
                 }
                 // corrects males on X nonPAR
                 if (is_x_nonpar) {
-                    for (int j = 0; j < nsmpl; j++) {
+                    for (j = 0; j < nsmpl; j++) {
                         if (sample[j].computed_gender != GENDER_MALE) continue;
                         if (gts[sample[j].idx] == gt) {
                             ((float *)baf_fmt->p)[sample[j].idx] -=
@@ -2621,18 +2644,18 @@ static int get_contig(bcf_srs_t *sr, sample_t *sample, model_t *model) {
             // if allele A index is bigger than allele B index flip the BAF to make
             // sure it refers to the highest allele
             if (model->locus_arr[i].allele_a > model->locus_arr[i].allele_b) {
-                for (int j = 0; j < nsmpl; j++)
+                for (j = 0; j < nsmpl; j++)
                     ((float *)baf_fmt->p)[sample[j].idx] = 1.0f - ((float *)baf_fmt->p)[sample[j].idx];
             }
 
-            for (int j = 0; j < nsmpl; j++)
+            for (j = 0; j < nsmpl; j++)
                 if (gts[j] != GT_AB || (is_x_nonpar && sample[j].computed_gender == GENDER_MALE) || is_y_or_mt)
                     ((float *)baf_fmt->p)[sample[j].idx] = NAN;
         }
 
         // read line in memory
         model->n++;
-        for (int j = 0; j < nsmpl; j++) {
+        for (j = 0; j < nsmpl; j++) {
             if (model->flags & WGS_DATA) {
                 if (ad0[j] == bcf_int16_missing && ad1[j] == bcf_int16_missing) continue;
 
@@ -2752,13 +2775,13 @@ static int read_stats(sample_t *samples, const bcf_hdr_t *hdr, const char *fn, i
         sample.mt_lrr_median = NAN;
     int lrr_gc_rel_ess = tsv_register(tsv, "lrr_gc_rel_ess", tsv_read_float, (void *)&sample.stats.lrr_gc_rel_ess);
     if (lrr_sd < 0 || lrr_gc_rel_ess < 0) sample.adjlrr_sd = NAN;
-    int lrr_gc_coeffs = 0;
-    for (int i = 0; i <= lrr_gc_order; i++) {
+    int i, lrr_gc_coeffs = 0;
+    for (i = 0; i <= lrr_gc_order; i++) {
         str.l = 0;
         ksprintf(&str, "lrr_gc_%d", i);
         if (!(tsv_register(tsv, str.s, tsv_read_float, (void *)&sample.stats.coeffs[i]) < 0)) lrr_gc_coeffs++;
     }
-    int i = 0;
+    i = 0;
     while (hts_getline(fp, KS_SEP_LINE, &str) > 0) {
         if (!tsv_parse_delimiter(tsv, (bcf1_t *)hdr, str.s, '\t')) {
             int idx = sample.idx;
@@ -2905,7 +2928,8 @@ static float *read_list_invf(const char *str, int *n, float min, float max) {
     char *tmp, **list = hts_readlist(str, 0, n);
     if (*n >= 128) error("Cannot handle list of 128 or more parameters: %s\n", str);
     float *ret = (float *)malloc(*n * sizeof(float));
-    for (int i = 0; i < *n; i++) {
+    int i;
+    for (i = 0; i < *n; i++) {
         ret[i] = 1.0f / strtof(list[i], &tmp);
         if (*tmp) error("Could not parse: %s\n", list[i]);
         if (ret[i] < min || ret[i] > max)
@@ -2926,7 +2950,8 @@ static int cnp_parse(const char *line, char **chr_beg, char **chr_end, uint32_t 
     // Skip the fields that were parsed above
     char *ss = (char *)line;
     while (*ss && isspace(*ss)) ss++;
-    for (int i = 0; i < 3; i++) {
+    int i;
+    for (i = 0; i < 3; i++) {
         while (*ss && !isspace(*ss)) ss++;
         if (!*ss) return -2; // wrong number of fields
         while (*ss && isspace(*ss)) ss++;
@@ -2963,6 +2988,7 @@ int run(int argc, char *argv[]) {
 
     // program options
     char *tmp = NULL;
+    int i, j, rid;
     int rules_is_file = 0;
     int only_stats = 0;
     int regions_is_file = 0;
@@ -3574,14 +3600,14 @@ int run(int argc, char *argv[]) {
     }
 
     sample = (sample_t *)calloc(nsmpl, sizeof(sample_t));
-    for (int i = 0; i < nsmpl; i++) {
+    for (i = 0; i < nsmpl; i++) {
         sample[i].idx = i;
         sample[i].x_nonpar_lrr_median = NAN;
         sample[i].y_nonpar_lrr_median = NAN;
         sample[i].mt_lrr_median = NAN;
     }
     if (stats_fname ? read_stats(sample, hdr, stats_fname, model.lrr_gc_order, model.flags) : 1) {
-        for (int rid = 0; rid < hdr->n[BCF_DT_CTG]; rid++) {
+        for (rid = 0; rid < hdr->n[BCF_DT_CTG]; rid++) {
             model.rid = rid;
             int nret = get_contig(sr, sample, &model);
             if (model.n <= 0) continue;
@@ -3590,14 +3616,14 @@ int run(int argc, char *argv[]) {
                         bcf_hdr_id2name(hdr, rid));
             if (model.genome_rules->length[rid] < model.locus_arr[model.n - 1].pos)
                 model.genome_rules->length[rid] = model.locus_arr[model.n - 1].pos;
-            for (int j = 0; j < nsmpl; j++) sample_stats(sample + j, &model);
+            for (j = 0; j < nsmpl; j++) sample_stats(sample + j, &model);
         }
 
         sample_summary(sample, nsmpl, &model, stats_fname == NULL);
     }
 
     int cnt[4] = {0, 0, 0, 0};
-    for (int i = 0; i < nsmpl; i++) cnt[sample[i].computed_gender]++;
+    for (i = 0; i < nsmpl; i++) cnt[sample[i].computed_gender]++;
     if (!(model.flags & NO_LOG)) {
         if (cnt[GENDER_KLINEFELTER] > 0)
             fprintf(log_file,
@@ -3610,14 +3636,14 @@ int run(int argc, char *argv[]) {
     mocha_print_stats(out_fz, sample, nsmpl, model.lrr_gc_order, hdr, model.flags);
 
     if (!only_stats) {
-        for (int rid = 0; rid < hdr->n[BCF_DT_CTG]; rid++) {
+        for (rid = 0; rid < hdr->n[BCF_DT_CTG]; rid++) {
             model.rid = rid;
             int nret = get_contig(sr, sample, &model);
             if (model.n <= 0) continue;
             if (!(model.flags & NO_LOG))
                 fprintf(log_file, "Using %d out of %d read variants from contig %s\n", model.n, nret,
                         bcf_hdr_id2name(hdr, rid));
-            for (int j = 0; j < nsmpl; j++) {
+            for (j = 0; j < nsmpl; j++) {
                 if (model.cnp_idx)
                     regidx_overlap(model.cnp_idx, bcf_hdr_id2name(hdr, rid), 0, model.genome_rules->length[rid],
                                    model.cnp_itr);
@@ -3636,7 +3662,7 @@ int run(int argc, char *argv[]) {
             int n_cnp_loss = 0, n_cnp_gain = 0, n_rare_gain = 0, n_rare_loss = 0;
             float *cnp_ldev = (float *)malloc(mocha_table.n * sizeof(float));
             float *rare_ldev = (float *)malloc(mocha_table.n * sizeof(float));
-            for (int i = 0; i < mocha_table.n; i++) {
+            for (i = 0; i < mocha_table.n; i++) {
                 if (mocha_table.a[i].rid == model.genome_rules->x_rid) continue;
                 if (mocha_table.a[i].type == MOCHA_CNP_LOSS && mocha_table.a[i].n_hets == 0)
                     cnp_ldev[n_cnp_loss++] = mocha_table.a[i].ldev;
@@ -3663,7 +3689,7 @@ int run(int argc, char *argv[]) {
     }
 
     // clear sample data
-    for (int j = 0; j < nsmpl; j++) {
+    for (j = 0; j < nsmpl; j++) {
         free(sample[j].vcf_imap_arr);
         free(sample[j].data_arr[BDEV]);
         free(sample[j].data_arr[LDEV]);

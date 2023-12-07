@@ -37,7 +37,7 @@
 #include <htslib/kseq.h>
 #include "bcftools.h"
 
-#define TRIO_PHASE_VERSION "2023-09-19"
+#define TRIO_PHASE_VERSION "2023-12-06"
 
 #define ABSOLUTE (1 << 24)
 #define TRANSMITTED (1 << 16)
@@ -73,7 +73,8 @@ typedef struct {
 args_t *args;
 
 static int add_id(set_t *set, int id) {
-    for (int i = 0; i < set->n; i++)
+    int i;
+    for (i = 0; i < set->n; i++)
         if (id == set->a[i]) return -1;
     set->n++;
     hts_expand(int, set->n, set->m, set->a);
@@ -218,7 +219,8 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
 
     args->inds = (ind_t *)calloc(bcf_hdr_nsamples(in), sizeof(ind_t));
     parse_ped(args, ped_fname);
-    for (int i = 0; i < bcf_hdr_nsamples(in); i++) {
+    int i;
+    for (i = 0; i < bcf_hdr_nsamples(in); i++) {
         args->inds[i].ibd_father = bcf_int32_missing;
         args->inds[i].ibd_mother = bcf_int32_missing;
     }
@@ -227,7 +229,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
 
 bcf1_t *process(bcf1_t *rec) {
     // extract genotypes from record and checks whether they follow a diploid model
-    int nsmpl = bcf_hdr_nsamples(args->in_hdr);
+    int i, j, nsmpl = bcf_hdr_nsamples(args->in_hdr);
     int ngt = bcf_get_genotypes(args->in_hdr, rec, &args->arr, &args->m_arr);
     if (ngt <= 0) return rec;
     int ploidy = ngt / nsmpl;
@@ -236,11 +238,11 @@ bcf1_t *process(bcf1_t *rec) {
     // check whether the chromosome in the record has changed
     if (rec->rid != args->prev_rid) {
         args->prev_rid = rec->rid;
-        for (int i = 0; i < nsmpl; i++) {
+        for (i = 0; i < nsmpl; i++) {
             ind_t *sample_ind = &args->inds[i];
             sample_ind->is_prev_het_flipped = 0;
         }
-        for (int i = 0; i < args->children.n; i++) {
+        for (i = 0; i < args->children.n; i++) {
             int child_id = args->children.a[i];
             ind_t *child_ind = &args->inds[child_id];
             child_ind->ibd_father = 0;
@@ -250,7 +252,7 @@ bcf1_t *process(bcf1_t *rec) {
 
     // copy genotypes inside individual structure while propagating information across
     // consecutive heterozygous sites
-    for (int i = 0; i < nsmpl; i++) {
+    for (i = 0; i < nsmpl; i++) {
         ind_t *sample_ind = &args->inds[i];
         sample_ind->gt[0] = args->arr[ploidy * i];
         sample_ind->gt[1] = args->arr[ploidy * i + 1];
@@ -259,18 +261,18 @@ bcf1_t *process(bcf1_t *rec) {
     }
 
     // run multiple times to ensure convergence
-    for (int j = 0; j < args->niters; j++) {
-        for (int i = 0; i < nsmpl; i++) args->inds[i].flip_vote = 0;
+    for (j = 0; j < args->niters; j++) {
+        for (i = 0; i < nsmpl; i++) args->inds[i].flip_vote = 0;
 
         // propagate absolute and relative phase information from parents to children
-        for (int i = 0; i < args->children.n; i++) {
+        for (i = 0; i < args->children.n; i++) {
             int child_id = args->children.a[i];
             ind_t *child_ind = &args->inds[child_id];
             if (gt_is_missing(child_ind->gt) || !gt_is_het(child_ind->gt)) continue;
 
             int absolute_vote = 0;
             int relative_vote = 0;
-            for (int j = 0; j < child_ind->fathers.n; j++) {
+            for (j = 0; j < child_ind->fathers.n; j++) {
                 int father_id = child_ind->fathers.a[j];
                 int32_t *father_gt = args->inds[father_id].gt;
                 if (gt_pat(child_ind->gt) == gt_pat(father_gt) && gt_pat(child_ind->gt) == gt_mat(father_gt))
@@ -295,7 +297,7 @@ bcf1_t *process(bcf1_t *rec) {
 
             absolute_vote = 0;
             relative_vote = 0;
-            for (int j = 0; j < child_ind->mothers.n; j++) {
+            for (j = 0; j < child_ind->mothers.n; j++) {
                 int mother_id = child_ind->mothers.a[j];
                 int32_t *mother_gt = args->inds[mother_id].gt;
                 if (gt_pat(child_ind->gt) == gt_pat(mother_gt) && gt_pat(child_ind->gt) == gt_mat(mother_gt)) {
@@ -322,13 +324,13 @@ bcf1_t *process(bcf1_t *rec) {
         }
 
         // propagate relative phase information from children to parents
-        for (int i = 0; i < args->children.n; i++) {
+        for (i = 0; i < args->children.n; i++) {
             int child_id = args->children.a[i];
             ind_t *child_ind = &args->inds[child_id];
 
             if (gt_is_missing(child_ind->gt) || (gt_is_het(child_ind->gt) && !gt_is_phased(child_ind->gt))) continue;
 
-            for (int j = 0; j < child_ind->fathers.n; j++) {
+            for (j = 0; j < child_ind->fathers.n; j++) {
                 int father_id = child_ind->fathers.a[j];
                 ind_t *father_ind = &args->inds[father_id];
 
@@ -338,7 +340,7 @@ bcf1_t *process(bcf1_t *rec) {
                     inc_vote(&father_ind->flip_vote, TRANSMITTED);
             }
 
-            for (int j = 0; j < child_ind->mothers.n; j++) {
+            for (j = 0; j < child_ind->mothers.n; j++) {
                 int mother_id = child_ind->mothers.a[j];
                 ind_t *mother_ind = &args->inds[mother_id];
 
@@ -350,17 +352,17 @@ bcf1_t *process(bcf1_t *rec) {
         }
 
         // propagate relative phase information from children to parents
-        for (int i = 0; i < nsmpl; i++) ind_vote(&args->inds[i]);
+        for (i = 0; i < nsmpl; i++) ind_vote(&args->inds[i]);
     }
 
     // update IBD states in children (if both child and parent are heterozygous and phased)
-    for (int i = 0; i < args->children.n; i++) {
+    for (i = 0; i < args->children.n; i++) {
         int child_id = args->children.a[i];
         ind_t *child_ind = &args->inds[child_id];
         if (gt_is_missing(child_ind->gt) || !gt_is_het(child_ind->gt) || !gt_is_phased(child_ind->gt)) continue;
 
         int vote = 0;
-        for (int j = 0; j < child_ind->fathers.n; j++) {
+        for (j = 0; j < child_ind->fathers.n; j++) {
             int father_id = child_ind->fathers.a[j];
             int32_t *father_gt = args->inds[father_id].gt;
             if (gt_is_missing(father_gt) || !gt_is_het(father_gt) || !gt_is_phased(father_gt)) continue;
@@ -376,7 +378,7 @@ bcf1_t *process(bcf1_t *rec) {
             child_ind->ibd_father = 1;
 
         vote = 0;
-        for (int j = 0; j < child_ind->mothers.n; j++) {
+        for (j = 0; j < child_ind->mothers.n; j++) {
             int mother_id = child_ind->mothers.a[j];
             int32_t *mother_gt = args->inds[mother_id].gt;
             if (gt_is_missing(mother_gt) || !gt_is_het(mother_gt) || !gt_is_phased(mother_gt)) continue;
@@ -393,7 +395,7 @@ bcf1_t *process(bcf1_t *rec) {
     }
 
     // copy individual structure back to genotypes and update is_prev_het_flipped values
-    for (int i = 0; i < nsmpl; i++) {
+    for (i = 0; i < nsmpl; i++) {
         ind_t *sample_ind = &args->inds[i];
         if (gt_is_het(sample_ind->gt) && gt_is_phased(sample_ind->gt) && gt_is_het(&args->arr[ploidy * i])
             && gt_is_phased(&args->arr[ploidy * i])) {
@@ -410,16 +412,17 @@ bcf1_t *process(bcf1_t *rec) {
     bcf_update_genotypes(args->out_hdr, rec, args->arr, args->m_arr);
 
     if (args->ibd) {
-        for (int i = 0; i < nsmpl; i++) args->arr[i] = args->inds[i].ibd_father;
+        for (i = 0; i < nsmpl; i++) args->arr[i] = args->inds[i].ibd_father;
         bcf_update_format_int32(args->out_hdr, rec, "IBD_F", args->arr, nsmpl);
-        for (int i = 0; i < nsmpl; i++) args->arr[i] = args->inds[i].ibd_mother;
+        for (i = 0; i < nsmpl; i++) args->arr[i] = args->inds[i].ibd_mother;
         bcf_update_format_int32(args->out_hdr, rec, "IBD_M", args->arr, nsmpl);
     }
     return rec;
 }
 
 void destroy(void) {
-    for (int i = 0; i < bcf_hdr_nsamples(args->in_hdr); i++) ind_destroy(&args->inds[i]);
+    int i;
+    for (i = 0; i < bcf_hdr_nsamples(args->in_hdr); i++) ind_destroy(&args->inds[i]);
     free(args->inds);
     free(args->children.a);
     free(args->arr);

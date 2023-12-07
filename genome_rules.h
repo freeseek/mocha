@@ -255,9 +255,9 @@ static rules_predef_t rules_predefs[] = {
 
 genome_rules_t *genome_init(const bcf_hdr_t *hdr) {
     genome_rules_t *self = (genome_rules_t *)calloc(1, sizeof(genome_rules_t));
-    int n = hdr->n[BCF_DT_CTG];
+    int rid, n = hdr->n[BCF_DT_CTG];
     self->length = (int *)calloc(n, sizeof(int));
-    for (int rid = 0; rid < n; rid++) self->length[rid] = hdr->id[BCF_DT_CTG][rid].val->info[0];
+    for (rid = 0; rid < n; rid++) self->length[rid] = hdr->id[BCF_DT_CTG][rid].val->info[0];
     self->cen_beg = (int *)calloc(n, sizeof(int));
     self->cen_end = (int *)calloc(n, sizeof(int));
     self->is_short_arm = (int *)calloc(n, sizeof(int));
@@ -383,7 +383,7 @@ static genome_rules_t *genome_init_string(const char *str, const bcf_hdr_t *hdr)
  * GRCh38
  */
 // adapted from Petr Danecek's implementation of init_rules() in bcftools/regidx.c
-genome_rules_t *genome_init_alias(FILE *restrict stream, char *alias, const bcf_hdr_t *hdr) {
+genome_rules_t *genome_init_alias(FILE *stream, char *alias, const bcf_hdr_t *hdr) {
     const rules_predef_t *rules = rules_predefs;
 
     int detailed = 0, len = strlen(alias);
@@ -424,10 +424,10 @@ genome_rules_t *genome_init_alias(FILE *restrict stream, char *alias, const bcf_
  * comma separated list
  */
 int readlist_short_arms(genome_rules_t *self, const char *str, const bcf_hdr_t *hdr) {
-    int n;
+    int i, n;
     char **list = hts_readlist(str, 0, &n);
     if (!list) return 0;
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         int rid = bcf_hdr_name2id(hdr, list[i]);
         free(list[i]);
         if (rid < 0) continue;

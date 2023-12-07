@@ -141,8 +141,8 @@ KSORT_INIT_GENERIC(float)
 float get_median(const float *v, int n, const int *imap) {
     if (n == 0) return NAN;
     float tmp, *w = (float *)malloc(n * sizeof(float));
-    int j = 0;
-    for (int i = 0; i < n; i++) {
+    int i, j = 0;
+    for (i = 0; i < n; i++) {
         tmp = imap ? v[imap[i]] : v[i];
         if (!isnan(tmp)) w[j++] = tmp;
     }
@@ -163,7 +163,8 @@ static inline int get_cov(const float *x, const float *y, int n, const int *imap
     if (n < 2) return -1;
     float xm = 0.0f;
     float ym = 0.0f;
-    for (int i = 0; i < n; i++) {
+    int i;
+    for (i = 0; i < n; i++) {
         int idx = imap ? imap[i] : i;
         xm += x[idx];
         ym += y[idx];
@@ -173,7 +174,7 @@ static inline int get_cov(const float *x, const float *y, int n, const int *imap
     *xss = 0.0f;
     *yss = 0.0f;
     *xyss = 0.0f;
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         int idx = imap ? imap[i] : i;
         float xd = x[idx] - xm;
         float yd = y[idx] - ym;
@@ -193,11 +194,12 @@ static inline int get_cov(const float *x, const float *y, int n, const int *imap
 static inline int bcf_get_unphased_genotype_alleles(const bcf_fmt_t *fmt, int16_t *gt0_arr, int16_t *gt1_arr,
                                                     int nsmpl) {
     if (!fmt || fmt->n != 2) return 0;
+    int i;
 
 #define BRANCH(type_t, bcf_type_vector_end)                                                                            \
     {                                                                                                                  \
         type_t *p = (type_t *)fmt->p;                                                                                  \
-        for (int i = 0; i < nsmpl; i++, p += 2) {                                                                      \
+        for (i = 0; i < nsmpl; i++, p += 2) {                                                                          \
             if (p[0] == bcf_type_vector_end || bcf_gt_is_missing(p[0]) || p[1] == bcf_type_vector_end                  \
                 || bcf_gt_is_missing(p[1])) {                                                                          \
                 gt0_arr[i] = bcf_int16_missing;                                                                        \
@@ -236,11 +238,12 @@ static inline int bcf_get_unphased_genotype_alleles(const bcf_fmt_t *fmt, int16_
 // assumes little endian architecture
 static inline int bcf_get_genotype_phase(const bcf_fmt_t *fmt, int8_t *gt_phase_arr, int nsmpl) {
     if (!fmt || fmt->n != 2) return 0;
+    int i;
 
 #define BRANCH(type_t, bcf_type_vector_end)                                                                            \
     {                                                                                                                  \
         type_t *p = (type_t *)fmt->p;                                                                                  \
-        for (int i = 0; i < nsmpl; i++, p += 2) {                                                                      \
+        for (i = 0; i < nsmpl; i++, p += 2) {                                                                          \
             if (p[0] == bcf_type_vector_end || bcf_gt_is_missing(p[0]) || p[1] == bcf_type_vector_end                  \
                 || bcf_gt_is_missing(p[1])) {                                                                          \
                 gt_phase_arr[i] = bcf_int8_missing;                                                                    \
@@ -281,12 +284,12 @@ static inline int bcf_get_genotype_phase(const bcf_fmt_t *fmt, int8_t *gt_phase_
 static inline int bcf_get_allelic_depth(const bcf_fmt_t *fmt, const int16_t *gt0_arr, const int16_t *gt1_arr,
                                         int16_t *ad0_arr, int16_t *ad1_arr, int nsmpl) {
     if (!fmt) return 0;
-    int nalleles = fmt->n;
+    int i, nalleles = fmt->n;
 
 #define BRANCH(type_t, bcf_type_vector_end, bcf_type_missing)                                                          \
     {                                                                                                                  \
         type_t *p = (type_t *)fmt->p;                                                                                  \
-        for (int i = 0; i < nsmpl; i++, p += nalleles) {                                                               \
+        for (i = 0; i < nsmpl; i++, p += nalleles) {                                                                   \
             if ((gt0_arr[i] != bcf_int16_missing && (int)gt0_arr[i] >= nalleles)                                       \
                 || (gt1_arr[i] != bcf_int16_missing && (int)gt1_arr[i] >= nalleles))                                   \
                 error("Error: found VCF record with GT alleles %d and %d and %d number of alleles\n", gt0_arr[i],      \
