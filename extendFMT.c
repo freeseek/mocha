@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2018-2023 Giulio Genovese
+   Copyright (C) 2018-2024 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2023-12-06"
+#define EXTENDFMT_VERSION "2024-05-05"
 
 /******************************************
  * CIRCULAR BUFFER                        *
@@ -268,6 +268,7 @@ static const char *usage_text(void) {
            "prefix)\n"
            "    -S, --samples-file [^]<file>    file of samples to include (or exclude with \"^\" prefix)\n"
            "        --force-samples             only warn about unknown subset samples\n"
+           "    -W, --write-index[=FMT]         Automatically index the output files [off]\n"
            "\n"
            "Example:\n"
            "    bcftools +extendFMT --format AS --phase --dist 500000 file.bcf\n"
@@ -315,12 +316,14 @@ int run(int argc, char **argv) {
     int phase_format = 0;
     int dist = 1e6;
     char *output_fname = NULL;
+    char *index_fname;
     int output_type = FT_VCF;
     int regions_overlap = 1;
     int targets_overlap = 0;
     int clevel = -1;
     int n_threads = 0;
     int record_cmd_line = 1;
+    int write_index = 0;
     char *targets_list = NULL;
     int targets_is_file = 0;
     char *regions_list = NULL;
@@ -329,26 +332,19 @@ int run(int argc, char **argv) {
     int sample_is_file = 0;
     int force_samples = 0;
 
-    static struct option loptions[] = {{"format", required_argument, NULL, 'f'},
-                                       {"phase", no_argument, NULL, 'p'},
-                                       {"dist", required_argument, NULL, 'd'},
-                                       {"output", required_argument, NULL, 'o'},
-                                       {"output-type", required_argument, NULL, 'O'},
-                                       {"threads", required_argument, NULL, 9},
-                                       {"regions", required_argument, NULL, 'r'},
-                                       {"regions-file", required_argument, NULL, 'R'},
-                                       {"regions-overlap", required_argument, NULL, 2},
-                                       {"targets", required_argument, NULL, 't'},
-                                       {"targets-file", required_argument, NULL, 'T'},
-                                       {"targets-overlap", required_argument, NULL, 3},
-                                       {"samples", required_argument, NULL, 's'},
-                                       {"samples-file", required_argument, NULL, 'S'},
-                                       {"force-samples", no_argument, NULL, 1},
-                                       {"no-version", no_argument, NULL, 8},
-                                       {0, 0, 0, 0}};
+    static struct option loptions[] = {
+        {"format", required_argument, NULL, 'f'},        {"phase", no_argument, NULL, 'p'},
+        {"dist", required_argument, NULL, 'd'},          {"output", required_argument, NULL, 'o'},
+        {"output-type", required_argument, NULL, 'O'},   {"threads", required_argument, NULL, 9},
+        {"regions", required_argument, NULL, 'r'},       {"regions-file", required_argument, NULL, 'R'},
+        {"regions-overlap", required_argument, NULL, 2}, {"targets", required_argument, NULL, 't'},
+        {"targets-file", required_argument, NULL, 'T'},  {"targets-overlap", required_argument, NULL, 3},
+        {"samples", required_argument, NULL, 's'},       {"samples-file", required_argument, NULL, 'S'},
+        {"force-samples", no_argument, NULL, 1},         {"no-version", no_argument, NULL, 8},
+        {"write-index", optional_argument, NULL, 'W'},          {0, 0, 0, 0}};
     int c;
     char *tmp;
-    while ((c = getopt_long(argc, argv, "h?f:pd:o:O:s:S:t:T:r:R:", loptions, NULL)) >= 0) {
+    while ((c = getopt_long(argc, argv, "h?f:pd:o:O:r:R:t:T:s:S:W::", loptions, NULL)) >= 0) {
         switch (c) {
         case 'f':
             format = optarg;
@@ -440,7 +436,10 @@ int run(int argc, char **argv) {
         case 1:
             force_samples = 1;
             break;
-
+        case 'W':
+            if (!(write_index = write_index_parse(optarg)))
+                error("Unsupported index format '%s'\n", optarg);
+            break;
         case 'h':
         case '?':
         default:
@@ -507,6 +506,8 @@ int run(int argc, char **argv) {
     if (out_fh == NULL) error("[%s] Error: cannot write to \"%s\": %s\n", __func__, output_fname, strerror(errno));
     if (n_threads) hts_set_opt(out_fh, HTS_OPT_THREAD_POOL, srs->p);
     if (bcf_hdr_write(out_fh, hdr) < 0) error("Unable to write to output VCF file\n");
+    if (init_index2(out_fh, hdr, output_fname, &index_fname, write_index) < 0)
+        error("Error: failed to initialise index for %s\n", output_fname);
 
     auxbuf_t *buf = auxbuf_init(dist, bcf_hdr_nsamples(hdr), format_type, fmt_id, gt_id);
     int prev_rid = -1;
@@ -520,6 +521,13 @@ int run(int argc, char **argv) {
     flush(buf, out_fh, hdr, format, 1);
     auxbuf_destroy(buf);
 
+    if (write_index) {
+        if (bcf_idx_save(out_fh) < 0) {
+            if (hts_close(out_fh) != 0) error("Close failed %s\n", strcmp(output_fname, "-") ? output_fname : "stdout");
+            error("Error: cannot write to index %s\n", index_fname);
+        }
+        free(index_fname);
+    }
     hts_close(out_fh);
     bcf_sr_destroy(srs);
 

@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2015-2023 Giulio Genovese
+   Copyright (C) 2015-2024 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2023-12-06"
+#define MOCHA_VERSION "2024-05-05"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -2126,7 +2126,7 @@ static void sample_stats(sample_t *self, const model_t *model) {
             } else if (!isnan(baf[i])) {
                 if (pos <= model->genome_rules->x_nonpar_beg) {
                     self->par1_n_hets++;
-                } else if (pos >= model->genome_rules->x_xtr_beg || pos <= model->genome_rules->x_xtr_end) {
+                } else if (pos >= model->genome_rules->x_xtr_beg && pos <= model->genome_rules->x_xtr_end) {
                     self->xtr_n_hets++;
                 } else if (pos >= model->genome_rules->x_nonpar_end) {
                     self->par2_n_hets++;
@@ -2870,6 +2870,7 @@ static const char *usage_text(void) {
            "    -c, --calls <file>              write chromosomal alterations calls table to a file [standard output]\n"
            "    -z  --stats <file>              write samples genome-wide statistics table to a file [no output]\n"
            "    -u, --ucsc-bed <file>           write UCSC bed track to a file [no output]\n"
+           "    -W, --write-index[=FMT]         Automatically index the output files [off]\n"
            "\n"
            "HMM Options:\n"
            "        --bdev-LRR-BAF <list>       comma separated list of inverse BAF deviations for LRR+BAF model "
@@ -3001,6 +3002,7 @@ int run(int argc, char *argv[]) {
     int clevel = -1;
     int n_threads = 0;
     int record_cmd_line = 1;
+    int write_index = 0;
     const char *filter_fname = NULL;
     const char *filter_str = NULL;
     const char *regions_list = NULL;
@@ -3012,6 +3014,7 @@ int run(int argc, char *argv[]) {
     const char *mhc_reg = NULL;
     const char *kir_reg = NULL;
     char *rules = NULL;
+    char *index_fname;
     sample_t *sample = NULL;
     FILE *log_file = stderr;
     FILE *out_fc = stdout;
@@ -3076,6 +3079,7 @@ int run(int argc, char *argv[]) {
                                        {"calls", required_argument, NULL, 'c'},
                                        {"stats", required_argument, NULL, 'z'},
                                        {"ucsc-bed", required_argument, NULL, 'u'},
+                                       {"write-index", optional_argument, NULL, 'W'},
                                        {"log", required_argument, NULL, 'l'},
                                        {"no-log", no_argument, NULL, 10},
                                        {"bdev-LRR-BAF", required_argument, NULL, 11},
@@ -3102,7 +3106,7 @@ int run(int argc, char *argv[]) {
                                        {"LRR-cutoff", required_argument, NULL, 32},
                                        {NULL, 0, NULL, 0}};
     int c;
-    while ((c = getopt_long(argc, argv, "h?g:G:v:f:e:i:r:R:t:T:s:S:p:o:O:al:c:z:u:", loptions, NULL)) >= 0) {
+    while ((c = getopt_long(argc, argv, "h?g:G:v:f:e:i:r:R:t:T:s:S:p:o:O:al:c:z:u:W::", loptions, NULL)) >= 0) {
         switch (c) {
         case 'g':
             rules = optarg;
@@ -3227,6 +3231,10 @@ int run(int argc, char *argv[]) {
             break;
         case 'a':
             model.flags |= NO_ANNOT;
+            break;
+        case 'W':
+            if (!(write_index = write_index_parse(optarg)))
+                error("Unsupported index format '%s'\n", optarg);
             break;
         case 'l':
             log_file = get_file_handle(optarg);
@@ -3576,6 +3584,8 @@ int run(int argc, char *argv[]) {
         if (out_fh == NULL) error("[%s] Error: cannot write to \"%s\": %s\n", __func__, output_fname, strerror(errno));
         if (n_threads) hts_set_opt(out_fh, HTS_OPT_THREAD_POOL, sr->p);
         out_hdr = print_hdr(out_fh, hdr, argc, argv, record_cmd_line, model.flags);
+        if (init_index2(out_fh, hdr, output_fname, &index_fname, write_index) < 0)
+            error("Error: failed to initialise index for %s\n", output_fname);
     }
 
     int nsmpl = bcf_hdr_nsamples(hdr);
@@ -3716,6 +3726,14 @@ int run(int argc, char *argv[]) {
     // close output VCF
     if (output_fname) {
         bcf_hdr_destroy(out_hdr);
+        if (write_index) {
+            if (bcf_idx_save(out_fh) < 0) {
+                if (hts_close(out_fh) != 0)
+                    error("Close failed %s\n", strcmp(output_fname, "-") ? output_fname : "stdout");
+                error("Error: cannot write to index %s\n", index_fname);
+            }
+            free(index_fname);
+        }
         hts_close(out_fh);
     }
 

@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2018-2023 Giulio Genovese
+   Copyright (C) 2018-2024 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -122,9 +122,10 @@ int tsv_read_computed_gender(tsv_t *tsv, bcf1_t *rec, void *usr) {
     } else {
         char *endptr;
         *computed_gender = (int)strtol(tsv->ss, &endptr, 0);
-        if (*endptr)
-            error("Could not parse gender %s\n(Acceptable values: 1/M/m = male, 2/F/f = female, 0/U/u/N/n = missing)\n",
-                  tsv->ss);
+        if (tsv->ss == endptr)
+            error(
+                "Could not parse gender %.*s\n(Acceptable values: 1/M/m = male, 2/F/f = female, 0/U/u/N/n = missing)\n",
+                (int)(tsv->se - tsv->ss), tsv->ss);
     }
     return 0;
 }
