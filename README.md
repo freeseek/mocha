@@ -133,8 +133,8 @@ tar xjvf bcftools-1.20.tar.bz2
 Download and compile plugins code (make sure you are using gcc version 5 or newer)
 ```
 cd bcftools-1.20/
-/bin/rm -f plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
-wget -P plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,trio-phase,mochatools,extendFMT}.c}
+/bin/rm -f plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,mochatools,extendFMT}.c}
+wget -P plugins https://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,mochatools,extendFMT}.c}
 make
 /bin/cp bcftools plugins/{fill-tags,fixploidy,mocha,trio-phase,mochatools,extendFMT}.so $HOME/bin/
 ```
