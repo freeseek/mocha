@@ -27,7 +27,7 @@
 
 options(error = function() {traceback(3); q()})
 
-pileup_plot_version <- '2024-05-05'
+pileup_plot_version <- '2024-09-27'
 
 suppressPackageStartupMessages(library(optparse))
 suppressPackageStartupMessages(library(ggplot2))
@@ -49,7 +49,7 @@ parser <- add_option(parser, c('--height'), type = 'double', default = 7.0, help
 parser <- add_option(parser, c('--fontsize'), type = 'integer', default = 16, help = 'font size [16]', metavar = '<integer>')
 args <- parse_args(parser, commandArgs(trailingOnly = TRUE), convert_hyphens_to_underscores = TRUE)
 
-write(paste('pileup_plot.R', pileup_plot_version, 'https://github.com/freeseek/mocha'), stderr())
+write(paste('pileup_plot.R', pileup_plot_version, 'http://github.com/freeseek/mocha'), stderr())
 
 if (is.null(args$cytoband)) {print_help(parser); stop('option --cytoband is required')}
 if (is.null(args$stats)) {print_help(parser); stop('option --stats is required')}

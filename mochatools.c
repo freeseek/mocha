@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2024-05-05"
+#define MOCHATOOLS_VERSION "2024-09-27"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
@@ -51,7 +51,7 @@
 #define INFO_MACH (1 << 10)
 
 // see Marchini, J., Howie, B. Genotype imputation for genome-wide association studies. Nat Rev Genet 11, 499–511
-// (2010). https://doi.org/10.1038/nrg2796
+// (2010). http://doi.org/10.1038/nrg2796
 // ##FORMAT=<ID=DS,Number=A,Type=Float,Description="Genotype dosage">
 #define SCORE_DS 1 // DS = AP1 + AP2
 // ##FORMAT=<ID=HDS,Number=2,Type=Float,Description="Estimated Haploid Alternate Allele Dosage ">
@@ -130,7 +130,7 @@ const char *usage(void) {
     return "\n"
            "About: tools for the MOsaic CHromosomal Alterations pipeline. "
            "(version " MOCHATOOLS_VERSION
-           " https://github.com/freeseek/mocha)\n"
+           " http://github.com/freeseek/mocha)\n"
            "Usage: bcftools +mochatools [General Options] -- [Plugin Options]\n"
            "Options:\n"
            "   run \"bcftools plugin\" for a list of common options\n"
@@ -332,7 +332,7 @@ int init(int argc, char **argv, bcf_hdr_t *in, bcf_hdr_t *out) {
     }
 
     fprintf(stderr,
-            "MOCHATOOLS_VERSION " MOCHATOOLS_VERSION " https://github.com/freeseek/mocha BCFtools %s HTSlib %s\n",
+            "MOCHATOOLS_VERSION " MOCHATOOLS_VERSION " http://github.com/freeseek/mocha BCFtools %s HTSlib %s\n",
             bcftools_version(), hts_version());
     if (!in || !out) error("Expected input VCF\n%s", usage());
     args->flags |= parse_tags(tag_list);

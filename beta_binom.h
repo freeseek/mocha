@@ -79,7 +79,7 @@ void beta_binom_destroy(beta_binom_t *self) {
 // log_gamma_alpha[n] = f(n, \alpha)
 // log_gamma_beta[n] = f(n, \beta)
 // log_gamma_alpha_beta[n] = f(n, \alpha + \beta)
-// see https://en.wikipedia.org/wiki/Beta-binomial_distribution#As_a_compound_distribution
+// see http://en.wikipedia.org/wiki/Beta-binomial_distribution#As_a_compound_distribution
 // p is the probability of success
 // rho is the "intra class" or "intra cluster" correlation
 // in Artieri et al. 2017, overdispersion is exactly "(1 - rho) / rho"

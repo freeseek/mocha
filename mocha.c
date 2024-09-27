@@ -34,7 +34,7 @@
 #include <htslib/vcf.h>
 #include <htslib/synced_bcf_reader.h>
 #include <htslib/ksort.h>
-#include "regidx.h" // cannot use htslib/regdix.h see https://github.com/samtools/htslib/pull/761
+#include "regidx.h" // cannot use htslib/regdix.h see http://github.com/samtools/htslib/pull/761
 #include "kmin.h"
 #include "mocha.h"
 #include "genome_rules.h"
@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2024-05-05"
+#define MOCHA_VERSION "2024-09-27"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -67,7 +67,7 @@
 #define FLIP_PL_DFLT "20.0"
 #define SHORT_ARM_CHRS_DFLT "13,14,15,21,22,chr13,chr14,chr15,chr21,chr22"
 #define LRR_BIAS_DFLT "0.2"
-// https://www.illumina.com/documents/products/technotes/technote_cnv_algorithms.pdf
+// http://www.illumina.com/documents/products/technotes/technote_cnv_algorithms.pdf
 #define LRR_HAP2DIP_DFLT "0.45"
 
 #define FLT_INCLUDE (1 << 0)
@@ -262,9 +262,9 @@ static inline float int16_to_float(int16_t in) { return in == bcf_int16_missing 
  * LRR AND COVERAGE POLYNOMIAL REGRESSION *
  ******************************************/
 
-// https://stackoverflow.com/questions/5083465/fast-efficient-least-squares-fit-algorithm-in-c
-// https://github.com/natedomin/polyfit/blob/master/polyfit.c
-// https://software.intel.com/sites/products/documentation/doclib/mkl_sa/11/mkl_lapack_examples/sgels_ex.c.htm
+// http://stackoverflow.com/questions/5083465/fast-efficient-least-squares-fit-algorithm-in-c
+// http://github.com/natedomin/polyfit/blob/master/polyfit.c
+// http://software.intel.com/sites/products/documentation/doclib/mkl_sa/11/mkl_lapack_examples/sgels_ex.c.htm
 // this function needs to use doubles internally when dealing with WGS data
 static int polyfit(const float *lrr, const float *gc, int n, const int *imap, int order, float *coeffs) {
     int i, j, k, m = order + 1;
@@ -2823,7 +2823,7 @@ static const char *usage_text(void) {
            "About:   MOsaic CHromosomal Alterations caller, requires phased genotypes (GT)\n"
            "         and either B-allele frequency (BAF) and Log R Ratio intensity (LRR)\n"
            "         or allelic depth coverage (AD). (version " MOCHA_VERSION
-           " https://github.com/freeseek/mocha)\n"
+           " http://github.com/freeseek/mocha)\n"
            "Usage:   bcftools +mocha [OPTIONS] <in.vcf.gz>\n"
            "\n"
            "Required options:\n"
@@ -3233,8 +3233,7 @@ int run(int argc, char *argv[]) {
             model.flags |= NO_ANNOT;
             break;
         case 'W':
-            if (!(write_index = write_index_parse(optarg)))
-                error("Unsupported index format '%s'\n", optarg);
+            if (!(write_index = write_index_parse(optarg))) error("Unsupported index format '%s'\n", optarg);
             break;
         case 'l':
             log_file = get_file_handle(optarg);
@@ -3340,7 +3339,7 @@ int run(int argc, char *argv[]) {
         }
     }
 
-    fprintf(log_file, "MOCHA " MOCHA_VERSION " https://github.com/freeseek/mocha BCFtools %s HTSlib %s\n",
+    fprintf(log_file, "MOCHA " MOCHA_VERSION " http://github.com/freeseek/mocha BCFtools %s HTSlib %s\n",
             bcftools_version(), hts_version());
     if (!rules) {
         fprintf(log_file, "Genome reference assembly was not specified with --genome or --genome-file\n");
@@ -3510,7 +3509,7 @@ int run(int argc, char *argv[]) {
     if ((model.lrr_gc_order < 0) && (model.flags & WGS_DATA)) model.lrr_gc_order = 0;
 
     // beginning of plugin run
-    fprintf(log_file, "MoChA " MOCHA_VERSION " https://github.com/freeseek/mocha\n");
+    fprintf(log_file, "MoChA " MOCHA_VERSION " http://github.com/freeseek/mocha\n");
     fprintf(log_file, "Genome reference: %s\n", rules);
     if (sample_names) fprintf(log_file, "Samples: %s\n", sample_names);
     if (targets_list) fprintf(log_file, "Targets: %s\n", targets_list);

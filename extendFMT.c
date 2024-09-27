@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2024-05-05"
+#define EXTENDFMT_VERSION "2024-09-27"
 
 /******************************************
  * CIRCULAR BUFFER                        *
@@ -242,7 +242,7 @@ const char *about(void) { return "Extend format fields to nearby variants.\n"; }
 static const char *usage_text(void) {
     return "\n"
            "About: Extend format fields to nearby variants. (version " EXTENDFMT_VERSION
-           " https://github.com/freeseek/mocha)\n"
+           " http://github.com/freeseek/mocha)\n"
            "Usage: bcftools +extendFMT [options] --format <ID> <in.vcf.gz>\n"
            "\n"
            "Plugin options:\n"
@@ -341,7 +341,7 @@ int run(int argc, char **argv) {
         {"targets-file", required_argument, NULL, 'T'},  {"targets-overlap", required_argument, NULL, 3},
         {"samples", required_argument, NULL, 's'},       {"samples-file", required_argument, NULL, 'S'},
         {"force-samples", no_argument, NULL, 1},         {"no-version", no_argument, NULL, 8},
-        {"write-index", optional_argument, NULL, 'W'},          {0, 0, 0, 0}};
+        {"write-index", optional_argument, NULL, 'W'},   {0, 0, 0, 0}};
     int c;
     char *tmp;
     while ((c = getopt_long(argc, argv, "h?f:pd:o:O:r:R:t:T:s:S:W::", loptions, NULL)) >= 0) {
@@ -437,8 +437,7 @@ int run(int argc, char **argv) {
             force_samples = 1;
             break;
         case 'W':
-            if (!(write_index = write_index_parse(optarg)))
-                error("Unsupported index format '%s'\n", optarg);
+            if (!(write_index = write_index_parse(optarg))) error("Unsupported index format '%s'\n", optarg);
             break;
         case 'h':
         case '?':

@@ -27,7 +27,7 @@
 
 options(error = function() {traceback(3); q()})
 
-mocha_plot_version <- '2024-05-05'
+mocha_plot_version <- '2024-09-27'
 
 suppressPackageStartupMessages(library(optparse))
 suppressPackageStartupMessages(library(data.table))
@@ -57,7 +57,7 @@ parser <- add_option(parser, c('--min-depth'), type = 'integer', default = 10, h
 parser <- add_option(parser, c('--clump'), type = 'integer', default = 10, help = 'width of the clumping window (WGS data only) [10]', metavar = '<integer>')
 args <- parse_args(parser, commandArgs(trailingOnly = TRUE), convert_hyphens_to_underscores = TRUE)
 
-write(paste('mocha_plot.R', mocha_plot_version, 'https://github.com/freeseek/mocha'), stderr())
+write(paste('mocha_plot.R', mocha_plot_version, 'http://github.com/freeseek/mocha'), stderr())
 
 if (is.null(args$genome) && is.null(args$cytoband)) {print_help(parser); stop('either --genome or --cytoband is required\nTo download the cytoband file run:\nwget http://hgdownload.cse.ucsc.edu/goldenPath/hg38/database/cytoBand.txt.gz')}
 if (!is.null(args$genome) && !is.null(args$cytoband)) {print_help(parser); stop('cannot use --genome and --cytoband at the same time')}

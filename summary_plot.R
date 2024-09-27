@@ -27,7 +27,7 @@
 
 options(error = function() {traceback(3); q()})
 
-summary_plot_version <- '2024-05-05'
+summary_plot_version <- '2024-09-27'
 
 library(optparse)
 library(ggplot2)
@@ -39,13 +39,14 @@ parser <- add_option(parser, c('--stats'), type = 'character', help = 'input MoC
 parser <- add_option(parser, c('--calls'), type = 'character', help = 'input MoChA calls file', metavar = '<file.tsv>')
 parser <- add_option(parser, c('--call-rate-thr'), type = 'double', default = 0.97, help = 'minimum call rate threshold [0.97]', metavar = '<float>')
 parser <- add_option(parser, c('--baf-auto-thr'), type = 'double', default = 0.03, help = 'maximum BAF autocorrelation threshold [0.03]', metavar = '<float>')
+parser <- add_option(parser, c('--baf-regress-thr'), type = 'double', default = 0.02, help = 'maximum BAF regression threshold [0.02]', metavar = '<float>')
 parser <- add_option(parser, c('--pdf'), type = 'character', help = 'output PDF file', metavar = '<file.pdf>')
 parser <- add_option(parser, c('--width'), type = 'double', default = 7.0, help = 'inches width of the output file [7.0]', metavar = '<float>')
 parser <- add_option(parser, c('--height'), type = 'double', default = 7.0, help = 'inches height of the output file [7.0]', metavar = '<float>')
 parser <- add_option(parser, c('--fontsize'), type = 'integer', default = 16, help = 'font size [16]', metavar = '<integer>')
 args <- parse_args(parser, commandArgs(trailingOnly = TRUE), convert_hyphens_to_underscores = TRUE)
 
-write(paste('summary_plot.R', summary_plot_version, 'https://github.com/freeseek/mocha'), stderr())
+write(paste('summary_plot.R', summary_plot_version, 'http://github.com/freeseek/mocha'), stderr())
 
 if (is.null(args$stats)) {print_help(parser); stop('option --stats is required')}
 if (is.null(args$calls)) {print_help(parser); stop('option --calls is required')}
@@ -81,8 +82,12 @@ df_calls$bdev[is.na(df_calls$bdev)] <- 0
 
 pdf(args$pdf, width = args$width, height = args$height)
 
-idx <- !( df_calls$sample_id %in% df_stats$sample_id[df_stats$call_rate < args$call_rate_thr | df_stats$baf_auto > args$baf_auto_thr] |
-          df_calls$chrom %in% c('X', 'Y', 'MT') | grepl('^CNP', df_calls$type) )
+if ('baf_regress' %in% colnames(df_stats)) {
+  idx_sample <- df_stats$call_rate < args$call_rate_thr | df_stats$baf_auto > args$baf_auto_thr | df_stats$baf_regress > args$baf_regress_thr
+} else {
+  idx_sample <- df_stats$call_rate < args$call_rate_thr | df_stats$baf_auto > args$baf_auto_thr
+}
+idx <- !( df_calls$sample_id %in% df_stats$sample_id[idx_sample] | df_calls$chrom %in% c('X', 'Y', 'MT') | grepl('^CNP', df_calls$type) )
 
 if (sum(idx) > 0) {
   p <- ggplot(df_calls[idx,], aes(x = bdev, y = rel_cov, color = type)) +
@@ -113,7 +118,7 @@ if (sum(idx & df_calls$type == 'CN-LOH') > 0) {
 p <- ggplot(df_stats, aes(x = 1 - call_rate, y = baf_auto, color = computed_gender)) +
   geom_vline(xintercept = 1 - args$call_rate_thr, color = 'black', linewidth = .5, alpha = 1/2) +
   geom_hline(yintercept = args$baf_auto_thr, color = 'black', linewidth = .5, alpha = 1/2) +
-  geom_point(data = df_stats[df_stats$call_rate < args$call_rate_thr | df_stats$baf_auto > args$baf_auto_thr,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
+  geom_point(data = df_stats[idx_sample,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
   geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_log10('1 - call rate') +
   scale_y_continuous('BAF auto-correlation') +
@@ -122,8 +127,34 @@ p <- ggplot(df_stats, aes(x = 1 - call_rate, y = baf_auto, color = computed_gend
   theme(legend.position = 'bottom', legend.box = 'horizontal')
 print(p)
 
+if ('baf_regress' %in% colnames(df_stats)) {
+  p <- ggplot(df_stats, aes(x = 1 - call_rate, y = baf_regress, color = computed_gender)) +
+    geom_vline(xintercept = 1 - args$call_rate_thr, color = 'black', linewidth = .5, alpha = 1/2) +
+    geom_hline(yintercept = args$baf_regress_thr, color = 'black', linewidth = .5, alpha = 1/2) +
+    geom_point(data = df_stats[idx_sample,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
+    geom_point(shape = 20, size = .5, alpha = 1/2) +
+    scale_x_log10('1 - call rate') +
+    scale_y_continuous('BAF regress') +
+    scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'K' = 'orange', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'K' = 'Klinefelter', 'U' = 'Undetermined')) +
+    theme_bw(base_size = args$fontsize) +
+    theme(legend.position = 'bottom', legend.box = 'horizontal')
+  print(p)
+
+  p <- ggplot(df_stats, aes(x = baf_regress, y = baf_auto, color = computed_gender)) +
+    geom_vline(xintercept = args$baf_regress_thr, color = 'black', linewidth = .5, alpha = 1/2) +
+    geom_hline(yintercept = args$baf_auto_thr, color = 'black', linewidth = .5, alpha = 1/2) +
+    geom_point(data = df_stats[idx_sample,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
+    geom_point(shape = 20, size = .5, alpha = 1/2) +
+    scale_x_continuous('BAF regress') +
+    scale_y_continuous('BAF auto-correlation') +
+    scale_color_manual('', values = c('M' = 'blue', 'F' = 'orchid', 'K' = 'orange', 'U' = 'gray'), labels = c('M' = 'Male', 'F' = 'Female', 'K' = 'Klinefelter', 'U' = 'Undetermined')) +
+    theme_bw(base_size = args$fontsize) +
+    theme(legend.position = 'bottom', legend.box = 'horizontal')
+  print(p)
+}
+
 p <- ggplot(df_stats, aes(x = x_nonpar_adj_lrr_median, y = y_nonpar_adj_lrr_median, color = computed_gender)) +
-  geom_point(data = df_stats[df_stats$call_rate < args$call_rate_thr | df_stats$baf_auto > args$baf_auto_thr,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
+  geom_point(data = df_stats[idx_sample,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
   geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_continuous('X nonPAR median LRR (autosome corrected)') +
   scale_y_continuous('Y nonPAR median LRR (autosome corrected)') +
@@ -137,7 +168,7 @@ if ('baf_sd' %in% colnames(df_stats)) { col_x <- 'baf_sd'; lbl_x <- 'Standard de
 if ('lrr_sd' %in% colnames(df_stats)) { col_y <- 'lrr_sd'; lbl_y <- 'Standard deviation LRR'
 } else if ('cov_sd' %in% colnames(df_stats)) { col_y <- 'cov_sd'; lbl_y <- 'Standard deviation coverage' }
 p <- ggplot(df_stats, aes(x = !! sym(col_x), y = !! sym(col_y), color = computed_gender)) +
-  geom_point(data = df_stats[df_stats$call_rate < args$call_rate_thr | df_stats$baf_auto > args$baf_auto_thr,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
+  geom_point(data = df_stats[idx_sample,], color = 'black', shape = 1, size = .5, alpha = 1/2) +
   geom_point(shape = 20, size = .5, alpha = 1/2) +
   scale_x_continuous(lbl_x) +
   scale_y_continuous(lbl_y) +
