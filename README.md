@@ -133,10 +133,10 @@ tar xjvf bcftools-1.20.tar.bz2
 Download and compile plugins code (make sure you are using gcc version 5 or newer)
 ```
 cd bcftools-1.20/
-/bin/rm -f plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,mochatools,extendFMT}.c}
-wget -P plugins http://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,mochatools,extendFMT}.c}
+/bin/rm -f plugins/{{mocha,beta_binom,genome_rules}.h,{mocha,mochatools,extendFMT,mochaphase}.c}
+wget -P plugins http://raw.githubusercontent.com/freeseek/mocha/master/{{mocha,beta_binom,genome_rules}.h,{mocha,mochatools,extendFMT,mochaphase}.c}
 make
-/bin/cp bcftools plugins/{fill-tags,fixploidy,mocha,mochatools,extendFMT}.so $HOME/bin/
+/bin/cp bcftools plugins/{fill-tags,fixploidy,mocha,mochatools,extendFMT,mochaphase}.so $HOME/bin/
 ```
 
 Make sure the directory with the plugins is available to BCFtools
@@ -650,6 +650,18 @@ awk -F "\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i; print}
   ( $(f["bdev_se"])!="nan" || $(f["lod_baf_phase"])!="nan" && $(f["lod_baf_phase"]) > 10.0 ) &&
   ( rel_cov<2.1 || bdev<0.05 || len>5e5 && bdev<0.1 && rel_cov<2.5 || len>5e6 && bdev<0.15 )' \
   $pfx.calls.tsv > $pfx.mca.calls.tsv
+awk -F"\t" -v OFS="\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR>1 && $(f["chrom"])!="X" && $(f["chrom"])!="chrX" && $(f["rel_cov"])>1 {
+  x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y*y<x*x) print $(f["sample_id"])}' \
+  $pfx.mca.calls.tsv > $pfx.cnloh.lines
+awk -F"\t" -v OFS="\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR>1 && $(f["chrom"])!="X" && $(f["chrom"])!="chrX" && $(f["rel_cov"])>1 {
+  x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y>x) print $(f["sample_id"])}' \
+  $pfx.mca.calls.tsv > $pfx.loss.lines
+awk -F"\t" -v OFS="\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i}
+  NR>1 && $(f["chrom"])!="X" && $(f["chrom"])!="chrX" && $(f["rel_cov"])>1 {
+  x=$(f["bdev"]); y=(1/($(f["rel_cov"])-1)-1)/2; if (y<-x) print $(f["sample_id"])}' \
+  $pfx.mca.calls.tsv > $pfx.gain.lines
 ```
 
 Generate list of samples with mosaic autosomal alterations
@@ -710,7 +722,7 @@ awk -F"\t" -v OFS="\t" 'NR==1 {for (i=1; i<=NF; i++) f[$i] = i} NR>1 {print $(f[
 
 Include other mosaic chromosomal alteration events in the phenotype table
 ```
-for type in auto cll myeloid lymphoid {{{1..12},{16..20}}p,{1..22}q}_{cnloh,loss} {1..22}_gain; do
+for type in auto cnloh gain loss cll myeloid lymphoid {{{1..12},{16..20}}p,{1..22}q}_{cnloh,loss} {1..22}_gain; do
   n=$(cat $pfx.$type.lines | wc -l);
   if [ "$n" -gt 0 ]; then
     awk -F"\t" -v OFS="\t" -v type=$type 'NR==FNR {x[$1]=1}
