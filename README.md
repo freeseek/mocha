@@ -57,7 +57,8 @@ General Options:
         --force-samples             only warn about unknown subset samples
         --input-stats <file>        input samples genome-wide statistics file
         --only-stats                compute genome-wide statistics without detecting mosaic chromosomal alterations
-    -p  --cnp <file>                list of regions to genotype in BED format
+    -p  --cnp <file>                list of regions to genotype in BED format (4th column DEL, DUP, or CNV)
+        --fra <file>                list of commonly deleted regions in BED format (4th column phred-scaled likelihood)
         --mhc <region>              MHC region to exclude from analysis (will be retained in the output)
         --kir <region>              KIR region to exclude from analysis (will be retained in the output)
         --threads <int>             number of extra output compression threads [0]
@@ -286,6 +287,12 @@ for chr in {1..22} X; do
   bcftools query -i 'AC>1 && END-POS+1>10000 && (SVTYPE=="CNV" || SVTYPE=="DEL" || SVTYPE=="DUP")' \
   -f "%CHROM\t%POS0\t%END\t%SVTYPE\n" $HOME/GRCh38/1kGP_high_coverage_Illumina.chr$chr.filtered.SNV_INDEL_SV_phased_panel$sfx.vcf.gz
 done > $HOME/GRCh38/cnps.bed
+```
+
+List of commonly deleted regions
+```
+wget https://www.medrxiv.org/content/medrxiv/early/2025/07/30/2025.07.30.25332451/DC2/embed/media-2.xlsx
+xlsx2csv -d tab -s3 media-2.xlsx | tail -n+3 | head -n5 | awk -F"\t" -v OFS="\t" '{print $1,$2*1e6,$3*1e6,70}' > fras.bed
 ```
 
 Minimal divergence intervals from segmental duplications (make sure your bedtools version is 2.27 or newer)

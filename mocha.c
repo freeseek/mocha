@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2015-2024 Giulio Genovese
+   Copyright (C) 2015-2025 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -43,7 +43,7 @@
 #include "filter.h"
 #include "tsv2vcf.h"
 
-#define MOCHA_VERSION "2024-09-27"
+#define MOCHA_VERSION "2025-08-19"
 
 /****************************************
  * CONSTANT DEFINITIONS                 *
@@ -144,6 +144,8 @@ typedef struct {
     genome_rules_t *genome_rules;
     regidx_t *cnp_idx;
     regitr_t *cnp_itr;
+    regidx_t *fra_idx;
+    regitr_t *fra_itr;
     regidx_t *mhc_idx;
     regidx_t *kir_idx;
 
@@ -1674,110 +1676,107 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
     if (model->cnp_itr) {
         while (regitr_overlap(model->cnp_itr)) {
             int a, b;
-            if (get_cnp_edges(pos, n, model->cnp_itr->beg, model->cnp_itr->end, &a, &b) == 0) {
-                int cnp_type = regitr_payload(model->cnp_itr, int);
-                float exp_ldev = NAN;
-                float exp_bdev = NAN;
-                mocha.type = MOCHA_UNDET;
-                mocha.ldev = get_median(lrr + a, b + 1 - a, NULL);
-                if (mocha.ldev > 0 && (cnp_type == MOCHA_CNP_GAIN || cnp_type == MOCHA_CNP_CNV)) {
-                    if (model->flags & WGS_DATA) {
-                        minus_lrr_ad_lod_t data = {lrr + a,
-                                                   ad0 + a,
-                                                   ad1 + a,
-                                                   b + 1 - a,
-                                                   NULL,
-                                                   model->err_log_prb,
-                                                   model->lrr_bias,
-                                                   model->lrr_hap2dip,
-                                                   self->adjlrr_sd,
-                                                   self->stats.dispersion};
-                        mocha.lod_lrr_baf = -minus_lrr_ad_lod(1.0f / 6.0f, (void *)&data);
-                    } else {
-                        minus_lrr_baf_lod_t data = {lrr + a,
-                                                    baf + a,
-                                                    b + 1 - a,
-                                                    NULL,
-                                                    model->err_log_prb,
-                                                    model->lrr_bias,
-                                                    model->lrr_hap2dip,
-                                                    self->adjlrr_sd,
-                                                    self->stats.dispersion};
-                        mocha.lod_lrr_baf = -minus_lrr_baf_lod(1.0f / 6.0f, (void *)&data);
-                    }
-                    if (mocha.lod_lrr_baf
-                        > -(model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f * (float)M_LOG10E) {
-                        mocha.type = MOCHA_CNP_GAIN;
-                        mocha.cf = NAN;
-                        exp_ldev = log2f(1.5f) * model->lrr_hap2dip;
-                        exp_bdev = 1.0f / 6.0f;
-                    }
-                } else if (mocha.ldev <= 0 && (cnp_type == MOCHA_CNP_LOSS || cnp_type == MOCHA_CNP_CNV)) {
-                    if (model->flags & WGS_DATA) {
-                        minus_lrr_ad_lod_t data = {lrr + a,
-                                                   ad0 + a,
-                                                   ad1 + a,
-                                                   b + 1 - a,
-                                                   NULL,
-                                                   model->err_log_prb,
-                                                   model->lrr_bias,
-                                                   model->lrr_hap2dip,
-                                                   self->adjlrr_sd,
-                                                   self->stats.dispersion};
-                        mocha.lod_lrr_baf = -minus_lrr_ad_lod(-0.5f, (void *)&data);
-                    } else {
-                        minus_lrr_baf_lod_t data = {lrr + a,
-                                                    baf + a,
-                                                    b + 1 - a,
-                                                    NULL,
-                                                    model->err_log_prb,
-                                                    model->lrr_bias,
-                                                    model->lrr_hap2dip,
-                                                    self->adjlrr_sd,
-                                                    self->stats.dispersion};
-                        mocha.lod_lrr_baf = -minus_lrr_baf_lod(-0.5f, (void *)&data);
-                    }
-                    if (mocha.lod_lrr_baf
-                        > -(model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f * (float)M_LOG10E) {
-                        mocha.type = MOCHA_CNP_LOSS;
-                        mocha.cf = NAN;
-                        exp_ldev = -model->lrr_hap2dip;
-                        exp_bdev = 0.5f;
-                    }
+            if (get_cnp_edges(pos, n, model->cnp_itr->beg, model->cnp_itr->end, &a, &b) < 0) continue;
+            int cnp_type = regitr_payload(model->cnp_itr, int);
+            float exp_ldev = NAN;
+            float exp_bdev = NAN;
+            mocha.type = MOCHA_UNDET;
+            mocha.ldev = get_median(lrr + a, b + 1 - a, NULL);
+            if (mocha.ldev > 0 && (cnp_type == MOCHA_CNP_GAIN || cnp_type == MOCHA_CNP_CNV)) {
+                if (model->flags & WGS_DATA) {
+                    minus_lrr_ad_lod_t data = {lrr + a,
+                                               ad0 + a,
+                                               ad1 + a,
+                                               b + 1 - a,
+                                               NULL,
+                                               model->err_log_prb,
+                                               model->lrr_bias,
+                                               model->lrr_hap2dip,
+                                               self->adjlrr_sd,
+                                               self->stats.dispersion};
+                    mocha.lod_lrr_baf = -minus_lrr_ad_lod(1.0f / 6.0f, (void *)&data);
+                } else {
+                    minus_lrr_baf_lod_t data = {lrr + a,
+                                                baf + a,
+                                                b + 1 - a,
+                                                NULL,
+                                                model->err_log_prb,
+                                                model->lrr_bias,
+                                                model->lrr_hap2dip,
+                                                self->adjlrr_sd,
+                                                self->stats.dispersion};
+                    mocha.lod_lrr_baf = -minus_lrr_baf_lod(1.0f / 6.0f, (void *)&data);
                 }
-                if (mocha.type == MOCHA_CNP_GAIN || mocha.type == MOCHA_CNP_LOSS) {
-                    if (model->flags & WGS_DATA) {
-                        if (cnp_edge_is_not_cn2_lrr_ad(lrr, ad0, ad1, n, a, b,
-                                                       (model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f,
-                                                       model->err_log_prb, model->lrr_bias, model->lrr_hap2dip,
-                                                       self->adjlrr_sd, self->stats.dispersion, exp_ldev, exp_bdev))
-                            continue;
-                    } else {
-                        if (cnp_edge_is_not_cn2_lrr_baf(lrr, baf, n, a, b,
-                                                        (model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f,
-                                                        model->err_log_prb, model->lrr_bias, model->lrr_hap2dip,
-                                                        self->adjlrr_sd, self->stats.dispersion, exp_ldev, exp_bdev))
-                            continue;
-                    }
-                    get_mocha_stats(pos, lrr, baf, gt_phase, n, a, b, cen_beg, cen_end, length, self->stats.baf_conc,
-                                    model->genome_rules->is_short_arm[model->rid], &mocha);
-                    // compute bdev, if possible
-                    if (mocha.n_hets > 0) {
-                        mocha.bdev = model->flags & WGS_DATA
-                                         ? get_ad_bdev(ad0 + a, ad1 + a, b + 1 - a, NULL, self->stats.dispersion)
-                                         : get_baf_bdev(baf + a, b + 1 - a, NULL, self->stats.dispersion);
-                    } else {
-                        mocha.bdev = NAN;
-                    }
-                    mocha_table->n++;
-                    hts_expand(mocha_t, mocha_table->n, mocha_table->m, mocha_table->a);
-                    mocha_table->a[mocha_table->n - 1] = mocha;
-                    for (j = a; j <= b; j++) {
-                        // TODO add other stuff here, like setting ldev
-                        // and bdev
-                        lrr[j] = NAN; // do not use the data again
-                        baf[j] = NAN; // do not use the data again
-                    }
+                if (mocha.lod_lrr_baf > -(model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f * (float)M_LOG10E) {
+                    mocha.type = MOCHA_CNP_GAIN;
+                    mocha.cf = NAN;
+                    exp_ldev = log2f(1.5f) * model->lrr_hap2dip;
+                    exp_bdev = 1.0f / 6.0f;
+                }
+            } else if (mocha.ldev <= 0 && (cnp_type == MOCHA_CNP_LOSS || cnp_type == MOCHA_CNP_CNV)) {
+                if (model->flags & WGS_DATA) {
+                    minus_lrr_ad_lod_t data = {lrr + a,
+                                               ad0 + a,
+                                               ad1 + a,
+                                               b + 1 - a,
+                                               NULL,
+                                               model->err_log_prb,
+                                               model->lrr_bias,
+                                               model->lrr_hap2dip,
+                                               self->adjlrr_sd,
+                                               self->stats.dispersion};
+                    mocha.lod_lrr_baf = -minus_lrr_ad_lod(-0.5f, (void *)&data);
+                } else {
+                    minus_lrr_baf_lod_t data = {lrr + a,
+                                                baf + a,
+                                                b + 1 - a,
+                                                NULL,
+                                                model->err_log_prb,
+                                                model->lrr_bias,
+                                                model->lrr_hap2dip,
+                                                self->adjlrr_sd,
+                                                self->stats.dispersion};
+                    mocha.lod_lrr_baf = -minus_lrr_baf_lod(-0.5f, (void *)&data);
+                }
+                if (mocha.lod_lrr_baf > -(model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f * (float)M_LOG10E) {
+                    mocha.type = MOCHA_CNP_LOSS;
+                    mocha.cf = NAN;
+                    exp_ldev = -model->lrr_hap2dip;
+                    exp_bdev = 0.5f;
+                }
+            }
+            if (mocha.type == MOCHA_CNP_GAIN || mocha.type == MOCHA_CNP_LOSS) {
+                if (model->flags & WGS_DATA) {
+                    if (cnp_edge_is_not_cn2_lrr_ad(lrr, ad0, ad1, n, a, b,
+                                                   (model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f,
+                                                   model->err_log_prb, model->lrr_bias, model->lrr_hap2dip,
+                                                   self->adjlrr_sd, self->stats.dispersion, exp_ldev, exp_bdev))
+                        continue;
+                } else {
+                    if (cnp_edge_is_not_cn2_lrr_baf(lrr, baf, n, a, b,
+                                                    (model->xy_major_log_prb + model->xy_minor_log_prb) / 2.0f,
+                                                    model->err_log_prb, model->lrr_bias, model->lrr_hap2dip,
+                                                    self->adjlrr_sd, self->stats.dispersion, exp_ldev, exp_bdev))
+                        continue;
+                }
+                get_mocha_stats(pos, lrr, baf, gt_phase, n, a, b, cen_beg, cen_end, length, self->stats.baf_conc,
+                                model->genome_rules->is_short_arm[model->rid], &mocha);
+                // compute bdev, if possible
+                if (mocha.n_hets > 0) {
+                    mocha.bdev = model->flags & WGS_DATA
+                                     ? get_ad_bdev(ad0 + a, ad1 + a, b + 1 - a, NULL, self->stats.dispersion)
+                                     : get_baf_bdev(baf + a, b + 1 - a, NULL, self->stats.dispersion);
+                } else {
+                    mocha.bdev = NAN;
+                }
+                mocha_table->n++;
+                hts_expand(mocha_t, mocha_table->n, mocha_table->m, mocha_table->a);
+                mocha_table->a[mocha_table->n - 1] = mocha;
+                for (j = a; j <= b; j++) {
+                    // TODO add other stuff here, like setting ldev
+                    // and bdev
+                    lrr[j] = NAN; // do not use the data again
+                    baf[j] = NAN; // do not use the data again
                 }
             }
         }
@@ -1839,11 +1838,38 @@ static void sample_run(sample_t *self, mocha_table_t *mocha_table, const model_t
             path = log_viterbi_run(emis_log_lkl, n_imap, n_hs + (hmm_model == LRR_BAF ? n_hs : 0),
                                    model->xy_major_log_prb, model->xy_minor_log_prb, tel_log_prb,
                                    hmm_model == LRR_BAF ? NAN : model->flip_log_prb, last_p, first_q);
-            free(emis_log_lkl);
 
             if (hmm_model == LRR_BAF)
                 for (i = 0; i < n_imap; i++)
                     if (path[i] > n_hs) path[i] = 0;
+
+            if (hmm_model == BAF_PHASE && model->fra_itr) {
+                // attempt here to add another segment in high prior regions, but only do so for the model with the
+                // phase
+                while (regitr_overlap(model->fra_itr)) {
+                    int a, b;
+                    // check if there are any sites overlapping the region
+                    if (get_cnp_edges(pos, n, model->fra_itr->beg, model->fra_itr->end, &a, &b) < 0) continue;
+                    // check if there are any heterozygous sites overlapping the region
+                    if (get_cnp_edges(imap_arr, n_imap, a, b, &a, &b) < 0) continue;
+                    int skip = 0;
+                    for (i = 0; i <= b - a; i++)
+                        if (path[a + i]) skip = 1;
+                    if (skip) continue;
+                    // if there is no overlap, attempt to make a call by finding which part of the emission
+                    // probabilities to use for this attempt, we use the autosomal telomere probabilities as enter and
+                    // exit probabilities
+                    float fra_log_prb = regitr_payload(model->fra_itr, float);
+                    int8_t *fra_path =
+                        log_viterbi_run(emis_log_lkl + a * (1 + 2 * n_hs), b - a + 1, n_hs, fra_log_prb / 2.0,
+                                        fra_log_prb / 2.0, fra_log_prb / 2.0, model->flip_log_prb, 0, 0);
+                    // if the fragile path has nonzero elements, copy them in the regular path
+                    for (i = 0; i <= b - a; i++) path[a + i] = fra_path[i];
+                    free(fra_path);
+                }
+            }
+
+            free(emis_log_lkl);
             ret = get_path_segs(path, hs_arr, n_imap, hmm_model, middle, &beg, &m_beg, &end, &m_end, &nseg);
 
             if (ret) // two consecutive hidden states were used, hinting that
@@ -2854,7 +2880,10 @@ static const char *usage_text(void) {
            "        --input-stats <file>        input samples genome-wide statistics file\n"
            "        --only-stats                compute genome-wide statistics without detecting mosaic chromosomal "
            "alterations\n"
-           "    -p  --cnp <file>                list of regions to genotype in BED format\n"
+           "    -p  --cnp <file>                list of regions to genotype in BED format (4th column DEL, DUP, or "
+           "CNV)\n"
+           "        --fra <file>                list of commonly deleted regions in BED format (4th column "
+           "phred-scaled likelihood)\n"
            "        --mhc <region>              MHC region to exclude from analysis (will be retained in the output)\n"
            "        --kir <region>              KIR region to exclude from analysis (will be retained in the output)\n"
            "        --threads <int>             number of extra output compression threads [0]\n"
@@ -2972,6 +3001,31 @@ static int cnp_parse(const char *line, char **chr_beg, char **chr_end, uint32_t 
     return 0;
 }
 
+static int fra_parse(const char *line, char **chr_beg, char **chr_end, uint32_t *beg, uint32_t *end, void *payload,
+                     void *usr) {
+    // Use the standard parser for CHROM,FROM,TO
+    int ret = regidx_parse_bed(line, chr_beg, chr_end, beg, end, NULL, NULL);
+    if (ret != 0) return ret;
+
+    // Skip the fields that were parsed above
+    char *ss = (char *)line;
+    while (*ss && isspace(*ss)) ss++;
+    int i;
+    for (i = 0; i < 3; i++) {
+        while (*ss && !isspace(*ss)) ss++;
+        if (!*ss) return -2; // wrong number of fields
+        while (*ss && isspace(*ss)) ss++;
+    }
+    if (!*ss) return -2;
+
+    // Parse the payload
+    float *dat = (float *)payload;
+    char *tmp;
+    *dat = -strtof(ss, &tmp) / 10.0f * M_LN10;
+    if (*tmp) error("Could not parse: %s\n", ss);
+    return 0;
+}
+
 static FILE *get_file_handle(const char *str) {
     FILE *ret;
     if (strcmp(str, "-") == 0)
@@ -3010,6 +3064,7 @@ int run(int argc, char *argv[]) {
     const char *sample_names = NULL;
     const char *output_fname = NULL;
     const char *cnp_fname = NULL;
+    const char *fra_fname = NULL;
     const char *stats_fname = NULL;
     const char *mhc_reg = NULL;
     const char *kir_reg = NULL;
@@ -3066,44 +3121,45 @@ int run(int argc, char *argv[]) {
                                        {"samples", required_argument, NULL, 's'},
                                        {"samples-file", required_argument, NULL, 'S'},
                                        {"force-samples", no_argument, NULL, 3},
-                                       {"cnp", required_argument, NULL, 'p'},
                                        {"input-stats", required_argument, NULL, 4},
                                        {"only-stats", no_argument, NULL, 5},
-                                       {"mhc", required_argument, NULL, 6},
-                                       {"kir", required_argument, NULL, 7},
-                                       {"threads", required_argument, NULL, 9},
+                                       {"cnp", required_argument, NULL, 'p'},
+                                       {"fra", required_argument, NULL, 6},
+                                       {"mhc", required_argument, NULL, 7},
+                                       {"kir", required_argument, NULL, 8},
+                                       {"threads", required_argument, NULL, 10},
                                        {"output", required_argument, NULL, 'o'},
                                        {"output-type", required_argument, NULL, 'O'},
-                                       {"no-version", no_argument, NULL, 8},
+                                       {"no-version", no_argument, NULL, 9},
                                        {"no-annotations", no_argument, NULL, 'a'},
                                        {"calls", required_argument, NULL, 'c'},
                                        {"stats", required_argument, NULL, 'z'},
                                        {"ucsc-bed", required_argument, NULL, 'u'},
                                        {"write-index", optional_argument, NULL, 'W'},
                                        {"log", required_argument, NULL, 'l'},
-                                       {"no-log", no_argument, NULL, 10},
-                                       {"bdev-LRR-BAF", required_argument, NULL, 11},
-                                       {"bdev-BAF-phase", required_argument, NULL, 12},
-                                       {"min-dist", required_argument, NULL, 13},
-                                       {"adjust-BAF-LRR", required_argument, NULL, 14},
-                                       {"regress-BAF-LRR", required_argument, NULL, 15},
-                                       {"LRR-GC-order", required_argument, NULL, 16},
-                                       {"xy-major-pl", required_argument, NULL, 17},
-                                       {"xy-minor-pl", required_argument, NULL, 18},
-                                       {"auto-tel-pl", required_argument, NULL, 19},
-                                       {"chrX-tel-pl", required_argument, NULL, 20},
-                                       {"chrY-tel-pl", required_argument, NULL, 21},
-                                       {"error-pl", required_argument, NULL, 22},
-                                       {"flip-pl", required_argument, NULL, 23},
-                                       {"short-arm-chrs", required_argument, NULL, 24},
-                                       {"use-short-arms", no_argument, NULL, 25},
-                                       {"use-centromeres", no_argument, NULL, 26},
-                                       {"use-males-xtr", no_argument, NULL, 27},
-                                       {"use-males-par2", no_argument, NULL, 28},
-                                       {"use-no-rules-chrs", no_argument, NULL, 29},
-                                       {"LRR-weight", required_argument, NULL, 30},
-                                       {"LRR-hap2dip", required_argument, NULL, 31},
-                                       {"LRR-cutoff", required_argument, NULL, 32},
+                                       {"no-log", no_argument, NULL, 11},
+                                       {"bdev-LRR-BAF", required_argument, NULL, 12},
+                                       {"bdev-BAF-phase", required_argument, NULL, 13},
+                                       {"min-dist", required_argument, NULL, 14},
+                                       {"adjust-BAF-LRR", required_argument, NULL, 15},
+                                       {"regress-BAF-LRR", required_argument, NULL, 16},
+                                       {"LRR-GC-order", required_argument, NULL, 17},
+                                       {"xy-major-pl", required_argument, NULL, 18},
+                                       {"xy-minor-pl", required_argument, NULL, 19},
+                                       {"auto-tel-pl", required_argument, NULL, 20},
+                                       {"chrX-tel-pl", required_argument, NULL, 21},
+                                       {"chrY-tel-pl", required_argument, NULL, 22},
+                                       {"error-pl", required_argument, NULL, 23},
+                                       {"flip-pl", required_argument, NULL, 24},
+                                       {"short-arm-chrs", required_argument, NULL, 25},
+                                       {"use-short-arms", no_argument, NULL, 26},
+                                       {"use-centromeres", no_argument, NULL, 27},
+                                       {"use-males-xtr", no_argument, NULL, 28},
+                                       {"use-males-par2", no_argument, NULL, 29},
+                                       {"use-no-rules-chrs", no_argument, NULL, 30},
+                                       {"LRR-weight", required_argument, NULL, 31},
+                                       {"LRR-hap2dip", required_argument, NULL, 32},
+                                       {"LRR-cutoff", required_argument, NULL, 33},
                                        {NULL, 0, NULL, 0}};
     int c;
     while ((c = getopt_long(argc, argv, "h?g:G:v:f:e:i:r:R:t:T:s:S:p:o:O:al:c:z:u:W::", loptions, NULL)) >= 0) {
@@ -3189,12 +3245,15 @@ int run(int argc, char *argv[]) {
             cnp_fname = optarg;
             break;
         case 6:
-            mhc_reg = optarg;
+            fra_fname = optarg;
             break;
         case 7:
+            mhc_reg = optarg;
+            break;
+        case 8:
             kir_reg = optarg;
             break;
-        case 9:
+        case 10:
             n_threads = (int)strtol(optarg, &tmp, 0);
             if (*tmp) error("Could not parse: --threads %s\n", optarg);
             break;
@@ -3226,7 +3285,7 @@ int run(int argc, char *argv[]) {
                     error("Could not parse argument: --compression-level %s\n", optarg + 1);
             }
             break;
-        case 8:
+        case 9:
             record_cmd_line = 0;
             break;
         case 'a':
@@ -3238,7 +3297,7 @@ int run(int argc, char *argv[]) {
         case 'l':
             log_file = get_file_handle(optarg);
             break;
-        case 10:
+        case 11:
             model.flags |= NO_LOG;
             break;
         case 'c':
@@ -3250,83 +3309,83 @@ int run(int argc, char *argv[]) {
         case 'u':
             out_fu = get_file_handle(optarg);
             break;
-        case 11:
+        case 12:
             bdev_lrr_baf = optarg;
             break;
-        case 12:
+        case 13:
             bdev_baf_phase = optarg;
             break;
-        case 13:
+        case 14:
             model.min_dst = (int)strtol(optarg, &tmp, 0);
             if (*tmp) error("Could not parse: --min-dist %s\n", optarg);
             break;
-        case 14:
+        case 15:
             model.adj_baf_lrr = (int)strtol(optarg, &tmp, 0);
             if (*tmp) error("Could not parse: --adjust-BAF-LRR %s\n", optarg);
             break;
-        case 15:
+        case 16:
             model.regress_baf_lrr = (int)strtol(optarg, &tmp, 0);
             if (*tmp) error("Could not parse: --regress-BAF-LRR %s\n", optarg);
             break;
-        case 16:
+        case 17:
             model.lrr_gc_order = (int)strtol(optarg, &tmp, 0);
             if (*tmp) error("Could not parse: --LRR-GC-order %s\n", optarg);
             break;
-        case 17:
+        case 18:
             model.xy_major_log_prb = -strtof(optarg, &tmp) / 10.0f * M_LN10;
             if (*tmp) error("Could not parse: --xy-major-pl %s\n", optarg);
             break;
-        case 18:
+        case 19:
             model.xy_minor_log_prb = -strtof(optarg, &tmp) / 10.0f * M_LN10;
             if (*tmp) error("Could not parse: --xy-minor-pl %s\n", optarg);
             break;
-        case 19:
+        case 20:
             model.auto_tel_log_prb = -strtof(optarg, &tmp) / 10.0f * M_LN10;
             if (*tmp) error("Could not parse: --auto-tel-pl %s\n", optarg);
             break;
-        case 20:
+        case 21:
             model.chrX_tel_log_prb = -strtof(optarg, &tmp) / 10.0f * M_LN10;
             if (*tmp) error("Could not parse: --chrX-tel-pl %s\n", optarg);
             break;
-        case 21:
+        case 22:
             model.chrY_tel_log_prb = -strtof(optarg, &tmp) / 10.0f * M_LN10;
             if (*tmp) error("Could not parse: --chrY-tel-pl %s\n", optarg);
             break;
-        case 22:
+        case 23:
             model.err_log_prb = -strtof(optarg, &tmp) / 10.0f * M_LN10;
             if (*tmp) error("Could not parse: --error-pl %s\n", optarg);
             break;
-        case 23:
+        case 24:
             model.flip_log_prb = -strtof(optarg, &tmp) / 10.0f * M_LN10;
             if (*tmp) error("Could not parse: --flip-pl %s\n", optarg);
             break;
-        case 24:
+        case 25:
             short_arm_chrs = optarg;
             break;
-        case 25:
+        case 26:
             model.flags |= USE_SHORT_ARMS;
             break;
-        case 26:
+        case 27:
             model.flags |= USE_CENTROMERES;
             break;
-        case 27:
+        case 28:
             model.flags |= USE_MALES_XTR;
             break;
-        case 28:
+        case 29:
             model.flags |= USE_MALES_PAR2;
             break;
-        case 29:
+        case 30:
             model.flags |= USE_NO_RULES_CHRS;
             break;
-        case 30:
+        case 31:
             model.lrr_bias = strtof(optarg, &tmp);
             if (*tmp) error("Could not parse: --LRR-weight %s\n", optarg);
             break;
-        case 31:
+        case 32:
             model.lrr_hap2dip = strtof(optarg, &tmp);
             if (*tmp) error("Could not parse: --LRR-hap2dip %s\n", optarg);
             break;
-        case 32:
+        case 33:
             model.lrr_cutoff = strtof(optarg, &tmp);
             if (*tmp) error("Could not parse: --LRR-cutoff %s\n", optarg);
             break;
@@ -3421,6 +3480,11 @@ int run(int argc, char *argv[]) {
         model.cnp_idx = regidx_init(cnp_fname, cnp_parse, NULL, sizeof(int), NULL);
         if (!model.cnp_idx) error("Error: failed to initialize CNP regions: --cnp %s\n", cnp_fname);
         model.cnp_itr = regitr_init(model.cnp_idx);
+    }
+    if (fra_fname) {
+        model.fra_idx = regidx_init(fra_fname, fra_parse, NULL, sizeof(int), NULL);
+        if (!model.fra_idx) error("Error: failed to initialize commonly deleted regions file: --fra %s\n", fra_fname);
+        model.fra_itr = regitr_init(model.fra_idx);
     }
     if (mhc_reg) model.mhc_idx = regidx_init_string(mhc_reg, regidx_parse_reg, NULL, 0, NULL);
     if (kir_reg) model.kir_idx = regidx_init_string(kir_reg, regidx_parse_reg, NULL, 0, NULL);
@@ -3656,6 +3720,9 @@ int run(int argc, char *argv[]) {
                 if (model.cnp_idx)
                     regidx_overlap(model.cnp_idx, bcf_hdr_id2name(hdr, rid), 0, model.genome_rules->length[rid],
                                    model.cnp_itr);
+                if (model.fra_idx)
+                    regidx_overlap(model.fra_idx, bcf_hdr_id2name(hdr, rid), 0, model.genome_rules->length[rid],
+                                   model.fra_itr);
                 sample_run(sample + j, &mocha_table, &model);
             }
 
@@ -3742,6 +3809,8 @@ int run(int argc, char *argv[]) {
     if (model.filter) filter_destroy(model.filter);
     if (model.cnp_idx) regidx_destroy(model.cnp_idx);
     if (model.cnp_itr) regitr_destroy(model.cnp_itr);
+    if (model.fra_idx) regidx_destroy(model.fra_idx);
+    if (model.fra_itr) regitr_destroy(model.fra_itr);
     bcf_sr_destroy(sr);
     free(sample);
 

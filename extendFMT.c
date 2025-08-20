@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2018-2024 Giulio Genovese
+   Copyright (C) 2018-2025 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -34,7 +34,7 @@
 #include "bcftools.h"
 #include "rbuf.h"
 
-#define EXTENDFMT_VERSION "2024-09-27"
+#define EXTENDFMT_VERSION "2025-08-19"
 
 /******************************************
  * CIRCULAR BUFFER                        *

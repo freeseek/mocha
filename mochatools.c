@@ -1,6 +1,6 @@
 /* The MIT License
 
-   Copyright (C) 2017-2024 Giulio Genovese
+   Copyright (C) 2017-2025 Giulio Genovese
 
    Author: Giulio Genovese <giulio.genovese@gmail.com>
 
@@ -33,7 +33,7 @@
 #include "mocha.h"
 #include "bcftools.h"
 
-#define MOCHATOOLS_VERSION "2024-09-27"
+#define MOCHATOOLS_VERSION "2025-08-19"
 
 #define TAG_LIST_DFLT "none"
 #define GC_WIN_DFLT "200"
@@ -791,7 +791,7 @@ static int bcf_get_format_sign(bcf_fmt_t *fmt, int8_t *as_arr, int nsmpl) {
             else if (p[i] > (type_t)0)                                                                                 \
                 as_arr[i] = (int8_t)1;                                                                                 \
             else                                                                                                       \
-                as_arr[i] = (int8_t) - 1;                                                                              \
+                as_arr[i] = (int8_t)-1;                                                                                \
         }                                                                                                              \
     }
     switch (fmt->type) {
@@ -1122,9 +1122,9 @@ ret:
             odds_ratio = (float)args->info_arr[1] / (float)args->info_arr[0];
         } else {
             double left, right, fisher;
-            double pval = kt_fisher_exact(args->info_arr[0], args->info_arr[1], args->info_arr[2], args->info_arr[3],
-                                          &left, &right, &fisher);
-            value = (float)(args->phred ? -10.0 * M_LOG10E * log(pval) : pval);
+            kt_fisher_exact(args->info_arr[0], args->info_arr[1], args->info_arr[2], args->info_arr[3], &left, &right,
+                            &fisher);
+            value = (float)(args->phred ? -10.0 * M_LOG10E * log(fisher) : fisher);
             odds_ratio = ((float)args->info_arr[1] * (float)args->info_arr[2])
                          / ((float)args->info_arr[0] * (float)args->info_arr[3]);
         }
