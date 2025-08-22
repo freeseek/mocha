@@ -292,7 +292,7 @@ done > $HOME/GRCh38/cnps.bed
 List of commonly deleted regions
 ```
 wget https://www.medrxiv.org/content/medrxiv/early/2025/07/30/2025.07.30.25332451/DC2/embed/media-2.xlsx
-xlsx2csv -d tab -s3 media-2.xlsx | tail -n+3 | head -n5 | awk -F"\t" -v OFS="\t" '{print $1,$2*1e6,$3*1e6,70}' > fras.bed
+xlsx2csv -d tab -s3 media-2.xlsx | tail -n+3 | head -n4 | awk -F"\t" -v OFS="\t" '{print $1,$2*1e6,$3*1e6,80}' > fras.bed
 ```
 
 Minimal divergence intervals from segmental duplications (make sure your bedtools version is 2.27 or newer)
